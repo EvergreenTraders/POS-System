@@ -11,6 +11,7 @@ import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
 import SaleTransactionScreen from './SaleTransactionScreen';
 import BuyTransactionScreen from './BuyTransactionScreen';
+import PaymentTransactionScreen from './PaymentTransactionScreen';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
@@ -251,6 +252,72 @@ function SaleTransactionCard({ tx, saleIcon, saleColor, onOpen, onVoid }) {
   );
 }
 
+const PAYMENT_AMBER = '#d97706';
+
+function PaymentTransactionCard({ tx, onOpen, onVoid }) {
+  const fmt = (n) => `$${Number(n).toFixed(2)}`;
+  const pawnCount = (tx.selectedPayments || []).filter(p => p.type === 'pawn_extension').length;
+  const layawayCount = (tx.selectedPayments || []).filter(p => p.type === 'layaway').length;
+
+  return (
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${PAYMENT_AMBER}` }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <MuiIcons.Payment sx={{ fontSize: 20, color: PAYMENT_AMBER }} />
+          <Typography fontWeight={700} fontSize={13} color={PAYMENT_AMBER}>PAYMENT</Typography>
+        </Box>
+        <Chip label={tx.ticketId} size="small"
+          sx={{ fontWeight: 700, fontSize: 11, height: 20, bgcolor: '#f5f5f5', border: '1px solid #e0e0e0' }} />
+      </Box>
+
+      <Box sx={{ px: 1.5, pb: 1.25 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75, mt: 0.75 }}>
+          {pawnCount > 0 && (
+            <Chip icon={<MuiIcons.LocalOffer sx={{ fontSize: 14 }} />}
+              label={`${pawnCount} pawn ext.`} size="small"
+              sx={{ fontSize: 11, height: 22, bgcolor: '#fef3c7', color: PAYMENT_AMBER, '& .MuiChip-icon': { color: PAYMENT_AMBER } }} />
+          )}
+          {layawayCount > 0 && (
+            <Chip icon={<MuiIcons.CalendarMonth sx={{ fontSize: 14 }} />}
+              label={`${layawayCount} layaway`} size="small"
+              sx={{ fontSize: 11, height: 22, bgcolor: '#ede9fe', color: '#7c3aed', '& .MuiChip-icon': { color: '#7c3aed' } }} />
+          )}
+        </Box>
+
+        <Divider sx={{ my: 1 }} />
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+          <Typography variant="caption" color="text.secondary">Pawn Extensions</Typography>
+          <Typography variant="caption" fontWeight={600}>{fmt(tx.pawnTotal || 0)}</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+          <Typography variant="caption" color="text.secondary">Layaway Payments</Typography>
+          <Typography variant="caption" fontWeight={600}>{fmt(tx.layawayTotal || 0)}</Typography>
+        </Box>
+
+        <Divider sx={{ my: 1 }} />
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+          <Typography variant="caption" fontWeight={600} color={PAYMENT_AMBER}>Total Payment</Typography>
+          <Typography variant="caption" fontWeight={700} color={PAYMENT_AMBER}>{fmt(tx.totalPayment || 0)}</Typography>
+        </Box>
+
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
+            onClick={onOpen}
+            sx={{ flex: 1, fontSize: 11, borderColor: PAYMENT_AMBER, color: PAYMENT_AMBER, '&:hover': { borderColor: '#b45309' } }}>
+            Open
+          </Button>
+          <IconButton size="small" color="error" onClick={onVoid}
+            sx={{ border: '1px solid', borderColor: 'error.main', borderRadius: 1 }}>
+            <MuiIcons.Block fontSize="small" />
+          </IconButton>
+        </Box>
+      </Box>
+    </Paper>
+  );
+}
+
 function TransactionTypeButton({ label, icon, color, onClick, count }) {
   return (
     <Badge badgeContent={count || 0} color="primary" overlap="rectangular"
@@ -458,6 +525,8 @@ export default function ModernTransactions() {
     }
     return null;
   });
+  const [paymentOpen, setPaymentOpen]     = useState(false);
+  const [existingPaymentData, setExistingPaymentData] = useState(null);
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
   const [noCustomerWarning, setNoCustomerWarning] = useState(false);
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
@@ -750,13 +819,21 @@ export default function ModernTransactions() {
         color: '#1a472a',
       };
     }
+    if (tx.type === 'PAYMENT') {
+      return {
+        label: `Payment (${tx.ticketId})`,
+        value: `+$${Number(tx.totalPayment || 0).toFixed(2)}`,
+        color: PAYMENT_AMBER,
+      };
+    }
     return null;
   }).filter(Boolean);
 
   const netDue = workspaceTransactions.reduce((sum, tx) => {
-    if (tx.type === 'PAWN') return sum - Number(tx.totalPawnAmount);
-    if (tx.type === 'SALE') return sum + Number(tx.total || 0);
-    if (tx.type === 'BUY')  return sum - Number(tx.totalPaid || 0);
+    if (tx.type === 'PAWN')    return sum - Number(tx.totalPawnAmount);
+    if (tx.type === 'SALE')    return sum + Number(tx.total || 0);
+    if (tx.type === 'BUY')     return sum - Number(tx.totalPaid || 0);
+    if (tx.type === 'PAYMENT') return sum + Number(tx.totalPayment || 0);
     return sum;
   }, 0);
 
@@ -770,7 +847,24 @@ export default function ModernTransactions() {
     } else if (type === 'buy') {
       if (!customer) { setNoCustomerWarning(true); return; }
       setBuyOpen(true);
+    } else if (type === 'payment') {
+      if (!customer) { setNoCustomerWarning(true); return; }
+      setPaymentOpen(true);
     }
+  };
+
+  const handleAddPaymentToWorkspace = (paymentData) => {
+    setWorkspaceTransactions(prev => {
+      const existingIdx = prev.findIndex(t => t.type === 'PAYMENT' && t.ticketId === paymentData.ticketId);
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx] = { ...updated[existingIdx], ...paymentData };
+        return updated;
+      }
+      return [...prev, { id: Date.now(), type: 'PAYMENT', ...paymentData }];
+    });
+    setPaymentOpen(false);
+    setExistingPaymentData(null);
   };
 
   const handleAddBuyToWorkspace = (buyData) => {
@@ -869,6 +963,18 @@ export default function ModernTransactions() {
         }}
         onConvertTo={handleBuyConvertTo}
         existingBuyData={existingBuyData}
+      />
+    );
+  }
+
+  if (paymentOpen) {
+    return (
+      <PaymentTransactionScreen
+        customer={customer}
+        customerStats={customerStats}
+        onClose={() => { setPaymentOpen(false); setExistingPaymentData(null); }}
+        onAddToWorkspace={handleAddPaymentToWorkspace}
+        existingPaymentData={existingPaymentData}
       />
     );
   }
@@ -1133,6 +1239,12 @@ export default function ModernTransactions() {
                         buyIcon={transactionTypes.find(t => t.type === 'buy')?.icon}
                         buyColor={transactionTypes.find(t => t.type === 'buy')?.color}
                         onOpen={() => { setExistingBuyData(tx); setBuyOpen(true); }}
+                        onVoid={() => setVoidConfirm(tx)}
+                      />
+                    ) : tx.type === 'PAYMENT' ? (
+                      <PaymentTransactionCard
+                        tx={tx}
+                        onOpen={() => { setExistingPaymentData(tx); setPaymentOpen(true); }}
                         onVoid={() => setVoidConfirm(tx)}
                       />
                     ) : null}
