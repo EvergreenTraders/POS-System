@@ -8443,6 +8443,35 @@ app.post('/api/trade-ticket', async (req, res) => {
   }
 });
 
+// GET /api/customers/:id/trade/stats — mirrors /customers/:id/buy/stats, but
+// counts trade tickets and sums the trade-in side (via the linked buy_ticket).
+app.get('/api/customers/:id/trade/stats', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        MAX(t.transaction_date) AS last_trade_date,
+        COUNT(DISTINCT tt.trade_ticket_id) AS total_trades,
+        COALESCE(SUM(COALESCE(j.item_price, h.cost_price, 0)), 0) AS total_trade_in_value
+      FROM trade_ticket tt
+      JOIN transactions t ON tt.transaction_id = t.transaction_id
+      LEFT JOIN buy_ticket bt ON bt.buy_ticket_id = tt.buy_ticket_id
+      LEFT JOIN jewelry   j ON bt.item_id = j.item_id
+      LEFT JOIN hardgoods h ON bt.item_id = h.item_id
+      WHERE t.customer_id = $1
+    `, [id]);
+    const row = result.rows[0];
+    res.json({
+      last_trade_date:      row.last_trade_date || null,
+      total_trades:          parseInt(row.total_trades)         || 0,
+      total_trade_in_value:  parseFloat(row.total_trade_in_value) || 0,
+    });
+  } catch (err) {
+    console.error('Error fetching customer trade stats:', err);
+    res.status(500).json({ error: 'Failed to fetch customer trade stats' });
+  }
+});
+
 // Pawn Ticket API Endpoints
 app.get('/api/pawn-ticket', async (req, res) => {
   try {

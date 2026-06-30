@@ -806,6 +806,26 @@ export default function ModernTransactions() {
       .catch(err => console.error('Failed to refresh customer after buy edit:', err));
   }, [location.state]);
 
+  // Restore trade screen after returning from CustomerEditor
+  useEffect(() => {
+    if (!location.state?.customerUpdated) return;
+    const raw = sessionStorage.getItem('pendingTradeState');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingTradeState');
+    const { customerId, customer: savedCustomer, ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId } = pending;
+    if (!customerId) return;
+    if (savedCustomer) setCustomer(savedCustomer);
+    setExistingTradeData({ ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId });
+    setTradeOpen(true);
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after trade edit:', err));
+  }, [location.state]);
+
   const handleCustomerSearch = async (query) => {
     setCustomerSearch(query);
     if (!query.trim()) { setCustomerResults([]); setShowResults(false); return; }

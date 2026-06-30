@@ -88,6 +88,7 @@ export default function TradeTransactionScreen({
 
   const [categories, setCategories] = useState([]);
   const [taxRate, setTaxRate]       = useState(0.07);
+  const [tradeStats, setTradeStats] = useState(null);
 
   // Buy ticket picker (Add Existing Buy Ticket)
   const [buyPickerOpen, setBuyPickerOpen]   = useState(false);
@@ -188,6 +189,15 @@ export default function TradeTransactionScreen({
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (!customer?.id) { setTradeStats(null); return; }
+    axios.get(`${config.apiUrl}/customers/${customer.id}/trade/stats`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setTradeStats(res.data))
+      .catch(() => setTradeStats(null));
+  }, [customer?.id]);
 
   // ── Financials ───────────────────────────────────────────────────────────────
 
@@ -743,27 +753,43 @@ export default function TradeTransactionScreen({
                   <Typography fontWeight={700} fontSize={15} lineHeight={1.2}>
                     {customer.first_name} {customer.last_name}
                   </Typography>
+                  <Typography fontSize={12} color="text.secondary" lineHeight={1.2}>
+                    {customer.phone || '—'}
+                  </Typography>
                 </Box>
-                <Button size="small" variant="outlined"
-                  sx={{ borderRadius: 2, textTransform: 'none', fontSize: 12, borderColor: TRADE_TEAL, color: TRADE_TEAL, '&:hover': { borderColor: TRADE_DARK, bgcolor: '#e0f9ff' } }}
-                  onClick={() => navigate(`/customers/${customer.id}`)}>
-                  View Customer
-                </Button>
+                <Tooltip title="Edit customer">
+                  <IconButton size="small"
+                    sx={{ color: TRADE_TEAL, border: `1px solid ${TRADE_TEAL}`, '&:hover': { bgcolor: '#e0f9ff' } }}
+                    onClick={() => {
+                      sessionStorage.setItem('pendingTradeState', JSON.stringify({
+                        customerId: customer.id,
+                        customer,
+                        ticketId,
+                        tradeItems,
+                        saleItems,
+                        ticketNote,
+                        showOnReceipt,
+                        isStoreCreditNet,
+                        buyTicketId: tradeBuyTicketId,
+                        saleTicketId: tradeSaleTicketId,
+                      }));
+                      navigate('/customer-editor', {
+                        state: {
+                          customer: {
+                            ...customer,
+                            id_expiry_date: customer.id_expiry_date ? new Date(customer.id_expiry_date).toISOString().substring(0, 10) : '',
+                            date_of_birth:  customer.date_of_birth  ? new Date(customer.date_of_birth).toISOString().substring(0, 10)  : '',
+                          },
+                          mode: 'edit',
+                          returnTo: location.pathname,
+                        },
+                      });
+                    }}>
+                    <MuiIcons.Edit fontSize="small" />
+                  </IconButton>
+                </Tooltip>
               </Box>
 
-              <Divider orientation="vertical" flexItem />
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography fontSize={11} color="text.secondary">Phone</Typography>
-                <Typography fontSize={13} fontWeight={600}>{customer.phone || '—'}</Typography>
-              </Box>
-              <Divider orientation="vertical" flexItem />
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography fontSize={11} color="text.secondary">ID</Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'center' }}>
-                  <Typography fontSize={13} fontWeight={600}>{customer.id_number ? 'Verified' : 'Not on file'}</Typography>
-                  {customer.id_number && <MuiIcons.CheckCircle sx={{ fontSize: 14, color: '#2e7d32' }} />}
-                </Box>
-              </Box>
               <Divider orientation="vertical" flexItem />
               <Box sx={{ textAlign: 'center' }}>
                 <Typography fontSize={11} color="text.secondary">Store Credit</Typography>
@@ -778,6 +804,20 @@ export default function TradeTransactionScreen({
               <Box sx={{ textAlign: 'center' }}>
                 <Typography fontSize={11} color="text.secondary">Total Sales</Typography>
                 <Typography fontSize={13} fontWeight={600}>{fmt(totalSalesAmt)}</Typography>
+              </Box>
+              <Divider orientation="vertical" flexItem />
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography fontSize={11} color="text.secondary">Total Trades</Typography>
+                <Typography fontSize={13} fontWeight={600}>{tradeStats?.total_trades ?? 0}</Typography>
+              </Box>
+              <Divider orientation="vertical" flexItem />
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography fontSize={11} color="text.secondary">Last Trade</Typography>
+                <Typography fontSize={13} fontWeight={600}>
+                  {tradeStats?.last_trade_date
+                    ? new Date(tradeStats.last_trade_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                    : '—'}
+                </Typography>
               </Box>
             </Box>
           );
