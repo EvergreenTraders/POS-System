@@ -301,6 +301,12 @@ pool.query(`
   ALTER TABLE buy_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE
 `).catch(err => console.error('buy_ticket note/receipt migration:', err.message));
 
+// Ensure ticket_note and show_on_receipt exist on trade_ticket table
+pool.query(`
+  ALTER TABLE trade_ticket ADD COLUMN IF NOT EXISTS ticket_note TEXT;
+  ALTER TABLE trade_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE
+`).catch(err => console.error('trade_ticket note/receipt migration:', err.message));
+
 // Authentication route
 // Ensure track_hours column exists on employees table
 pool.query(`
@@ -6355,6 +6361,8 @@ app.post('/api/quotes/trade', uploadJewelryImages, async (req, res) => {
     const customer_id   = req.body.customer_id;
     const employee_id   = req.body.employee_id;
     const total_amount  = req.body.total_amount;
+    const ticket_note   = req.body.ticket_note   || null;
+    const show_on_receipt = req.body.show_on_receipt === 'true';
     const uploadedFiles = req.files || [];
 
     if (!customer_id || !employee_id) {
@@ -6365,6 +6373,8 @@ app.post('/api/quotes/trade', uploadJewelryImages, async (req, res) => {
     }
 
     await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_type VARCHAR(10) DEFAULT 'pawn'`);
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS ticket_note TEXT`);
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE`);
     await client.query(`ALTER TABLE quote_items DROP CONSTRAINT IF EXISTS quote_items_item_id_fkey`);
 
     const latestResult = await client.query(
@@ -6385,9 +6395,9 @@ app.post('/api/quotes/trade', uploadJewelryImages, async (req, res) => {
     const saleTypeId = saleTypeResult.rows[0]?.id ?? null;
 
     const quoteResult = await client.query(
-      `INSERT INTO quotes (quote_id, customer_id, employee_id, total_amount, expires_in, days_remaining, quote_type, created_at)
-       VALUES ($1, $2, $3, $4, $5, $5, 'trade', CURRENT_TIMESTAMP) RETURNING *`,
-      [quoteId, customer_id, employee_id, parseFloat(total_amount) || 0, expiresIn]
+      `INSERT INTO quotes (quote_id, customer_id, employee_id, total_amount, expires_in, days_remaining, quote_type, ticket_note, show_on_receipt, created_at)
+       VALUES ($1, $2, $3, $4, $5, $5, 'trade', $6, $7, CURRENT_TIMESTAMP) RETURNING *`,
+      [quoteId, customer_id, employee_id, parseFloat(total_amount) || 0, expiresIn, ticket_note, show_on_receipt]
     );
 
     // Trade-in items — create a new jewelry record for each, same as /api/quotes.

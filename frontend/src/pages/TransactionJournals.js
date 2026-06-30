@@ -56,6 +56,7 @@ function TransactionJournals() {
   const [buyTickets, setBuyTickets] = useState([]);
   const [saleTickets, setSaleTickets] = useState([]);
   const [pawnTickets, setPawnTickets] = useState([]);
+  const [tradeTickets, setTradeTickets] = useState([]);
   const [taxRate, setTaxRate] = useState(0.13);
   const API_BASE_URL = config.apiUrl;
 
@@ -188,6 +189,14 @@ function TransactionJournals() {
         console.error('Error fetching pawn tickets:', pawnTicketError);
         setPawnTickets([]);
       }
+
+      try {
+        const tradeTicketResponse = await axios.get(`${API_BASE_URL}/trade-ticket?transaction_id=${transaction.transaction_id}`);
+        setTradeTickets(tradeTicketResponse.data || []);
+      } catch (tradeTicketError) {
+        console.error('Error fetching trade tickets:', tradeTicketError);
+        setTradeTickets([]);
+      }
     } catch (error) {
       console.error('Error fetching transaction details:', error);
       // Initialize with empty data if there's an error
@@ -196,6 +205,7 @@ function TransactionJournals() {
       setBuyTickets([]);
       setSaleTickets([]);
       setPawnTickets([]);
+      setTradeTickets([]);
     } finally {
       setLoadingItems(false);
       setLoadingPayments(false);
@@ -210,6 +220,7 @@ function TransactionJournals() {
     setBuyTickets([]);
     setSaleTickets([]);
     setPawnTickets([]);
+    setTradeTickets([]);
     // Don't clear transaction items to keep them in memory
   };
 
@@ -217,21 +228,163 @@ function TransactionJournals() {
   const groupItemsByTicket = () => {
     const grouped = {};
 
-    transactionItems.forEach((item, index) => {
-      // Use ticket_id directly from the item (returned by backend query)
-      const ticketId = item.ticket_id || 'no-ticket';
+    // Build a lookup: BT-xxx or ST-xxx → TT-xxx, so trade sub-tickets are merged
+    // under the single trade ticket id instead of appearing as separate buy/sale groups.
+    const subTicketToTradeId = {};
+    tradeTickets.forEach(tt => {
+      if (tt.buy_ticket_id)  subTicketToTradeId[tt.buy_ticket_id]  = tt.trade_ticket_id;
+      if (tt.sale_ticket_id) subTicketToTradeId[tt.sale_ticket_id] = tt.trade_ticket_id;
+    });
 
-      if (!grouped[ticketId]) {
-        grouped[ticketId] = [];
-      }
+    transactionItems.forEach((item, index) => {
+      const rawId = item.ticket_id || 'no-ticket';
+      // Remap BT-xxx / ST-xxx → TT-xxx when they belong to a trade ticket
+      const ticketId = subTicketToTradeId[rawId] || rawId;
+
+      if (!grouped[ticketId]) grouped[ticketId] = [];
       grouped[ticketId].push({ ...item, originalIndex: index });
     });
 
     return grouped;
   };
 
+  const handleTradeTicketClick = async (tradeTicketId) => {
+    const tradeTicket = tradeTickets.find(tt => tt.trade_ticket_id === tradeTicketId);
+    const allItems = transactionItems.filter(item => {
+      const id = item.ticket_id;
+      return id === tradeTicket?.buy_ticket_id || id === tradeTicket?.sale_ticket_id;
+    });
+
+    if (allItems.length === 0) { alert('No items found for this trade ticket'); return; }
+
+    const tradeInItems  = allItems.filter(i => i.transaction_type === 'buy');
+    const tradeSaleItems = allItems.filter(i => i.transaction_type === 'sale');
+
+    const ticketNote    = tradeTicket?.ticket_note || null;
+    const showOnReceipt = tradeTicket?.show_on_receipt ?? false;
+
+    let businessName = 'PAWNALL NEW MOBILE';
+    let businessAddress = '';
+    let businessPhone = '';
+    let businessLogo = '';
+    let businessLogoMimetype = '';
+    try {
+      const token = localStorage.getItem('token');
+      const r = await axios.get(`${API_BASE_URL}/business-info`, { headers: { Authorization: `Bearer ${token}` } });
+      businessName        = r.data.business_name || businessName;
+      businessAddress     = r.data.address || '';
+      businessPhone       = r.data.phone  || '';
+      if (r.data.logo && r.data.logo_mimetype) {
+        businessLogo         = r.data.logo;
+        businessLogoMimetype = r.data.logo_mimetype;
+      }
+    } catch {}
+
+    const transactionDate = selectedTransaction ? new Date(selectedTransaction.created_at) : new Date();
+    const formattedDate   = transactionDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    const formattedTime   = transactionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+    const totalTradeIn   = tradeInItems.reduce((s, i) => s + (parseFloat(i.item_price) || 0), 0);
+    const totalSale      = tradeSaleItems.reduce((s, i) => s + (parseFloat(i.item_price) || 0), 0);
+    const taxableDiff    = Math.max(0, totalSale - totalTradeIn);
+    const taxAmt         = taxableDiff * taxRate;
+    const totalSaleWithTax = totalSale + taxAmt;
+    const netBalance     = totalSaleWithTax - totalTradeIn; // positive = customer owes
+
+    const itemRow = (item, index) => {
+      const desc = item.long_desc || item.short_desc || item.description || `Item ${index + 1}`;
+      const price = parseFloat(item.item_price) || 0;
+      return `<tr>
+        <td style="padding:5px 4px; border-bottom:1px dotted #ccc;">${desc}</td>
+        <td style="padding:5px 4px; border-bottom:1px dotted #ccc; text-align:right;">$${price.toFixed(2)}</td>
+      </tr>`;
+    };
+
+    const receiptHTML = `<!DOCTYPE html><html><head><title>${tradeTicketId}</title>
+      <style>
+        body { font-family:'Courier New',monospace; max-width:400px; margin:10px auto; padding:15px; font-size:12px; }
+        .header { position:relative; margin-bottom:15px; border-bottom:2px dashed #333; padding-bottom:15px; min-height:75px; }
+        .header-content { padding-right:80px; }
+        .header h1 { margin:0 0 5px 0; color:#333; font-size:18px; font-weight:bold; }
+        .header p { margin:3px 0; font-size:11px; }
+        .header img { position:absolute; top:0; right:0; max-width:70px; max-height:70px; object-fit:contain; }
+        .info-row { display:flex; justify-content:space-between; padding:4px 0; font-size:11px; }
+        .info-label { font-weight:bold; }
+        .section-title { font-weight:bold; font-size:11px; padding:8px 4px 4px; border-bottom:1px solid #333; margin-top:10px; letter-spacing:0.5px; }
+        table { width:100%; border-collapse:collapse; font-size:11px; }
+        .totals { margin-top:10px; border-top:2px dashed #333; padding-top:8px; }
+        .net-row { font-weight:bold; font-size:13px; border-top:1px solid #333; padding-top:6px; margin-top:4px; }
+        .footer { margin-top:20px; text-align:center; font-size:10px; border-top:1px dashed #333; padding-top:10px; }
+        @media print { body{margin:0;padding:10px;} .no-print{display:none;} }
+      </style></head><body>
+      <div class="header">
+        ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Logo"/>` : ''}
+        <div class="header-content">
+          <h1>${businessName}</h1>
+          ${businessAddress ? `<p>${businessAddress}</p>` : ''}
+          ${businessPhone   ? `<p>${businessPhone}</p>`   : ''}
+        </div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <div class="info-row"><span class="info-label">Trade Ticket #:</span><span>${tradeTicketId}</span></div>
+        <div class="info-row"><span class="info-label">Date &amp; Time:</span><span>${formattedDate} ${formattedTime}</span></div>
+        <div class="info-row"><span class="info-label">Customer:</span><span>${selectedTransaction?.customer_name || 'N/A'}</span></div>
+        ${selectedTransaction?.customer_phone ? `<div class="info-row"><span class="info-label">Phone:</span><span>${selectedTransaction.customer_phone}</span></div>` : ''}
+        <div class="info-row"><span class="info-label">Employee:</span><span>${selectedTransaction?.employee_name || 'N/A'}</span></div>
+      </div>
+      ${tradeInItems.length > 0 ? `
+      <div class="section-title">TRADE-IN ITEMS</div>
+      <table><tbody>
+        ${tradeInItems.map((item, i) => itemRow(item, i)).join('')}
+      </tbody></table>
+      <div class="info-row" style="padding-top:6px;">
+        <span style="font-weight:bold;">Trade-In Allowance:</span>
+        <span>$${totalTradeIn.toFixed(2)}</span>
+      </div>` : ''}
+      ${tradeSaleItems.length > 0 ? `
+      <div class="section-title" style="margin-top:12px;">SALE ITEMS</div>
+      <table><tbody>
+        ${tradeSaleItems.map((item, i) => itemRow(item, i)).join('')}
+      </tbody></table>
+      <div style="padding-top:6px;">
+        <div class="info-row"><span>Subtotal:</span><span>$${totalSale.toFixed(2)}</span></div>
+        ${taxAmt > 0 ? `<div class="info-row" style="font-size:11px;color:#444;"><span>Tax (${(taxRate*100).toFixed(0)}% on $${taxableDiff.toFixed(2)} difference):</span><span>$${taxAmt.toFixed(2)}</span></div>` : ''}
+        <div class="info-row"><span style="font-weight:bold;">Total Sale:</span><span style="font-weight:bold;">$${totalSaleWithTax.toFixed(2)}</span></div>
+      </div>` : ''}
+      <div class="totals">
+        <div class="info-row net-row">
+          <span>${netBalance >= 0 ? 'Net Due from Customer:' : 'Net Due to Customer:'}</span>
+          <span>$${Math.abs(netBalance).toFixed(2)}</span>
+        </div>
+      </div>
+      ${ticketNote && showOnReceipt ? `
+      <div style="margin-top:12px;border-top:1px dashed #333;padding-top:10px;font-size:11px;">
+        <strong>Note:</strong> <span style="white-space:pre-wrap;">${ticketNote}</span>
+      </div>` : ''}
+      <div class="footer">
+        <p style="white-space:pre-wrap;">${receiptConfig.buy_receipt || 'Thank you for your business.'}</p>
+      </div>
+      <div class="no-print" style="text-align:center;margin-top:30px;">
+        <button onclick="window.print()" style="padding:10px 30px;font-size:16px;cursor:pointer;">Print</button>
+        <button onclick="window.close()" style="padding:10px 30px;font-size:16px;margin-left:10px;cursor:pointer;">Close</button>
+      </div>
+    </body></html>`;
+
+    const printWindow = window.open('', '_blank');
+    const pdfReadyHTML = injectPDFScript(receiptHTML, `trade_${tradeTicketId}`);
+    printWindow.document.write(pdfReadyHTML);
+    printWindow.document.close();
+  };
+
   // Handle double click on ticket_id to show receipt using PDF template
   const handleBuyTicketClick = async (ticketId) => {
+    // Trade tickets (TT-xxx) get their own dedicated receipt
+    const isTradeTicket = tradeTickets.some(tt => tt.trade_ticket_id === ticketId);
+    if (isTradeTicket) {
+      await handleTradeTicketClick(ticketId);
+      return;
+    }
+
     // Determine if this is a sale, buy, or pawn ticket by checking which ticket list contains it
     const isSaleTicket = saleTickets.some(st => st.sale_ticket_id === ticketId);
     const isBuyTicket = buyTickets.some(bt => bt.buy_ticket_id === ticketId);
@@ -293,10 +446,13 @@ function TransactionJournals() {
     const taxAmount = isSaleTransaction ? taxableAmount * taxRate : 0;
     const totalAmount = taxableAmount + taxAmount;
     const ticketNoteItem = ticketItems.find(i => i.ticket_note);
-    const ticketNote = ticketNoteItem?.ticket_note
-      || (isSaleTicket ? saleTickets.find(st => st.sale_ticket_id === ticketId && st.ticket_note)?.ticket_note : null)
-      || (isBuyTicket  ? buyTickets.find(bt => bt.buy_ticket_id === ticketId && bt.ticket_note)?.ticket_note  : null)
-      || null;
+    const ticketNoteRow = isSaleTicket
+      ? saleTickets.find(st => st.sale_ticket_id === ticketId && st.ticket_note)
+      : isBuyTicket
+        ? buyTickets.find(bt => bt.buy_ticket_id === ticketId && bt.ticket_note)
+        : null;
+    const ticketNote = ticketNoteItem?.ticket_note || ticketNoteRow?.ticket_note || null;
+    const showOnReceipt = ticketNoteItem?.show_on_receipt ?? ticketNoteRow?.show_on_receipt ?? true;
     const transactionDate = selectedTransaction ? new Date(selectedTransaction.created_at) : new Date();
     const formattedDate = transactionDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
     const formattedTime = transactionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -496,7 +652,7 @@ function TransactionJournals() {
             </div>
           </div>
 
-          ${ticketNote ? `
+          ${ticketNote && showOnReceipt ? `
           <div style="margin-top: 12px; border-top: 1px dashed #333; padding-top: 10px; font-size: 11px;">
             <strong>Note:</strong> <span style="white-space: pre-wrap;">${ticketNote}</span>
           </div>

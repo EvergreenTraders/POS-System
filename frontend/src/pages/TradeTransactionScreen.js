@@ -626,6 +626,8 @@ export default function TradeTransactionScreen({
       // the customer). Summing both sides instead (as a positive total) doesn't
       // correspond to any real dollar amount.
       formData.append('total_amount', totalSaleAfterTax - totalTradeAllowance);
+      if (ticketNote)    formData.append('ticket_note', ticketNote);
+      if (showOnReceipt) formData.append('show_on_receipt', 'true');
 
       const res = await axios.post(`${config.apiUrl}/quotes/trade`, formData, {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
