@@ -998,6 +998,38 @@ export default function ModernTransactions() {
     setExistingSaleData(null);
   };
 
+  // Called when TradeTransactionScreen detects only trade-in items exist.
+  // Converts all trade-in items to a new Buy ticket and opens it.
+  const handleSwitchToBuy = ({ tradeItems, ticketNote, showOnReceipt }) => {
+    const buyItems = tradeItems.map(item => ({
+      _lineId: item._lineId,
+      part_no: item.part_no,
+      category_id: item.category_id || '',
+      category_name: item.category_name || '',
+      description: item.description || '',
+      serial_number: item.serial_number || '',
+      qty: item.qty || 1,
+      paid: parseFloat(item.tradeAllowance) || 0,
+      images: item.images || [],
+      sourceEstimator: item.sourceEstimator || 'jewelry',
+      jewelryData: item.jewelryData,
+      ...(item.fromInventory && { fromInventory: true, item_id: item.item_id }),
+    }));
+    setTradeOpen(false);
+    setExistingTradeData(null);
+    setExistingBuyData({ buyItems, ticketNote, showOnReceipt });
+    setBuyOpen(true);
+  };
+
+  // Called when TradeTransactionScreen detects only sale items exist.
+  // Moves all sale items to a new Sale ticket and opens it.
+  const handleSwitchToSale = ({ saleItems, ticketNote, showOnReceipt }) => {
+    setTradeOpen(false);
+    setExistingTradeData(null);
+    setExistingSaleData({ saleItems, ticketNote, showOnReceipt, globalDiscount: 0 });
+    setSaleOpen(true);
+  };
+
   const handleConvertTradeItemToBuy = (tradeItem, targetTicketId) => {
     const buyItem = {
       _lineId: tradeItem._lineId,
@@ -1178,6 +1210,8 @@ export default function ModernTransactions() {
         onConsumeWorkspaceSale={(saleTicketId) =>
           setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'SALE' && t.ticketId === saleTicketId)))
         }
+        onSwitchToBuy={handleSwitchToBuy}
+        onSwitchToSale={handleSwitchToSale}
       />
     );
   }

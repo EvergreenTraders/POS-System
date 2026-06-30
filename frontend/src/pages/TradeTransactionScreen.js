@@ -90,6 +90,8 @@ export default function TradeTransactionScreen({
   onConsumeWorkspaceBuy,
   workspaceSaleTickets = [],
   onConsumeWorkspaceSale,
+  onSwitchToBuy,
+  onSwitchToSale,
 }) {
   const navigate   = useNavigate();
   const location   = useLocation();
@@ -164,6 +166,8 @@ export default function TradeTransactionScreen({
   const cameraVideoRef = useRef(null);
 
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  // null | 'noSale' | 'noTradeIn'
+  const [wrongTypeWarning, setWrongTypeWarning] = useState(null);
 
   const showSnackbar = (msg, sev = 'success') => setSnackbar({ open: true, message: msg, severity: sev });
   const fmt = (n) => `$${Number(n || 0).toFixed(2)}`;
@@ -674,6 +678,8 @@ export default function TradeTransactionScreen({
       showSnackbar('Add at least one item before adding to workspace', 'warning');
       return;
     }
+    if (saleItems.length === 0) { setWrongTypeWarning('noSale'); return; }
+    if (tradeItems.length === 0) { setWrongTypeWarning('noTradeIn'); return; }
     onAddToWorkspace?.({
       ticketId, tradeItems, saleItems, ticketNote, showOnReceipt,
       isStoreCreditNet, totalTradeAllowance, totalSaleAfterTax, netDueToCustomer,
@@ -687,6 +693,8 @@ export default function TradeTransactionScreen({
       showSnackbar('Add items before checkout', 'warning');
       return;
     }
+    if (saleItems.length === 0) { setWrongTypeWarning('noSale'); return; }
+    if (tradeItems.length === 0) { setWrongTypeWarning('noTradeIn'); return; }
     if (!customer?.id) {
       showSnackbar('Please select a customer before checkout', 'error');
       return;
@@ -1701,6 +1709,54 @@ export default function TradeTransactionScreen({
             startIcon={<MuiIcons.PhotoCamera />}
             sx={{ bgcolor: TRADE_TEAL, '&:hover': { bgcolor: TRADE_DARK }, textTransform: 'none' }}>
             Capture
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Wrong ticket type warning */}
+      <Dialog
+        open={wrongTypeWarning !== null}
+        onClose={() => setWrongTypeWarning(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, fontWeight: 700, pb: 1 }}>
+          <MuiIcons.Warning sx={{ color: '#f57c00' }} />
+          Incomplete Trade Ticket
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            {wrongTypeWarning === 'noSale'
+              ? 'No sale items have been added. A trade ticket requires items on both sides.'
+              : 'No trade-in items have been added. A trade ticket requires items on both sides.'}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {wrongTypeWarning === 'noSale'
+              ? 'Use a Buy Ticket instead, or add sale items to complete the trade.'
+              : 'Use a Sale Ticket instead, or add trade-in items to complete the trade.'}
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 2.5, py: 1.5, gap: 1 }}>
+          <Button onClick={() => setWrongTypeWarning(null)} sx={{ textTransform: 'none' }}>
+            Keep Editing
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setWrongTypeWarning(null);
+              if (wrongTypeWarning === 'noSale') {
+                onSwitchToBuy?.({ tradeItems, ticketNote, showOnReceipt });
+              } else {
+                onSwitchToSale?.({ saleItems, ticketNote, showOnReceipt });
+              }
+            }}
+            sx={{
+              textTransform: 'none',
+              bgcolor: '#f57c00',
+              '&:hover': { bgcolor: '#e65100' },
+            }}
+          >
+            {wrongTypeWarning === 'noSale' ? 'Switch to Buy Ticket' : 'Switch to Sale Ticket'}
           </Button>
         </DialogActions>
       </Dialog>
