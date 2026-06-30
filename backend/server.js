@@ -9165,29 +9165,29 @@ app.put('/api/receipt-config', async (req, res) => {
       pawn_receipt,
       layaway_receipt,
       return_receipt,
-      refund_receipt
+      trade_receipt,
+      payment_receipt,
+      repair_receipt,
     } = req.body;
 
-    // Check if a record already exists
     const checkResult = await pool.query('SELECT * FROM receipt_config');
 
     let result;
     if (checkResult.rows.length === 0) {
-      // Insert new record
       result = await pool.query(
-        `INSERT INTO receipt_config (transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt]
+        `INSERT INTO receipt_config (transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, trade_receipt, payment_receipt, repair_receipt)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, trade_receipt, payment_receipt, repair_receipt]
       );
     } else {
-      // Update existing record
       result = await pool.query(
         `UPDATE receipt_config
          SET transaction_receipt = $1, buy_receipt = $2, pawn_receipt = $3,
-             layaway_receipt = $4, return_receipt = $5, refund_receipt = $6,
+             layaway_receipt = $4, return_receipt = $5,
+             trade_receipt = $6, payment_receipt = $7, repair_receipt = $8,
              updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
-        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt]
+        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, trade_receipt, payment_receipt, repair_receipt]
       );
     }
 

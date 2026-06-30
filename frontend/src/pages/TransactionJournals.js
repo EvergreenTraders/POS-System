@@ -75,6 +75,7 @@ function TransactionJournals() {
     transaction_receipt: 'Thank you for shopping with us',
     buy_receipt: 'Thank you for shopping with us',
     sales_receipt: 'Thank you for shopping with us',
+    trade_receipt: 'Thank you for shopping with us',
     pawn_receipt: ''
   });
 
@@ -88,6 +89,7 @@ function TransactionJournals() {
             transaction_receipt: response.data.transaction_receipt || 'Thank you for shopping with us',
             buy_receipt: response.data.buy_receipt || 'Thank you for shopping with us',
             sales_receipt: response.data.sales_receipt || 'Thank you for shopping with us',
+            trade_receipt: response.data.trade_receipt || 'Thank you for shopping with us',
             pawn_receipt: response.data.pawn_receipt || ''
           });
         }
@@ -362,7 +364,7 @@ function TransactionJournals() {
         <strong>Note:</strong> <span style="white-space:pre-wrap;">${ticketNote}</span>
       </div>` : ''}
       <div class="footer">
-        <p style="white-space:pre-wrap;">${receiptConfig.buy_receipt || 'Thank you for your business.'}</p>
+        <p style="white-space:pre-wrap;">${receiptConfig.trade_receipt || 'Thank you for your business.'}</p>
       </div>
       <div class="no-print" style="text-align:center;margin-top:30px;">
         <button onclick="window.print()" style="padding:10px 30px;font-size:16px;cursor:pointer;">Print</button>
