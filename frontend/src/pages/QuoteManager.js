@@ -38,6 +38,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import SaveIcon from '@mui/icons-material/Save';
 import EditIcon from '@mui/icons-material/Edit';
+import { generateTradeTicketId, commitTradeTicketId } from './TradeTransactionScreen';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -80,18 +81,6 @@ function generateSaleTicketId() {
   return id;
 }
 
-function generateTradeTicketId() {
-  const voided = JSON.parse(localStorage.getItem('voidedTradeTickets') || '[]');
-  const pending = localStorage.getItem('pendingTTTicketId');
-  if (pending && !voided.includes(pending)) return pending;
-  if (pending) localStorage.removeItem('pendingTTTicketId');
-  let last = parseInt(localStorage.getItem('lastTTTicketNumber') || '100000');
-  let id;
-  do { last += 1; id = `TT-${last}`; } while (voided.includes(id));
-  localStorage.setItem('lastTTTicketNumber', last.toString());
-  localStorage.setItem('pendingTTTicketId', id);
-  return id;
-}
 
 function QuoteManager() {
   const navigate = useNavigate();

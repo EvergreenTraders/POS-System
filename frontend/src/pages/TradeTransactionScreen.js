@@ -30,15 +30,36 @@ function generateTradeTicketId() {
   const pending = localStorage.getItem(TT_PENDING_KEY);
   if (pending && !voided.includes(pending)) return pending;
   if (pending) localStorage.removeItem(TT_PENDING_KEY);
-  let last = parseInt(localStorage.getItem(TT_COUNTER_KEY) || '100000');
+  let last = parseInt(localStorage.getItem(TT_COUNTER_KEY) || '0');
   let id;
-  do { last += 1; id = `TT-${last}`; } while (voided.includes(id));
+  do { last += 1; id = `TT-${last.toString().padStart(8, '0')}`; } while (voided.includes(id));
   localStorage.setItem(TT_COUNTER_KEY, last.toString());
   localStorage.setItem(TT_PENDING_KEY, id);
   return id;
 }
 
 function commitTradeTicketId() { localStorage.removeItem(TT_PENDING_KEY); }
+
+async function syncTradeTicketCounter() {
+  try {
+    const res = await axios.get(`${config.apiUrl}/trade-ticket/last-id`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    });
+    const dbNum    = res.data.last_number || 0;
+    const localNum = parseInt(localStorage.getItem(TT_COUNTER_KEY) || '0');
+    if (dbNum > localNum) {
+      localStorage.setItem(TT_COUNTER_KEY, dbNum.toString());
+      localStorage.removeItem(TT_PENDING_KEY);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.warn('Could not sync trade ticket counter with DB:', e.message);
+    return false;
+  }
+}
+
+export { generateTradeTicketId, commitTradeTicketId };
 
 function getCustomerImageUrl(customer) {
   if (!customer?.image) return null;
@@ -193,6 +214,13 @@ export default function TradeTransactionScreen({
         console.error('Error fetching metal code maps:', err);
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    syncTradeTicketCounter().then(bumped => {
+      if (bumped) setTicketId(prev => existingTradeData?.ticketId || generateTradeTicketId());
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

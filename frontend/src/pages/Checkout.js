@@ -1536,6 +1536,12 @@ function Checkout() {
                 },
                 { headers: { Authorization: `Bearer ${token}` } }
               );
+              // Commit pending ticket IDs so they are not reused on the next
+              // checkout (especially important for the quote→checkout path which
+              // bypasses TradeTransactionScreen's own commit calls).
+              localStorage.removeItem('pendingTTTicketId');
+              if (buyTicketId)  localStorage.removeItem('pendingBTTicketId');
+              if (saleTicketId) localStorage.removeItem('pendingSTTicketId');
             } catch (tradeTicketError) {
               console.error('Error posting trade_ticket:', tradeTicketError);
             }
