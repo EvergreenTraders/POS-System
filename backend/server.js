@@ -7261,7 +7261,20 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         itemCounter++;
         status = 'QUOTED';
       } else if (item.buyTicketId) {
-        ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
+        if (!(item.buyTicketId in ticketCounters)) {
+          // Seed the counter from the highest -NN suffix already persisted under this
+          // buy_ticket_id (not just items seen so far in this request, and not a plain
+          // COUNT — a prior failed/partial attempt can leave gaps, e.g. -03/-04 exist
+          // but -01/-02 don't) — otherwise a buy_ticket_id reused across separate
+          // requests/retries restarts at -01 and collides with existing jewelry rows.
+          const maxSeqResult = await client.query(
+            `SELECT COALESCE(MAX(CAST(SUBSTRING(item_id FROM '-([0-9]+)$') AS INTEGER)), 0) AS max_seq
+             FROM buy_ticket WHERE buy_ticket_id = $1`,
+            [item.buyTicketId]
+          );
+          ticketCounters[item.buyTicketId] = parseInt(maxSeqResult.rows[0].max_seq) || 0;
+        }
+        ticketCounters[item.buyTicketId] += 1;
         item_id = `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`;
         status = isPawn ? 'PAWN' : 'HOLD';
       } else {
@@ -7507,7 +7520,17 @@ app.post('/api/jewelry', async (req, res) => {
         itemCounter++;
         status = 'QUOTED';
       } else if (item.buyTicketId) {
-        ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
+        if (!(item.buyTicketId in ticketCounters)) {
+          // Seed the counter from the highest -NN suffix already persisted under this
+          // buy_ticket_id — see the matching comment in /api/jewelry/with-images.
+          const maxSeqResult = await client.query(
+            `SELECT COALESCE(MAX(CAST(SUBSTRING(item_id FROM '-([0-9]+)$') AS INTEGER)), 0) AS max_seq
+             FROM buy_ticket WHERE buy_ticket_id = $1`,
+            [item.buyTicketId]
+          );
+          ticketCounters[item.buyTicketId] = parseInt(maxSeqResult.rows[0].max_seq) || 0;
+        }
+        ticketCounters[item.buyTicketId] += 1;
         item_id = `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`;
         status = isPawn ? 'PAWN' : 'HOLD';
       } else {

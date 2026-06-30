@@ -497,31 +497,63 @@ export default function TradeTransactionScreen({
           show_on_receipt: showOnReceipt,
         }))
       ),
-      ...tradeItems.map(item => ({
-        ...item,
-        id: `${ticketId}_trade_${item._lineId}_${Date.now()}`,
-        description: item.description || item.part_no,
-        short_desc: item.description || '',
-        price: -((parseFloat(item.tradeAllowance) || 0) * (parseInt(item.qty) || 1)),
-        value: -((parseFloat(item.tradeAllowance) || 0) * (parseInt(item.qty) || 1)),
-        transaction_type: 'trade_in',
-        customer: cartCustomer,
-        employee: currentUser
-          ? { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(), role: currentUser.role }
-          : null,
-        tradeTicketId: ticketId,
-        buyTicketId: tradeBuyTicketId,
-        ticket_note: ticketNote || null,
-        show_on_receipt: showOnReceipt,
-      })),
+      ...tradeItems.map(item => {
+        // jewelryData carries the full estimator record (metal, purity, gemstones,
+        // etc.) for items sourced from the jewelry intake screen — flatten it to the
+        // top level first (like BuyTransactionScreen does) so the jewelry-creation
+        // endpoint, which reads these as plain item.* fields, actually gets them.
+        const jewelryBase = item.jewelryData ? { ...item.jewelryData } : {};
+        return {
+          ...jewelryBase,
+          ...item,
+          id: `${ticketId}_trade_${item._lineId}_${Date.now()}`,
+          description: item.description || item.jewelryData?.short_desc || item.part_no,
+          short_desc: item.description || item.jewelryData?.short_desc || '',
+          long_desc: item.jewelryData?.long_desc || item.description || '',
+          price: -((parseFloat(item.tradeAllowance) || 0) * (parseInt(item.qty) || 1)),
+          value: -((parseFloat(item.tradeAllowance) || 0) * (parseInt(item.qty) || 1)),
+          transaction_type: 'trade_in',
+          customer: cartCustomer,
+          employee: currentUser
+            ? { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(), role: currentUser.role }
+            : null,
+          tradeTicketId: ticketId,
+          buyTicketId: tradeBuyTicketId,
+          ticket_note: ticketNote || null,
+          show_on_receipt: showOnReceipt,
+        };
+      }),
     ];
 
     sessionStorage.setItem('checkoutItems', JSON.stringify(cartItems));
     sessionStorage.setItem('selectedCustomer', JSON.stringify(cartCustomer));
+    sessionStorage.setItem('pendingTradeReturn', JSON.stringify({
+      customerId: customer.id,
+      customer,
+      ticketId,
+      tradeItems,
+      saleItems,
+      ticketNote,
+      showOnReceipt,
+      isStoreCreditNet,
+    }));
     commitTradeTicketId();
     if (tradeBuyTicketId)  commitBuyTicketId();
     if (tradeSaleTicketId) commitSaleTicketId();
-    navigate('/checkout', { state: { items: cartItems, allCartItems: cartItems, customer: cartCustomer, from: 'trade-ticket' } });
+    // Tax on a trade only applies to the amount the sale exceeds the trade-in
+    // allowance (taxableDifference above), so the net total can't be rebuilt by
+    // summing individual line items in Checkout — pass the ticket's own total.
+    // Positive = customer owes the store; negative = store owes the customer
+    // (matches the buy/pawn sign convention Checkout uses).
+    navigate('/checkout', {
+      state: {
+        items: cartItems,
+        allCartItems: cartItems,
+        customer: cartCustomer,
+        from: 'trade-ticket',
+        tradeTotal: -netDueToCustomer,
+      },
+    });
   };
 
   // ── Customer bar stats ───────────────────────────────────────────────────────

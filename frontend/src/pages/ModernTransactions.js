@@ -564,8 +564,24 @@ export default function ModernTransactions() {
     }
     return null;
   });
-  const [tradeOpen, setTradeOpen]         = useState(false);
-  const [existingTradeData, setExistingTradeData] = useState(null);
+  const [tradeOpen, setTradeOpen]         = useState(() => {
+    if (location.state?.returnToTrade) {
+      const raw = sessionStorage.getItem('pendingTradeReturn');
+      return !!raw;
+    }
+    return false;
+  });
+  const [existingTradeData, setExistingTradeData] = useState(() => {
+    if (location.state?.returnToTrade) {
+      const raw = sessionStorage.getItem('pendingTradeReturn');
+      if (!raw) return null;
+      try {
+        const { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet } = JSON.parse(raw);
+        return { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet };
+      } catch { return null; }
+    }
+    return null;
+  });
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
   const [noCustomerWarning, setNoCustomerWarning] = useState(false);
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
@@ -696,6 +712,25 @@ export default function ModernTransactions() {
       })
         .then(res => setCustomer(res.data))
         .catch(err => console.error('Failed to refresh customer after buy checkout cancel:', err));
+    }
+  }, [location.state]);
+
+  // Refresh customer data after returning from Checkout via Trade Ticket breadcrumb; tradeOpen/existingTradeData seeded in useState.
+  useEffect(() => {
+    if (!location.state?.returnToTrade) return;
+    const raw = sessionStorage.getItem('pendingTradeReturn');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingTradeReturn');
+    const { customerId, customer: savedCustomer } = pending;
+    if (savedCustomer) setCustomer(savedCustomer);
+    if (customerId) {
+      axios.get(`${config.apiUrl}/customers/${customerId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      })
+        .then(res => setCustomer(res.data))
+        .catch(err => console.error('Failed to refresh customer after trade checkout cancel:', err));
     }
   }, [location.state]);
 

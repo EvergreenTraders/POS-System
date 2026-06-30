@@ -137,6 +137,10 @@ function Checkout() {
     email: ''
   });
   const [checkoutSource, setCheckoutSource] = useState(location.state?.from || null);
+  // Trade tickets tax only the amount the sale exceeds the trade-in allowance,
+  // a ticket-level computation TradeTransactionScreen already did — captured
+  // here once so it survives re-renders rather than re-reading location.state.
+  const [tradeTotal] = useState(location.state?.tradeTotal);
   const [taxRate, setTaxRate] = useState(0.13); // Default 13% tax rate
   const [selectedProvince, setSelectedProvince] = useState('ON');
   const [provinceName, setProvinceName] = useState('Ontario');
@@ -455,6 +459,14 @@ function Checkout() {
   }, [selectedCustomer, setCustomer]);
 
   const calculateSubtotal = useCallback(() => {
+    // A trade ticket's total can't be rebuilt by summing its trade_in/trade_sale
+    // line items here — tax only applies to the portion of the sale that exceeds
+    // the trade-in allowance, a ticket-level computation TradeTransactionScreen
+    // already did. Use that precomputed total directly instead.
+    if (checkoutSource === 'trade-ticket' && tradeTotal !== undefined) {
+      return tradeTotal;
+    }
+
     // Always use checkoutItems if available, as it contains the items selected for checkout
     // Only fall back to cartItems if checkoutItems is empty (e.g., coming from estimator)
     const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
@@ -510,7 +522,7 @@ function Checkout() {
       // Apply sign based on transaction type
       // Money going OUT (buy/pawn) = negative values
       // Money coming IN (sale/repair/redeem) = positive values
-      if (transactionType === 'buy' || transactionType === 'pawn') {
+      if (transactionType === 'buy' || transactionType === 'pawn' || transactionType === 'trade_in') {
         itemValue = -Math.abs(itemValue);
       } else {
         itemValue = Math.abs(itemValue);
@@ -529,7 +541,7 @@ function Checkout() {
       }
     }
     return subtotal;
-  }, [checkoutItems, cartItems, selectedCustomer, taxRate]);
+  }, [checkoutItems, cartItems, selectedCustomer, taxRate, checkoutSource, tradeTotal]);
 
   const calculateTax = useCallback(() => {
     // Tax is not calculated - all prices already include tax
@@ -888,15 +900,14 @@ function Checkout() {
           } else if (hasJewelryItems) {
             // If coming from estimator, create new jewelry items (only if we have jewelry items)
             // Filter out items from inventory as they already exist in the database
-            // Pre-assign item IDs following BT-XXXXXXXX-XX format (same as hardgoods)
-            const ticketCounters = {};
+            // Don't pre-assign item IDs here — the server computes BT-XXXXXXXX-XX ids
+            // against the DB count for that buy_ticket_id, which is the only way to
+            // avoid colliding with items already persisted under the same ticket in
+            // an earlier request (this naive in-memory counter always restarted at 1).
             const newJewelryItems = checkoutItems.filter(item => !item.fromInventory).map(item => {
-              if (!item.buyTicketId) return item;
-              ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
               const desc = item.short_desc || item.description || '';
               return {
                 ...item,
-                item_id: `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`,
                 short_desc: desc,
                 long_desc: item.long_desc || desc,
               };
@@ -1800,6 +1811,52 @@ function Checkout() {
             }
           }
 
+          // After successful buy checkout, remove the buy card from workspace localStorage
+          const buyCheckoutCompleted = checkoutSource === 'buy-ticket' &&
+            checkoutItems.some(i => (i.transaction_type || '').toLowerCase() === 'buy');
+          if (buyCheckoutCompleted) {
+            const customerId = selectedCustomer?.id;
+            const buyTicketId = checkoutItems.find(i => i.buyTicketId)?.buyTicketId;
+            if (customerId && buyTicketId) {
+              try {
+                const key = `workspace_${customerId}`;
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const filtered = (parsed.transactions || []).filter(
+                    tx => !(tx.type === 'BUY' && tx.ticketId === buyTicketId)
+                  );
+                  localStorage.setItem(key, JSON.stringify({ ...parsed, transactions: filtered }));
+                }
+              } catch (e) {
+                console.error('Error clearing buy workspace entry:', e);
+              }
+            }
+          }
+
+          // After successful trade checkout, remove the trade card from workspace localStorage
+          const tradeCheckoutCompleted = checkoutSource === 'trade-ticket' &&
+            checkoutItems.some(i => ['trade_in', 'trade_sale'].includes((i.transaction_type || '').toLowerCase()));
+          if (tradeCheckoutCompleted) {
+            const customerId = selectedCustomer?.id;
+            const tradeTicketId = checkoutItems.find(i => i.tradeTicketId)?.tradeTicketId;
+            if (customerId && tradeTicketId) {
+              try {
+                const key = `workspace_${customerId}`;
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const filtered = (parsed.transactions || []).filter(
+                    tx => !(tx.type === 'TRADE' && tx.ticketId === tradeTicketId)
+                  );
+                  localStorage.setItem(key, JSON.stringify({ ...parsed, transactions: filtered }));
+                }
+              } catch (e) {
+                console.error('Error clearing trade workspace entry:', e);
+              }
+            }
+          }
+
           // After successful pawn checkout, remove the card(s) from the workspace localStorage
           const pawnCheckoutCompleted = checkoutItems.length > 0 &&
             checkoutItems.every(i => (i.transaction_type || '').toLowerCase() === 'pawn');
@@ -1917,6 +1974,8 @@ const handleBackToEstimation = () => {
       navigate('/modern-transactions', { state: { returnToSale: true } });
     } else if (checkoutSource === 'buy-ticket') {
       navigate('/modern-transactions', { state: { returnToBuy: true } });
+    } else if (checkoutSource === 'trade-ticket') {
+      navigate('/modern-transactions', { state: { returnToTrade: true } });
     } else if (checkoutSource === 'cart') {
       // Check if this is a pawn-only checkout — navigate back to pawn screen
       const isPawnCheckout = checkoutItems.length > 0 &&
@@ -2046,11 +2105,12 @@ const handleBackToEstimation = () => {
   const isPawnCheckout = checkoutItems.length > 0 &&
     checkoutItems.every(item => (item.transaction_type || '').toLowerCase() === 'pawn');
 
-  const isSaleCheckout = checkoutSource === 'sale-ticket';
-  const isBuyCheckout  = checkoutSource === 'buy-ticket';
-  const themeColor   = isSaleCheckout ? '#2e7d32' : isBuyCheckout ? '#0284c7' : PURPLE;
-  const themeDark    = isSaleCheckout ? '#1b5e20' : isBuyCheckout ? '#0369a1' : PURPLE_DARK;
-  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : isBuyCheckout ? '#e0f2fe' : '#f3e5f5';
+  const isSaleCheckout  = checkoutSource === 'sale-ticket';
+  const isBuyCheckout   = checkoutSource === 'buy-ticket';
+  const isTradeCheckout = checkoutSource === 'trade-ticket';
+  const themeColor   = isSaleCheckout ? '#2e7d32' : isBuyCheckout ? '#0284c7' : isTradeCheckout ? '#0891b2' : PURPLE;
+  const themeDark    = isSaleCheckout ? '#1b5e20' : isBuyCheckout ? '#0369a1' : isTradeCheckout ? '#0e7490' : PURPLE_DARK;
+  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : isBuyCheckout ? '#e0f2fe' : isTradeCheckout ? '#e0f9ff' : '#f3e5f5';
 
   const breadcrumbSource = isPawnCheckout
     ? 'Pawn Transaction'
@@ -2058,6 +2118,8 @@ const handleBackToEstimation = () => {
     ? 'Sale Transaction'
     : checkoutSource === 'buy-ticket'
     ? 'Buy Transaction'
+    : checkoutSource === 'trade-ticket'
+    ? 'Trade Ticket'
     : checkoutSource === 'coinsbullions'
     ? 'Coins & Bullions'
     : checkoutSource === 'cart'
@@ -2069,7 +2131,7 @@ const handleBackToEstimation = () => {
 
       {/* Breadcrumb */}
       <Box sx={{ bgcolor: themeColor, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        {isBuyCheckout ? (
+        {isBuyCheckout || isTradeCheckout ? (
           <>
             <Typography variant="body2" fontWeight={400}
               sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
@@ -2080,7 +2142,7 @@ const handleBackToEstimation = () => {
             <Typography variant="body2" fontWeight={400}
               sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
               onClick={handleBackToEstimation}>
-              Buy Ticket
+              {isTradeCheckout ? 'Trade Ticket' : 'Buy Ticket'}
             </Typography>
           </>
         ) : (
