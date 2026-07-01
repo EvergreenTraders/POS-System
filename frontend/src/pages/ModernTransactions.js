@@ -666,11 +666,23 @@ export default function ModernTransactions() {
       const raw = sessionStorage.getItem('pendingPaymentState');
       return !!raw;
     }
+    if (location.state?.returnToPayment) {
+      const raw = sessionStorage.getItem('pendingPaymentReturn');
+      return !!raw;
+    }
     return false;
   });
   const [existingPaymentData, setExistingPaymentData] = useState(() => {
     if (location.state?.customerUpdated) {
       const raw = sessionStorage.getItem('pendingPaymentState');
+      if (!raw) return null;
+      try {
+        const { ticketId, selectedPayments, notes, ticketNote, showOnReceipt } = JSON.parse(raw);
+        return { ticketId, selectedPayments, notes, ticketNote, showOnReceipt };
+      } catch { return null; }
+    }
+    if (location.state?.returnToPayment) {
+      const raw = sessionStorage.getItem('pendingPaymentReturn');
       if (!raw) return null;
       try {
         const { ticketId, selectedPayments, notes, ticketNote, showOnReceipt } = JSON.parse(raw);
@@ -941,6 +953,26 @@ export default function ModernTransactions() {
     })
       .then(res => setCustomer(res.data))
       .catch(err => console.error('Failed to refresh customer after payment edit:', err));
+  }, [location.state]);
+
+  // Restore payment screen after navigating back from Checkout
+  useEffect(() => {
+    if (!location.state?.returnToPayment) return;
+    const raw = sessionStorage.getItem('pendingPaymentReturn');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingPaymentReturn');
+    const { customerId, customer: savedCustomer, ticketId, selectedPayments, notes, ticketNote, showOnReceipt } = pending;
+    if (!customerId) return;
+    if (savedCustomer) setCustomer(savedCustomer);
+    setExistingPaymentData({ ticketId, selectedPayments, notes, ticketNote, showOnReceipt });
+    setPaymentOpen(true);
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after checkout back:', err));
   }, [location.state]);
 
   const handleCustomerSearch = async (query) => {

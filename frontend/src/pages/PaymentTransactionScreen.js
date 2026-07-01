@@ -9,6 +9,8 @@ import {
   Select, MenuItem, Snackbar, Alert, Stack, CircularProgress, Tooltip,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
+import { useAuth } from '../context/AuthContext';
+import { useWorkingDate } from '../context/WorkingDateContext';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
@@ -119,6 +121,8 @@ export default function PaymentTransactionScreen({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user: currentUser } = useAuth();
+  const { workingDate } = useWorkingDate();
 
   const [ticketId] = useState(() => existingPaymentData?.ticketId || generatePaymentTicketId());
   const [activeFilter, setActiveFilter] = useState('all');
@@ -130,6 +134,18 @@ export default function PaymentTransactionScreen({
   const [ticketNote, setTicketNote] = useState(existingPaymentData?.ticketNote || '');
   const [showOnReceipt, setShowOnReceipt] = useState(existingPaymentData?.showOnReceipt ?? false);
   const [snack, setSnack] = useState(null);
+
+
+  // Sync counter from DB on mount so the next ID doesn't overlap with existing records
+  useEffect(() => {
+    axios.get(`${config.apiUrl}/payment-ticket/last-id`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    }).then(res => {
+      const serverNum = res.data.last_number || 0;
+      const localNum  = parseInt(localStorage.getItem(PMT_COUNTER_KEY) || '0', 10);
+      if (serverNum > localNum) localStorage.setItem(PMT_COUNTER_KEY, serverNum.toString());
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!customer?.id) { setPawns([]); return; }
@@ -235,6 +251,79 @@ export default function PaymentTransactionScreen({
       totalPayment,
       pawnTotal,
       layawayTotal,
+    });
+  };
+
+  const handleCheckoutNow = () => {
+    if (!customer?.id) {
+      setSnack({ severity: 'error', message: 'Please select a customer before checkout.' });
+      return;
+    }
+    if (selectedPayments.length === 0) {
+      setSnack({ severity: 'warning', message: 'Add at least one payment before checkout.' });
+      return;
+    }
+
+    const cartCustomer = {
+      id:         customer.id,
+      first_name: customer.first_name,
+      last_name:  customer.last_name,
+      name:       `${customer.first_name} ${customer.last_name}`.trim(),
+      phone:      customer.phone || '',
+      email:      customer.email || '',
+    };
+
+    const cartItems = selectedPayments
+      .filter(p => p.type === 'pawn_extension')
+      .map(p => {
+        const numPeriods    = p.numPeriods || 1;
+        const extensionDays = (p.frequency_days || 30) * numPeriods;
+        const prevDate      = p.due_date_raw || null;
+        const newDate       = p.newDueDateRaw
+          ? new Date(p.newDueDateRaw).toISOString().split('T')[0]
+          : null;
+        const interestPaid  = Math.round(p.principal * (p.interest_rate  / 100) * numPeriods * 100) / 100;
+        const feePaid       = Math.round((p.principal * (p.insurance_rate / 100) + (p.storage_fee || 0)) * numPeriods * 100) / 100;
+        return {
+          id:               `${ticketId}_${p.ref}_${Date.now()}`,
+          description:      `${p.ref} — ${p.description}`,
+          price:            parseFloat(p.paymentAmount) || 0,
+          value:            parseFloat(p.paymentAmount) || 0,
+          transaction_type: 'payment',
+          pawnTicketId:     p.ref,
+          paymentTicketId:  ticketId,
+          principal:        p.principal,
+          interest_paid:    interestPaid,
+          fee_paid:         feePaid,
+          total_paid:       parseFloat(p.paymentAmount) || 0,
+          previous_due_date: prevDate,
+          new_due_date:     newDate,
+          extension_days:   extensionDays,
+          numPeriods,
+          ticket_note:      ticketNote || null,
+          show_on_receipt:  showOnReceipt,
+          customer:         cartCustomer,
+          employee: currentUser
+            ? { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(), role: currentUser.role }
+            : null,
+        };
+      });
+
+    sessionStorage.setItem('checkoutItems', JSON.stringify(cartItems));
+    sessionStorage.setItem('selectedCustomer', JSON.stringify(cartCustomer));
+    sessionStorage.setItem('pendingPaymentReturn', JSON.stringify({
+      customerId: customer.id,
+      customer,
+      ticketId,
+      selectedPayments,
+      notes,
+      ticketNote,
+      showOnReceipt,
+    }));
+
+    commitPaymentTicketId();
+    navigate('/checkout', {
+      state: { items: cartItems, allCartItems: cartItems, customer: cartCustomer, from: 'payment-ticket' },
     });
   };
 
@@ -561,6 +650,7 @@ export default function PaymentTransactionScreen({
             variant="contained"
             endIcon={<MuiIcons.ArrowForward />}
             disabled={selectedPayments.length === 0}
+            onClick={handleCheckoutNow}
             sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, fontWeight: 700 }}
           >
             Checkout Now
