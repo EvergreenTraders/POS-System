@@ -57,6 +57,7 @@ function TransactionJournals() {
   const [saleTickets, setSaleTickets] = useState([]);
   const [pawnTickets, setPawnTickets] = useState([]);
   const [tradeTickets, setTradeTickets] = useState([]);
+  const [paymentTickets, setPaymentTickets] = useState([]);
   const [taxRate, setTaxRate] = useState(0.13);
   const API_BASE_URL = config.apiUrl;
 
@@ -76,6 +77,7 @@ function TransactionJournals() {
     buy_receipt: 'Thank you for shopping with us',
     sales_receipt: 'Thank you for shopping with us',
     trade_receipt: 'Thank you for shopping with us',
+    payment_receipt: 'Thank you for your payment',
     pawn_receipt: ''
   });
 
@@ -90,6 +92,7 @@ function TransactionJournals() {
             buy_receipt: response.data.buy_receipt || 'Thank you for shopping with us',
             sales_receipt: response.data.sales_receipt || 'Thank you for shopping with us',
             trade_receipt: response.data.trade_receipt || 'Thank you for shopping with us',
+            payment_receipt: response.data.payment_receipt || 'Thank you for your payment',
             pawn_receipt: response.data.pawn_receipt || ''
           });
         }
@@ -199,6 +202,14 @@ function TransactionJournals() {
         console.error('Error fetching trade tickets:', tradeTicketError);
         setTradeTickets([]);
       }
+
+      try {
+        const pmtResponse = await axios.get(`${API_BASE_URL}/payment-ticket?transaction_id=${transaction.transaction_id}`);
+        setPaymentTickets(pmtResponse.data || []);
+      } catch (pmtError) {
+        console.error('Error fetching payment tickets:', pmtError);
+        setPaymentTickets([]);
+      }
     } catch (error) {
       console.error('Error fetching transaction details:', error);
       // Initialize with empty data if there's an error
@@ -223,6 +234,7 @@ function TransactionJournals() {
     setSaleTickets([]);
     setPawnTickets([]);
     setTradeTickets([]);
+    setPaymentTickets([]);
     // Don't clear transaction items to keep them in memory
   };
 
@@ -378,8 +390,120 @@ function TransactionJournals() {
     printWindow.document.close();
   };
 
+  // Generate receipt for a payment ticket (PMT-xxx) — pawn extensions
+  const handlePaymentTicketClick = async (transactionId) => {
+    const rows = paymentTickets.filter(pt => pt.payment_ticket_id === transactionId || pt.transaction_id === transactionId);
+    if (rows.length === 0) { alert('No payment data found for this ticket'); return; }
+
+    const ticketNote    = rows[0].ticket_note    || null;
+    const showOnReceipt = rows[0].show_on_receipt ?? true;
+
+    let businessName = '', businessAddress = '', businessPhone = '', businessLogo = '', businessLogoMimetype = '';
+    try {
+      const biz = await axios.get(`${API_BASE_URL}/business-info`);
+      if (biz.data) {
+        businessName        = biz.data.business_name  || '';
+        businessAddress     = biz.data.address        || '';
+        businessPhone       = biz.data.phone          || '';
+        businessLogo        = biz.data.logo           || '';
+        businessLogoMimetype = biz.data.logo_mimetype || 'image/png';
+      }
+    } catch (e) { console.error('Error fetching business info:', e); }
+
+    const pmtId  = rows[0].payment_ticket_id;
+    const txDate = selectedTransaction ? new Date(selectedTransaction.created_at) : new Date();
+    const formattedDate = txDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    const formattedTime = txDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const totalPaid = rows.reduce((s, r) => s + (parseFloat(r.total_paid) || 0), 0);
+
+    const receiptHTML = `
+      <!DOCTYPE html><html><head>
+      <title>${pmtId}</title>
+      <style>
+        body { font-family:'Courier New',monospace; max-width:400px; margin:10px auto; padding:15px; font-size:12px; }
+        .header { position:relative; margin-bottom:15px; border-bottom:2px dashed #333; padding-bottom:15px; min-height:75px; }
+        .header-content { padding-right:80px; }
+        .header h1 { margin:0 0 5px 0; font-size:18px; font-weight:bold; }
+        .header p { margin:3px 0; font-size:11px; }
+        .header img { position:absolute; top:0; right:0; max-width:70px; max-height:70px; object-fit:contain; }
+        .ticket-info { margin-bottom:15px; }
+        .info-row { display:flex; justify-content:space-between; padding:4px 0; font-size:11px; }
+        .info-label { font-weight:bold; }
+        .section-title { font-weight:bold; font-size:12px; border-bottom:1px dashed #333; margin:12px 0 6px; padding-bottom:4px; }
+        .pawn-row { border-bottom:1px dotted #ccc; padding:6px 0; font-size:11px; }
+        .pawn-row:last-child { border-bottom:none; }
+        .total-row { font-weight:bold; border-top:2px dashed #333; border-bottom:2px dashed #333; padding:8px 0; margin-top:10px; font-size:12px; }
+        .footer { margin-top:20px; text-align:center; font-size:10px; border-top:1px dashed #333; padding-top:10px; }
+        @media print { body{margin:0;padding:10px;} .no-print{display:none;} }
+      </style>
+      </head><body>
+      <div class="header">
+        ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Logo"/>` : ''}
+        <div class="header-content">
+          <h1>${businessName}</h1>
+          ${businessAddress ? `<p>${businessAddress}</p>` : ''}
+          ${businessPhone   ? `<p>${businessPhone}</p>`   : ''}
+        </div>
+      </div>
+
+      <div class="ticket-info">
+        <div class="info-row"><span class="info-label">Payment Ticket #:</span><span>${pmtId}</span></div>
+        <div class="info-row"><span class="info-label">Date & Time:</span><span>${formattedDate} ${formattedTime}</span></div>
+        <div class="info-row"><span class="info-label">Customer:</span><span>${selectedTransaction?.customer_name || 'N/A'}</span></div>
+        ${selectedTransaction?.customer_phone ? `<div class="info-row"><span class="info-label">Phone:</span><span>${selectedTransaction.customer_phone}</span></div>` : ''}
+        <div class="info-row"><span class="info-label">Employee:</span><span>${selectedTransaction?.employee_name || 'N/A'}</span></div>
+      </div>
+
+      <div class="section-title">Pawn Extensions</div>
+      ${rows.map(r => {
+        const prevDate = r.previous_due_date ? new Date(r.previous_due_date).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+        const newDate  = r.new_due_date      ? new Date(r.new_due_date).toLocaleDateString('en-US',      { month:'short', day:'numeric', year:'numeric' }) : '—';
+        const desc     = r.item_description  || r.pawn_ticket_id;
+        return `
+        <div class="pawn-row">
+          <div class="info-row"><span class="info-label">${r.pawn_ticket_id}</span><span style="font-weight:bold;">$${(parseFloat(r.total_paid)||0).toFixed(2)}</span></div>
+          <div style="font-size:10px;color:#444;padding:2px 0;">${desc}</div>
+          <div class="info-row" style="font-size:10px;color:#666;">
+            <span>Previous Due: ${prevDate}</span>
+            <span>New Due: ${newDate}</span>
+          </div>
+        </div>`;
+      }).join('')}
+
+      <div class="total-row">
+        <div class="info-row"><span>Total Paid:</span><span>$${totalPaid.toFixed(2)}</span></div>
+      </div>
+
+      ${ticketNote && showOnReceipt ? `
+      <div style="margin-top:12px;border-top:1px dashed #333;padding-top:10px;font-size:11px;">
+        <strong>Note:</strong> <span style="white-space:pre-wrap;">${ticketNote}</span>
+      </div>` : ''}
+
+      <div class="footer">
+        <p style="white-space:pre-wrap;">${receiptConfig.payment_receipt || 'Thank you for your payment.'}</p>
+      </div>
+
+      <div class="no-print" style="text-align:center;margin-top:30px;">
+        <button onclick="window.print()" style="padding:10px 30px;font-size:16px;cursor:pointer;">Print</button>
+        <button onclick="window.close()" style="padding:10px 30px;font-size:16px;margin-left:10px;cursor:pointer;">Close</button>
+      </div>
+      </body></html>
+    `;
+
+    const printWindow = window.open('', '_blank');
+    const pdfReadyHTML = injectPDFScript(receiptHTML, `payment_${pmtId}`);
+    printWindow.document.write(pdfReadyHTML);
+    printWindow.document.close();
+  };
+
   // Handle double click on ticket_id to show receipt using PDF template
   const handleBuyTicketClick = async (ticketId) => {
+    // Payment tickets (PMT-xxx) get their own dedicated receipt
+    if (ticketId?.startsWith('PMT-')) {
+      await handlePaymentTicketClick(ticketId);
+      return;
+    }
+
     // Trade tickets (TT-xxx) get their own dedicated receipt
     const isTradeTicket = tradeTickets.some(tt => tt.trade_ticket_id === ticketId);
     if (isTradeTicket) {
@@ -681,6 +805,12 @@ function TransactionJournals() {
 
   const handlePrintTransaction = async () => {
     if (!selectedTransaction) return;
+
+    // PMT transactions have no transactionItems — use the payment receipt instead
+    if (paymentTickets.length > 0 && transactionItems.length === 0) {
+      await handlePaymentTicketClick(selectedTransaction.transaction_id);
+      return;
+    }
 
     // Fetch business info
     let businessName = '';
@@ -1425,7 +1555,9 @@ function TransactionJournals() {
                     </TableRow>
                     <TableRow>
                       <TableCell variant="head" colSpan={2} sx={{ fontWeight: 'bold', pt: 3 }}>
-                        Items ({transactionItems.length})
+                        {paymentTickets.length > 0 && transactionItems.length === 0
+                          ? `Pawn Extensions (${paymentTickets.length})`
+                          : `Items (${transactionItems.length})`}
                       </TableCell>
                     </TableRow>
                     {loadingItems ? (
@@ -1682,6 +1814,67 @@ function TransactionJournals() {
                             </Box>
                           </TableCell>
                         </TableRow>
+                      </>
+                    ) : paymentTickets.length > 0 ? (
+                      <>
+                        {/* Payment ticket (PMT) — pawn extension rows */}
+                        <TableRow sx={{ backgroundColor: '#fff8e1' }}>
+                          <TableCell colSpan={4} sx={{ py: 1, px: 2 }}>
+                            <Box display="flex" alignItems="center" justifyContent="space-between">
+                              <Typography
+                                variant="subtitle2"
+                                sx={{ fontWeight: 'bold', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                                onClick={() => handlePaymentTicketClick(selectedTransaction?.transaction_id)}
+                                title="Click to view receipt"
+                              >
+                                {paymentTickets[0]?.payment_ticket_id}
+                              </Typography>
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                        <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+                          <TableCell><strong>Pawn Ticket</strong></TableCell>
+                          <TableCell><strong>Description</strong></TableCell>
+                          <TableCell><strong>Due Date Change</strong></TableCell>
+                          <TableCell align="right"><strong>Amount Paid</strong></TableCell>
+                        </TableRow>
+                        {paymentTickets.map((pt, idx) => {
+                          const prevDate = pt.previous_due_date
+                            ? new Date(pt.previous_due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                            : '—';
+                          const newDate = pt.new_due_date
+                            ? new Date(pt.new_due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                            : '—';
+                          return (
+                            <TableRow key={idx}>
+                              <TableCell sx={{ fontWeight: 'bold', color: '#e65100', fontSize: '0.85em' }}>
+                                {pt.pawn_ticket_id}
+                              </TableCell>
+                              <TableCell sx={{ fontSize: '0.85em', color: '#555' }}>
+                                {pt.item_description || '—'}
+                              </TableCell>
+                              <TableCell sx={{ fontSize: '0.85em', color: '#555' }}>
+                                {prevDate} → {newDate}
+                              </TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                                ${(parseFloat(pt.total_paid) || 0).toFixed(2)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                        <TableRow sx={{ backgroundColor: '#fff3e0' }}>
+                          <TableCell colSpan={3} align="right" sx={{ fontWeight: 'bold' }}>Total Paid:</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                            ${paymentTickets.reduce((s, pt) => s + (parseFloat(pt.total_paid) || 0), 0).toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                        {paymentTickets[0]?.ticket_note && paymentTickets[0]?.show_on_receipt && (
+                          <TableRow>
+                            <TableCell colSpan={4} sx={{ fontSize: '0.85em', color: '#555', fontStyle: 'italic', py: 1 }}>
+                              <strong>Note:</strong> {paymentTickets[0].ticket_note}
+                            </TableCell>
+                          </TableRow>
+                        )}
                       </>
                     ) : (
                       <TableRow>

@@ -8606,6 +8606,61 @@ app.get('/api/trade-ticket/last-id', async (req, res) => {
   }
 });
 
+// GET /api/payment-ticket — returns payment_ticket rows joined with pawn_history
+// extension data and pawn item descriptions for receipt generation.
+// Supports ?transaction_id=xxx or ?payment_ticket_id=xxx
+app.get('/api/payment-ticket', async (req, res) => {
+  try {
+    const { transaction_id, payment_ticket_id } = req.query;
+    const params = [];
+    let where = '';
+    if (transaction_id) {
+      params.push(transaction_id);
+      where = 'WHERE pt.transaction_id = $1';
+    } else if (payment_ticket_id) {
+      params.push(payment_ticket_id);
+      where = 'WHERE pt.payment_ticket_id = $1';
+    }
+    const result = await pool.query(`
+      SELECT
+        pt.id,
+        pt.payment_ticket_id,
+        pt.pawn_ticket_id,
+        pt.transaction_id,
+        pt.ticket_note,
+        pt.show_on_receipt,
+        pt.created_at,
+        ph.principal_amount,
+        ph.interest_paid,
+        ph.fee_paid,
+        ph.total_paid,
+        ph.previous_due_date,
+        ph.new_due_date,
+        ph.extension_days,
+        pk.frequency_days,
+        STRING_AGG(COALESCE(j.short_desc, hg.short_desc), ', ' ORDER BY pk.id) AS item_description
+      FROM payment_ticket pt
+      LEFT JOIN pawn_history ph
+        ON ph.pawn_ticket_id = pt.pawn_ticket_id
+       AND ph.transaction_id  = pt.transaction_id
+       AND ph.action_type     = 'EXTEND'
+      LEFT JOIN pawn_ticket pk ON pk.pawn_ticket_id = pt.pawn_ticket_id
+      LEFT JOIN jewelry   j  ON j.item_id  = pk.item_id
+      LEFT JOIN hardgoods hg ON hg.item_id = pk.item_id
+      ${where}
+      GROUP BY pt.id, pt.payment_ticket_id, pt.pawn_ticket_id, pt.transaction_id,
+               pt.ticket_note, pt.show_on_receipt, pt.created_at,
+               ph.principal_amount, ph.interest_paid, ph.fee_paid, ph.total_paid,
+               ph.previous_due_date, ph.new_due_date, ph.extension_days, pk.frequency_days
+      ORDER BY pt.id
+    `, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching payment tickets:', err);
+    res.status(500).json({ error: 'Failed to fetch payment tickets' });
+  }
+});
+
 // GET /api/payment-ticket/last-id — returns the highest PMT number for counter sync
 app.get('/api/payment-ticket/last-id', async (req, res) => {
   try {
