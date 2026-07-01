@@ -307,6 +307,19 @@ pool.query(`
   ALTER TABLE trade_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE
 `).catch(err => console.error('trade_ticket note/receipt migration:', err.message));
 
+// Ensure payment_ticket table exists
+pool.query(`
+  CREATE TABLE IF NOT EXISTS payment_ticket (
+    id                 SERIAL PRIMARY KEY,
+    payment_ticket_id  VARCHAR(50) NOT NULL,
+    pawn_ticket_id     VARCHAR(50),
+    transaction_id     VARCHAR(50),
+    ticket_note        TEXT,
+    show_on_receipt    BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`).catch(err => console.error('payment_ticket create migration:', err.message));
+
 // Authentication route
 // Ensure track_hours column exists on employees table
 pool.query(`
@@ -8593,6 +8606,149 @@ app.get('/api/trade-ticket/last-id', async (req, res) => {
   }
 });
 
+// GET /api/payment-ticket — returns payment_ticket rows joined with pawn_history
+// extension data and pawn item descriptions for receipt generation.
+// Supports ?transaction_id=xxx or ?payment_ticket_id=xxx
+app.get('/api/payment-ticket', async (req, res) => {
+  try {
+    const { transaction_id, payment_ticket_id } = req.query;
+    const params = [];
+    let where = '';
+    if (transaction_id) {
+      params.push(transaction_id);
+      where = 'WHERE pt.transaction_id = $1';
+    } else if (payment_ticket_id) {
+      params.push(payment_ticket_id);
+      where = 'WHERE pt.payment_ticket_id = $1';
+    }
+    const result = await pool.query(`
+      SELECT
+        pt.id,
+        pt.payment_ticket_id,
+        pt.pawn_ticket_id,
+        pt.transaction_id,
+        pt.ticket_note,
+        pt.show_on_receipt,
+        pt.created_at,
+        ph.principal_amount,
+        ph.interest_paid,
+        ph.fee_paid,
+        ph.total_paid,
+        ph.previous_due_date,
+        ph.new_due_date,
+        ph.extension_days,
+        pk.frequency_days,
+        STRING_AGG(COALESCE(j.short_desc, hg.short_desc), ', ' ORDER BY pk.id) AS item_description
+      FROM payment_ticket pt
+      LEFT JOIN pawn_history ph
+        ON ph.pawn_ticket_id = pt.pawn_ticket_id
+       AND ph.transaction_id  = pt.transaction_id
+       AND ph.action_type     = 'EXTEND'
+      LEFT JOIN pawn_ticket pk ON pk.pawn_ticket_id = pt.pawn_ticket_id
+      LEFT JOIN jewelry   j  ON j.item_id  = pk.item_id
+      LEFT JOIN hardgoods hg ON hg.item_id = pk.item_id
+      ${where}
+      GROUP BY pt.id, pt.payment_ticket_id, pt.pawn_ticket_id, pt.transaction_id,
+               pt.ticket_note, pt.show_on_receipt, pt.created_at,
+               ph.principal_amount, ph.interest_paid, ph.fee_paid, ph.total_paid,
+               ph.previous_due_date, ph.new_due_date, ph.extension_days, pk.frequency_days
+      ORDER BY pt.id
+    `, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching payment tickets:', err);
+    res.status(500).json({ error: 'Failed to fetch payment tickets' });
+  }
+});
+
+// GET /api/payment-ticket/last-id — returns the highest PMT number for counter sync
+app.get('/api/payment-ticket/last-id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT payment_ticket_id FROM payment_ticket
+      WHERE payment_ticket_id ~ '^PMT-[0-9]+$'
+      ORDER BY CAST(SUBSTRING(payment_ticket_id FROM 5) AS INTEGER) DESC
+      LIMIT 1
+    `);
+    if (result.rows.length === 0) return res.json({ last_number: 0, last_id: null });
+    const lastId = result.rows[0].payment_ticket_id;
+    const num    = parseInt(lastId.replace('PMT-', ''), 10);
+    res.json({ last_number: num, last_id: lastId });
+  } catch (err) {
+    console.error('Error fetching last payment ticket id:', err);
+    res.status(500).json({ error: 'Failed to fetch last payment ticket id' });
+  }
+});
+
+// POST /api/payment-ticket — called by Checkout.js after the transaction and
+// payment records are already created. For each pawn in `payments`:
+//   1. Inserts a payment_ticket row (PMT header + link to pawn)
+//   2. Updates pawn_ticket.due_date to the new due date
+//   3. Inserts a pawn_history EXTEND record for the audit trail
+app.post('/api/payment-ticket', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const {
+      payment_ticket_id,
+      transaction_id,
+      ticket_note,
+      show_on_receipt,
+      employee_id,
+      payments,  // array of { pawn_ticket_id, principal_amount, interest_paid, fee_paid, total_paid, previous_due_date, new_due_date, extension_days }
+    } = req.body;
+
+    if (!payment_ticket_id) return res.status(400).json({ error: 'payment_ticket_id is required' });
+    if (!Array.isArray(payments) || payments.length === 0)
+      return res.status(400).json({ error: 'payments array is required and must not be empty' });
+
+    await client.query('BEGIN');
+
+    const insertedRows = [];
+    for (const p of payments) {
+      const { pawn_ticket_id, principal_amount, interest_paid, fee_paid, total_paid, previous_due_date, new_due_date, extension_days } = p;
+
+      const row = await client.query(
+        `INSERT INTO payment_ticket (payment_ticket_id, pawn_ticket_id, transaction_id, ticket_note, show_on_receipt)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [payment_ticket_id, pawn_ticket_id || null, transaction_id || null, ticket_note || null, show_on_receipt ?? false]
+      );
+      insertedRows.push(row.rows[0]);
+
+      if (pawn_ticket_id && new_due_date) {
+        await client.query(
+          `UPDATE pawn_ticket SET due_date = $1 WHERE pawn_ticket_id = $2`,
+          [new_due_date, pawn_ticket_id]
+        );
+      }
+
+      if (pawn_ticket_id) {
+        await client.query(
+          `INSERT INTO pawn_history
+             (pawn_ticket_id, action_type, transaction_id, principal_amount, interest_paid, fee_paid, total_paid,
+              previous_due_date, new_due_date, extension_days, performed_by)
+           VALUES ($1, 'EXTEND', $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            pawn_ticket_id, transaction_id || null,
+            principal_amount || null, interest_paid || null, fee_paid || null, total_paid || null,
+            previous_due_date || null, new_due_date || null, extension_days || null,
+            employee_id || null,
+          ]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    console.log(`✓ Payment ticket: ${payment_ticket_id}, ${payments.length} pawn(s) extended`);
+    res.status(201).json(insertedRows);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ Payment ticket error:', err.message);
+    res.status(500).json({ error: 'Failed to create payment ticket' });
+  } finally {
+    client.release();
+  }
+});
+
 app.get('/api/trade-ticket', async (req, res) => {
   try {
     const { trade_ticket_id, transaction_id } = req.query;
@@ -10137,6 +10293,94 @@ app.get('/api/customers/:id/pawns', async (req, res) => {
   } catch (err) {
     console.error('Error fetching customer pawns:', err);
     res.status(500).json({ error: 'Failed to fetch customer pawns' });
+  }
+});
+
+// GET /api/customers/:id/pmt/stats
+// Returns active/overdue pawn tickets for the customer with everything the
+// Payment Ticket screen needs: principal, rates, due date, days info, and
+// the per-period extension amount.
+app.get('/api/customers/:id/pmt/stats', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const today = new Date();
+
+    const result = await pool.query(`
+      SELECT
+        pt.pawn_ticket_id,
+        pt.status,
+        pt.due_date,
+        pt.term_days,
+        pt.frequency_days,
+        pt.interest_rate,
+        pt.insurance_rate,
+        pt.storage_fee,
+        STRING_AGG(COALESCE(j.short_desc, hg.short_desc), ', ' ORDER BY pt.id) AS item_description,
+        SUM(COALESCE(j.item_price, hg.cost_price, 0))                          AS pawn_amount,
+        MIN(t.transaction_date)                                                 AS transaction_date
+      FROM pawn_ticket pt
+      JOIN transactions t ON t.transaction_id = pt.transaction_id
+      LEFT JOIN jewelry   j  ON j.item_id  = pt.item_id
+      LEFT JOIN hardgoods hg ON hg.item_id = pt.item_id
+      WHERE t.customer_id = $1
+        AND pt.status IN ('ACTIVE', 'OVERDUE')
+      GROUP BY pt.pawn_ticket_id, pt.status, pt.due_date,
+               pt.term_days, pt.frequency_days, pt.interest_rate,
+               pt.insurance_rate, pt.storage_fee
+      ORDER BY
+        CASE WHEN pt.status = 'OVERDUE' THEN 0 ELSE 1 END,
+        pt.due_date ASC
+    `, [id]);
+
+    const pawns = result.rows.map(row => {
+      const principal      = parseFloat(row.pawn_amount)   || 0;
+      const interestRate   = parseFloat(row.interest_rate)  || 0;
+      const insuranceRate  = parseFloat(row.insurance_rate) || 0;
+      const storageFee     = parseFloat(row.storage_fee)    || 0;
+      const frequencyDays  = parseInt(row.frequency_days)   || 30;
+
+      // Extension amount = principal × (interest + insurance) / 100 + storage fee
+      const extensionAmount = Math.round(
+        (principal * (interestRate + insuranceRate) / 100 + storageFee) * 100
+      ) / 100;
+
+      const dueDate = row.due_date ? new Date(row.due_date) : null;
+      const diffDays = dueDate
+        ? Math.round((dueDate - today) / (1000 * 60 * 60 * 24))
+        : null;
+
+      const isOverdue = row.status === 'OVERDUE' || (diffDays !== null && diffDays < 0);
+
+      return {
+        type:             'pawn_extension',
+        ref:              row.pawn_ticket_id,
+        description:      row.item_description || '—',
+        transaction_date: row.transaction_date,
+        status:           isOverdue ? 'OVERDUE' : 'ACTIVE',
+        due_date:         dueDate
+          ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          : '—',
+        due_date_raw:     row.due_date,
+        days_info:        diffDays !== null
+          ? (diffDays < 0
+              ? `${Math.abs(diffDays)} day${Math.abs(diffDays) !== 1 ? 's' : ''} overdue`
+              : `${diffDays} day${diffDays !== 1 ? 's' : ''} left`)
+          : null,
+        days_diff:        diffDays,
+        principal,
+        extension_amount: extensionAmount,
+        frequency_days:   frequencyDays,
+        term_days:        parseInt(row.term_days) || 90,
+        interest_rate:    interestRate,
+        insurance_rate:   insuranceRate,
+        storage_fee:      storageFee,
+      };
+    });
+
+    res.json({ pawns });
+  } catch (err) {
+    console.error('Error fetching customer pmt stats:', err);
+    res.status(500).json({ error: 'Failed to fetch payment stats' });
   }
 });
 
