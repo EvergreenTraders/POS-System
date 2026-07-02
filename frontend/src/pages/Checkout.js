@@ -137,6 +137,7 @@ function Checkout() {
     email: ''
   });
   const [checkoutSource, setCheckoutSource] = useState(location.state?.from || null);
+  const [txTypeColors, setTxTypeColors] = useState({});
   // Trade tickets tax only the amount the sale exceeds the trade-in allowance,
   // a ticket-level computation TradeTransactionScreen already did — captured
   // here once so it survives re-renders rather than re-reading location.state.
@@ -247,7 +248,7 @@ function Checkout() {
 
         setIsInitialized(true);
       }
-      else if (fromSource === 'cart' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket' || fromSource === 'trade-ticket') {
+      else if (fromSource === 'cart' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket' || fromSource === 'trade-ticket' || fromSource === 'payment-ticket') {
         // Store the items to checkout and all cart items separately
         const items = itemsToCheckout;
 
@@ -286,6 +287,17 @@ function Checkout() {
       }
     }
   }, [location.state, addToCart, setCustomer, clearCart, isInitialized]);
+
+  // Load transaction type colors from DB so the checkout header matches each ticket type
+  useEffect(() => {
+    axios.get(`${API_BASE_URL}/transaction-types`)
+      .then(res => {
+        const map = {};
+        res.data.forEach(t => { map[t.type] = t.color; });
+        setTxTypeColors(map);
+      })
+      .catch(() => {});
+  }, []);
 
   // Load active payment methods
   useEffect(() => {
@@ -1708,41 +1720,41 @@ function Checkout() {
             }
           }
 
-          // Step 3.7: Record pawn history for payment (extension) transactions
-          const extendedTickets = new Set();
-
+          // Step 3.7: Create payment_ticket records, update pawn due dates, record pawn history
+          const paymentTicketGroups = {};
           for (const item of checkoutItems) {
-            const transactionType = item.transaction_type?.toLowerCase() || '';
+            if ((item.transaction_type?.toLowerCase() || '') === 'payment' && item.pawnTicketId) {
+              const pmtId = item.paymentTicketId;
+              if (!paymentTicketGroups[pmtId]) paymentTicketGroups[pmtId] = [];
+              paymentTicketGroups[pmtId].push(item);
+            }
+          }
 
-            if (transactionType === 'payment' && item.pawnTicketId) {
-              const pawnTicketId = item.pawnTicketId;
-
-              if (!extendedTickets.has(pawnTicketId)) {
-                extendedTickets.add(pawnTicketId);
-
-                try {
-                  // Record pawn history for extension
-                  await axios.post(
-                    `${config.apiUrl}/pawn-history`,
-                    {
-                      pawn_ticket_id: pawnTicketId,
-                      action_type: 'EXTEND',
-                      transaction_id: realTransactionId,
-                      principal_amount: parseFloat(item.principal) || null,
-                      interest_paid: parseFloat(item.interest) || null,
-                      fee_paid: parseFloat(item.fee) || null,
-                      total_paid: parseFloat(item.amount) || null,
-                      new_due_date: item.date || null,
-                      extension_days: parseInt(item.days) || null,
-                      performed_by: employeeId,
-                      notes: `Extended by ${item.term || 1} term(s)`
-                    },
-                    { headers: { Authorization: `Bearer ${token}` } }
-                  );
-                } catch (historyError) {
-                  console.error(`Error recording pawn history for ${pawnTicketId}:`, historyError);
-                }
-              }
+          for (const [pmtId, items] of Object.entries(paymentTicketGroups)) {
+            try {
+              await axios.post(
+                `${config.apiUrl}/payment-ticket`,
+                {
+                  payment_ticket_id: pmtId,
+                  transaction_id:    realTransactionId,
+                  ticket_note:       items[0]?.ticket_note || null,
+                  show_on_receipt:   items[0]?.show_on_receipt || false,
+                  employee_id:       employeeId,
+                  payments: items.map(item => ({
+                    pawn_ticket_id:    item.pawnTicketId,
+                    principal_amount:  parseFloat(item.principal)     || null,
+                    interest_paid:     parseFloat(item.interest_paid) || null,
+                    fee_paid:          parseFloat(item.fee_paid)      || null,
+                    total_paid:        parseFloat(item.total_paid)    || 0,
+                    previous_due_date: item.previous_due_date         || null,
+                    new_due_date:      item.new_due_date              || null,
+                    extension_days:    parseInt(item.extension_days)  || null,
+                  })),
+                },
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+            } catch (pmtError) {
+              console.error(`Error creating payment ticket ${pmtId}:`, pmtError);
             }
           }
 
@@ -2024,6 +2036,8 @@ const handleBackToEstimation = () => {
       navigate('/modern-transactions', { state: { returnToBuy: true } });
     } else if (checkoutSource === 'trade-ticket') {
       navigate('/modern-transactions', { state: { returnToTrade: true } });
+    } else if (checkoutSource === 'payment-ticket') {
+      navigate('/modern-transactions', { state: { returnToPayment: true } });
     } else if (checkoutSource === 'cart') {
       // Check if this is a pawn-only checkout — navigate back to pawn screen
       const isPawnCheckout = checkoutItems.length > 0 &&
@@ -2150,40 +2164,54 @@ const handleBackToEstimation = () => {
     });
   };
 
-  const isPawnCheckout = checkoutItems.length > 0 &&
+  const isPawnCheckout    = checkoutItems.length > 0 &&
     checkoutItems.every(item => (item.transaction_type || '').toLowerCase() === 'pawn');
+  const isSaleCheckout    = checkoutSource === 'sale-ticket';
+  const isBuyCheckout     = checkoutSource === 'buy-ticket';
+  const isTradeCheckout   = checkoutSource === 'trade-ticket';
+  const isPaymentCheckout = checkoutSource === 'payment-ticket';
 
-  const isSaleCheckout  = checkoutSource === 'sale-ticket';
-  const isBuyCheckout   = checkoutSource === 'buy-ticket';
-  const isTradeCheckout = checkoutSource === 'trade-ticket';
-  // Trade's color matches the registered transaction_type.color ('#00695c'),
-  // not TradeTransactionScreen's internal accent teal — keeps Checkout visually
-  // consistent with how trade is colored everywhere else in the app (e.g. the
-  // Transactions hub's type buttons).
-  const themeColor   = isSaleCheckout ? '#2e7d32' : isBuyCheckout ? '#0284c7' : isTradeCheckout ? '#00695c' : PURPLE;
-  const themeDark    = isSaleCheckout ? '#1b5e20' : isBuyCheckout ? '#0369a1' : isTradeCheckout ? '#004d40' : PURPLE_DARK;
-  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : isBuyCheckout ? '#e0f2fe' : isTradeCheckout ? '#e0f2f1' : '#f3e5f5';
+  // Map checkout source → transaction_type key so we can look up the DB color
+  const sourceToTxType = {
+    'sale-ticket':    'sale',
+    'buy-ticket':     'buy',
+    'trade-ticket':   'trade',
+    'payment-ticket': 'payment',
+  };
+  const txType = isPawnCheckout ? 'pawn' : (sourceToTxType[checkoutSource] || null);
+
+  // Primary color: from DB when available, hardcoded fallbacks for safety
+  const fallbackColors = {
+    sale: '#2e7d32', buy: '#0284c7', trade: '#00695c',
+    payment: '#f9a825', pawn: PURPLE,
+  };
+  const themeColor = (txType && txTypeColors[txType]) || fallbackColors[txType] || PURPLE;
+
+  // Dark + hover-bg variants (DB doesn't store these; keep a parallel map)
+  const darkColors   = { sale: '#1b5e20', buy: '#0369a1', trade: '#004d40', payment: '#f57f17', pawn: PURPLE_DARK };
+  const hoverBgColors = { sale: '#e8f5e9', buy: '#e0f2fe', trade: '#e0f2f1', payment: '#fff8e1', pawn: '#f3e5f5' };
+  const themeDark    = darkColors[txType]   || PURPLE_DARK;
+  const themeHoverBg = hoverBgColors[txType] || '#f3e5f5';
 
   const breadcrumbSource = isPawnCheckout
     ? 'Pawn Transaction'
-    : checkoutSource === 'sale-ticket'
-    ? 'Sale Transaction'
-    : checkoutSource === 'buy-ticket'
-    ? 'Buy Transaction'
-    : checkoutSource === 'trade-ticket'
-    ? 'Trade Ticket'
-    : checkoutSource === 'coinsbullions'
-    ? 'Coins & Bullions'
-    : checkoutSource === 'cart'
-    ? 'Cart'
+    : isSaleCheckout    ? 'Sale Transaction'
+    : isBuyCheckout     ? 'Buy Transaction'
+    : isTradeCheckout   ? 'Trade Ticket'
+    : isPaymentCheckout ? 'Payment Ticket'
+    : checkoutSource === 'coinsbullions' ? 'Coins & Bullions'
+    : checkoutSource === 'cart' ? 'Cart'
     : 'Estimator';
+
+  // Payment ticket ID shown in the breadcrumb (derived from cart items)
+  const paymentTicketId = isPaymentCheckout ? (checkoutItems[0]?.paymentTicketId || '') : '';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
 
       {/* Breadcrumb */}
       <Box sx={{ bgcolor: themeColor, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        {isBuyCheckout || isTradeCheckout ? (
+        {(isBuyCheckout || isTradeCheckout || isPaymentCheckout) ? (
           <>
             <Typography variant="body2" fontWeight={400}
               sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
@@ -2194,7 +2222,9 @@ const handleBackToEstimation = () => {
             <Typography variant="body2" fontWeight={400}
               sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
               onClick={handleBackToEstimation}>
-              {isTradeCheckout ? 'Trade Ticket' : 'Buy Ticket'}
+              {isTradeCheckout   ? 'Trade Ticket'
+               : isPaymentCheckout ? `Payment Ticket${paymentTicketId ? ` (${paymentTicketId})` : ''}`
+               : 'Buy Ticket'}
             </Typography>
           </>
         ) : (

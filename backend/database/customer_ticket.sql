@@ -214,6 +214,19 @@ BEGIN
   END IF;
 END $$;
 
+-- Create payment_ticket table. One PMT can cover multiple pawn extensions:
+-- each row shares the same payment_ticket_id but links to a different pawn_ticket_id.
+-- The customer and employee are derived via transaction_id → transactions table.
+CREATE TABLE IF NOT EXISTS payment_ticket (
+  id                 SERIAL PRIMARY KEY,
+  payment_ticket_id  VARCHAR(50) NOT NULL,
+  pawn_ticket_id     VARCHAR(50),
+  transaction_id     VARCHAR(50),
+  ticket_note        TEXT,
+  show_on_receipt    BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_pawn_ticket_pawn_ticket_id ON pawn_ticket(pawn_ticket_id);
 CREATE INDEX IF NOT EXISTS idx_pawn_ticket_transaction_id ON pawn_ticket(transaction_id);
@@ -231,3 +244,7 @@ CREATE INDEX IF NOT EXISTS idx_trade_ticket_trade_ticket_id ON trade_ticket(trad
 CREATE INDEX IF NOT EXISTS idx_trade_ticket_buy_ticket_id ON trade_ticket(buy_ticket_id);
 CREATE INDEX IF NOT EXISTS idx_trade_ticket_sale_ticket_id ON trade_ticket(sale_ticket_id);
 CREATE INDEX IF NOT EXISTS idx_trade_ticket_transaction_id ON trade_ticket(transaction_id);
+
+CREATE INDEX IF NOT EXISTS idx_payment_ticket_payment_ticket_id ON payment_ticket(payment_ticket_id);
+CREATE INDEX IF NOT EXISTS idx_payment_ticket_pawn_ticket_id ON payment_ticket(pawn_ticket_id);
+CREATE INDEX IF NOT EXISTS idx_payment_ticket_transaction_id ON payment_ticket(transaction_id);
