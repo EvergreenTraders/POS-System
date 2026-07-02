@@ -1868,13 +1868,6 @@ function TransactionJournals() {
                             ${paymentTickets.reduce((s, pt) => s + (parseFloat(pt.total_paid) || 0), 0).toFixed(2)}
                           </TableCell>
                         </TableRow>
-                        {paymentTickets[0]?.ticket_note && paymentTickets[0]?.show_on_receipt && (
-                          <TableRow>
-                            <TableCell colSpan={4} sx={{ fontSize: '0.85em', color: '#555', fontStyle: 'italic', py: 1 }}>
-                              <strong>Note:</strong> {paymentTickets[0].ticket_note}
-                            </TableCell>
-                          </TableRow>
-                        )}
                       </>
                     ) : (
                       <TableRow>
