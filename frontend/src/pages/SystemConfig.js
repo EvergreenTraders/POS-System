@@ -238,6 +238,7 @@ function SystemConfig() {
   const [gramsInput, setGramsInput] = useState('');
   const [diamondEstimates, setDiamondEstimates] = useState([]);
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
+  const [parkedWorkspaceRetention, setParkedWorkspaceRetention] = useState({ hours: 24, id: null });
   const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
   const [drawers, setDrawers] = useState([]);
   const [numberOfSafeDrawers, setNumberOfSafeDrawers] = useState({ count: 0, id: null });
@@ -696,6 +697,21 @@ function SystemConfig() {
       }
     };
 
+    const fetchParkedWorkspaceRetention = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/parked-workspace-config`);
+        if (response.data) {
+          setParkedWorkspaceRetention({
+            hours: response.data.hours,
+            id: response.data.id || null
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching parked workspace retention config:', error);
+        setParkedWorkspaceRetention({ hours: 24, id: null });
+      }
+    };
+
     const fetchTaxConfig = async () => {
       try {
         const response = await axios.get(`${API_BASE_URL}/tax-config`);
@@ -784,6 +800,7 @@ function SystemConfig() {
     fetchUserPreference();
     fetchCaratConversion();
     fetchInventoryHoldPeriod();
+    fetchParkedWorkspaceRetention();
     fetchDrawerConfig();
     fetchDrawers();
     fetchCasesConfig();
@@ -1015,6 +1032,7 @@ function SystemConfig() {
       pettyCashLimit: overrideField === 'petty_cash_limit' ? overrideValue : (employee.petty_cash_limit != null ? employee.petty_cash_limit : null),
       discrepancyThreshold: overrideField === 'discrepancy_threshold' ? overrideValue : (employee.discrepancy_threshold != null ? employee.discrepancy_threshold : null),
       employmentType: overrideField === 'employment_type' ? overrideValue : (employee.employment_type || 'hourly'),
+      canResumeParkedWorkspaces: get('can_resume_parked_workspaces', true),
     };
   };
 
@@ -1643,6 +1661,42 @@ const handleTabChange = (event, newValue) => {
       setSnackbar({
         open: true,
         message: 'Failed to update inventory hold period configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleParkedWorkspaceRetentionChange = async (event) => {
+    const newHours = parseInt(event.target.value);
+    if (newHours <= 0) {
+      setSnackbar({
+        open: true,
+        message: 'Retention period must be at least 1 hour',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.put(`${API_BASE_URL}/parked-workspace-config`, {
+        hours: newHours
+      });
+
+      setParkedWorkspaceRetention({
+        hours: response.data.hours,
+        id: response.data.id
+      });
+
+      setSnackbar({
+        open: true,
+        message: `Parked workspaces will be removed after ${newHours} hour${newHours === 1 ? '' : 's'}.`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating parked workspace retention:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update parked workspace retention configuration',
         severity: 'error'
       });
     }
@@ -3946,6 +4000,28 @@ const handleTabChange = (event, newValue) => {
             </Grid>
           </ConfigSection>
 
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Parked Workspace Retention
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={4}>
+                <TextField
+                  label="Retention Duration"
+                  type="number"
+                  value={parkedWorkspaceRetention.hours}
+                  onChange={(e) => setParkedWorkspaceRetention(prev => ({ ...prev, hours: e.target.value }))}
+                  onBlur={(e) => handleParkedWorkspaceRetentionChange(e)}
+                  InputProps={{
+                    endAdornment: <InputAdornment position="end">hours</InputAdornment>,
+                  }}
+                  helperText="How long anonymous (no customer) parked workspaces remain available before being automatically removed"
+                  fullWidth
+                />
+              </Grid>
+            </Grid>
+          </ConfigSection>
+
           {/* Storage Cases Configuration */}
           <ConfigSection>
             <Box sx={{ mt: 1 }}>
@@ -5164,6 +5240,7 @@ const handleTabChange = (event, newValue) => {
                       <TableCell align="center">Transfer Limit</TableCell>
                       <TableCell align="center">Petty Cash</TableCell>
                       <TableCell align="center">Petty Cash Limit</TableCell>
+                      <TableCell align="center">Resume Parked Workspaces</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -5315,6 +5392,14 @@ const handleTabChange = (event, newValue) => {
                             sx={{ width: 110 }}
                             disabled={emp.can_petty_cash === false}
                             InputProps={{ startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography> }}
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.can_resume_parked_workspaces !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_resume_parked_workspaces', emp.can_resume_parked_workspaces !== false)}
+                            color="primary"
+                            size="small"
                           />
                         </TableCell>
                       </TableRow>

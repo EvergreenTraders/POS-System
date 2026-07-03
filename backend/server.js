@@ -26,7 +26,7 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 // Serve uploaded files statically
 app.use('/uploads', express.static('uploads'));
 
@@ -251,6 +251,7 @@ const storeClosedMiddleware = async (req, res, next) => {
     '/api/tax-config',
     '/api/quote-expiration/config',
     '/api/inventory-hold-period/config',
+    '/api/parked-workspace-config',
     '/api/customer-preferences/',
     '/api/diamond_estimates',
     '/api/user_preferences',
@@ -307,19 +308,6 @@ pool.query(`
   ALTER TABLE trade_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE
 `).catch(err => console.error('trade_ticket note/receipt migration:', err.message));
 
-// Ensure payment_ticket table exists
-pool.query(`
-  CREATE TABLE IF NOT EXISTS payment_ticket (
-    id                 SERIAL PRIMARY KEY,
-    payment_ticket_id  VARCHAR(50) NOT NULL,
-    pawn_ticket_id     VARCHAR(50),
-    transaction_id     VARCHAR(50),
-    ticket_note        TEXT,
-    show_on_receipt    BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )
-`).catch(err => console.error('payment_ticket create migration:', err.message));
-
 // Authentication route
 // Ensure track_hours column exists on employees table
 pool.query(`
@@ -339,6 +327,9 @@ pool.query(`
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_view_safe BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('can_view_safe migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_resume_parked_workspaces BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_resume_parked_workspaces migration:', err.message));
 
 // Transfer and cash handling permissions
 pool.query(`
@@ -752,7 +743,8 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
     const { id } = req.params;
     const { trackHours, canOpenStore, canOpenDrawer, canViewDrawer, canViewSafe,
             transferAllowedDrawer, transferAllowedSafe, transferAllowedBank, transferAllowedStore,
-            transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold, employmentType } = req.body;
+            transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold, employmentType,
+            canResumeParkedWorkspaces } = req.body;
 
     const empType = employmentType === 'salary' ? 'salary' : 'hourly';
     // Salary employees are always exempt from clocking in
@@ -766,12 +758,14 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
           transfer_allowed_bank = $8, transfer_allowed_store = $9,
           transfer_limit = $10, can_petty_cash = $11, petty_cash_limit = $12,
           discrepancy_threshold = $13, employment_type = $14,
+          can_resume_parked_workspaces = $15,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $15
+      WHERE employee_id = $16
       RETURNING employee_id, username, first_name, last_name, role,
         track_hours, can_open_store, can_open_drawer, can_view_drawer, can_view_safe,
         transfer_allowed_drawer, transfer_allowed_safe, transfer_allowed_bank, transfer_allowed_store,
-        transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold, employment_type
+        transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold, employment_type,
+        can_resume_parked_workspaces
     `;
     const result = await pool.query(query, [
       effectiveTrackHours,
@@ -788,6 +782,7 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
       pettyCashLimit != null && pettyCashLimit !== '' ? parseFloat(pettyCashLimit) : null,
       discrepancyThreshold != null && discrepancyThreshold !== '' ? parseFloat(discrepancyThreshold) : null,
       empType,
+      canResumeParkedWorkspaces !== false,
       id
     ]);
 
@@ -8749,6 +8744,124 @@ app.post('/api/payment-ticket', async (req, res) => {
   }
 });
 
+// ── Parked Workspaces ─────────────────────────────────────────────────────────
+
+// Anonymous (no customer) parked workspace retention configuration
+app.get('/api/parked-workspace-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM parked_workspace_config ORDER BY created_at DESC LIMIT 1');
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No parked workspace configuration found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching parked workspace config:', err);
+    res.status(500).json({ error: 'Failed to fetch parked workspace configuration' });
+  }
+});
+
+app.put('/api/parked-workspace-config', async (req, res) => {
+  try {
+    const { hours } = req.body;
+
+    if (!(hours > 0)) {
+      return res.status(400).json({ error: 'Retention hours must be greater than 0' });
+    }
+
+    const checkResult = await pool.query('SELECT * FROM parked_workspace_config');
+
+    let result;
+    if (checkResult.rows.length === 0) {
+      result = await pool.query(
+        'INSERT INTO parked_workspace_config (hours) VALUES ($1) RETURNING *',
+        [hours]
+      );
+    } else {
+      result = await pool.query(
+        'UPDATE parked_workspace_config SET hours = $1, updated_at = CURRENT_TIMESTAMP RETURNING *',
+        [hours]
+      );
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating parked workspace config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/api/parked-workspaces', async (req, res) => {
+  try {
+    // Anonymous (no customer) parked workspaces expire after the configured retention period
+    const configResult = await pool.query('SELECT hours FROM parked_workspace_config ORDER BY created_at DESC LIMIT 1');
+    const retentionHours = configResult.rows[0]?.hours || 24;
+    await pool.query(
+      `DELETE FROM parked_workspaces WHERE customer_id IS NULL AND parked_at < NOW() - ($1 || ' hours')::interval`,
+      [retentionHours]
+    );
+
+    const result = await pool.query(`
+      SELECT
+        pw.id,
+        pw.customer_id,
+        pw.workspace_data,
+        pw.parked_by_employee_id,
+        pw.parked_at,
+        c.first_name || ' ' || c.last_name AS customer_name,
+        e.first_name || ' ' || e.last_name AS parked_by_employee_name
+      FROM parked_workspaces pw
+      LEFT JOIN customers  c ON pw.customer_id           = c.id
+      LEFT JOIN employees  e ON pw.parked_by_employee_id = e.employee_id
+      WHERE pw.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+         OR pw.store_id IS NULL
+      ORDER BY pw.parked_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching parked workspaces:', err);
+    res.status(500).json({ error: 'Failed to fetch parked workspaces' });
+  }
+});
+
+app.post('/api/parked-workspaces', async (req, res) => {
+  try {
+    const { customer_id, workspace_data, parked_by_employee_id } = req.body;
+    const storeRes = await pool.query(`SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1`);
+    const store_id = storeRes.rows[0]?.store_id || null;
+    const result = await pool.query(`
+      INSERT INTO parked_workspaces (customer_id, workspace_data, parked_by_employee_id, store_id)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [customer_id, JSON.stringify(workspace_data), parked_by_employee_id || null, store_id]);
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error parking workspace:', err);
+    res.status(500).json({ error: 'Failed to park workspace' });
+  }
+});
+
+app.delete('/api/parked-workspaces/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM parked_workspaces WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting parked workspace:', err);
+    res.status(500).json({ error: 'Failed to delete parked workspace' });
+  }
+});
+
+app.delete('/api/parked-workspaces', async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM parked_workspaces WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)'
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error clearing parked workspaces:', err);
+    res.status(500).json({ error: 'Failed to clear parked workspaces' });
+  }
+});
+
 app.get('/api/trade-ticket', async (req, res) => {
   try {
     const { trade_ticket_id, transaction_id } = req.query;
@@ -11633,6 +11746,8 @@ app.get('/api/transactions', async (req, res) => {
         )) as customer_address,
         e.first_name || ' ' || e.last_name as employee_name,
         e.employee_id,
+        t.parked_by_employee_id,
+        pe.first_name || ' ' || pe.last_name as parked_by_employee_name,
         t.total_amount,
         t.transaction_date,
         t.created_at,
@@ -11642,13 +11757,15 @@ app.get('/api/transactions', async (req, res) => {
       FROM transactions t
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN employees e ON t.employee_id = e.employee_id
+      LEFT JOIN employees pe ON t.parked_by_employee_id = pe.employee_id
       LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
       WHERE t.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       GROUP BY
         t.transaction_id, t.customer_id, c.first_name, c.last_name, c.phone,
         c.address_line1, c.address_line2, c.city, c.state, c.postal_code,
-        e.first_name, e.last_name, e.employee_id, t.total_amount,
-        t.transaction_date, t.created_at, t.updated_at, tic.item_count
+        e.first_name, e.last_name, e.employee_id,
+        t.parked_by_employee_id, pe.first_name, pe.last_name,
+        t.total_amount, t.transaction_date, t.created_at, t.updated_at, tic.item_count
       ORDER BY t.created_at DESC`;
     
     const result = await pool.query(query);
@@ -11705,6 +11822,7 @@ app.post('/api/transactions', async (req, res) => {
         const {
             customer_id,
             employee_id,
+            parked_by_employee_id,
             total_amount,
             cartItems,
             transaction_date = new Date().toISOString().split('T')[0]
@@ -11738,9 +11856,9 @@ app.post('/api/transactions', async (req, res) => {
         const transactionQuery = `
             INSERT INTO transactions (
                 transaction_id, customer_id, employee_id, session_id,
-                total_amount, transaction_date, store_id
+                total_amount, transaction_date, store_id, parked_by_employee_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1))
+            VALUES ($1, $2, $3, $4, $5, $6, (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1), $7)
             RETURNING *
         `;
 
@@ -11750,7 +11868,8 @@ app.post('/api/transactions', async (req, res) => {
             employee_id,
             sessionId,
             total_amount,
-            transaction_date
+            transaction_date,
+            parked_by_employee_id || null
         ]);
 
         // Items are now stored in buy_ticket and sale_ticket tables instead of transaction_items

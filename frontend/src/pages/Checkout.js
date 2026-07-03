@@ -248,7 +248,7 @@ function Checkout() {
 
         setIsInitialized(true);
       }
-      else if (fromSource === 'cart' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket' || fromSource === 'trade-ticket' || fromSource === 'payment-ticket') {
+      else if (fromSource === 'cart' || fromSource === 'workspace' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket' || fromSource === 'trade-ticket' || fromSource === 'payment-ticket') {
         // Store the items to checkout and all cart items separately
         const items = itemsToCheckout;
 
@@ -692,6 +692,10 @@ function Checkout() {
       return;
     }
 
+    // effectiveCustomer tracks the real customer to use in this transaction,
+    // since React state (selectedCustomer) doesn't update synchronously.
+    let effectiveCustomer = selectedCustomer;
+
     // Handle fast sale customer creation
     if (selectedCustomer?.isFastSale && !selectedCustomer?.id) {
       // Validate fast sale customer data
@@ -736,6 +740,7 @@ function Checkout() {
           name: `${createdCustomer.first_name} ${createdCustomer.last_name}`
         };
         setCustomer(updatedCustomer);
+        effectiveCustomer = updatedCustomer;
 
         setSnackbar({
           open: true,
@@ -750,6 +755,36 @@ function Checkout() {
           message: `Error creating customer: ${error.message}`,
           severity: 'error'
         });
+        return;
+      }
+    } else if ((checkoutSource === 'workspace' || checkoutSource === 'sale-ticket') && !selectedCustomer?.id) {
+      // Quick sale (from workspace or sale ticket): create a walk-in customer so the transaction has a valid customer_id
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Authentication token not found');
+        const formData = new FormData();
+        formData.append('first_name', 'Walk-in');
+        formData.append('last_name', 'Customer');
+        formData.append('status', 'active');
+        const res = await fetch(`${config.apiUrl}/customers`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        if (!res.ok) throw new Error('Failed to create walk-in customer');
+        const created = await res.json();
+        effectiveCustomer = {
+          id: created.id,
+          first_name: 'Walk-in',
+          last_name: 'Customer',
+          name: 'Walk-in Customer',
+          phone: '',
+          email: '',
+          tax_exempt: false,
+        };
+        setCustomer(effectiveCustomer);
+      } catch (err) {
+        setSnackbar({ open: true, message: 'Failed to create walk-in customer. Please try again.', severity: 'error' });
         return;
       }
     } else if (!selectedCustomer?.id) {
@@ -1145,9 +1180,17 @@ function Checkout() {
           // Step 2: Create transaction with PENDING status
           // For jewelry items: use createdJewelryItems
           // For non-jewelry items: use cartItems directly (no item_id needed)
+          // Read parked-by employee if this workspace was resumed from a park
+          let parkedByEmployeeId = null;
+          try {
+            const parkedBy = JSON.parse(sessionStorage.getItem('parkedByEmployee') || 'null');
+            if (parkedBy?.id) parkedByEmployeeId = parkedBy.id;
+          } catch {}
+
           const transactionPayload = {
-            customer_id: selectedCustomer.id,
+            customer_id: effectiveCustomer.id,
             employee_id: employeeId,
+            parked_by_employee_id: parkedByEmployeeId,
             total_amount: parseFloat(calculateTotal().toFixed(2)), // Round to 2 decimal places
             transaction_date: getCurrentDate() // Use working date from context
           };
@@ -1234,6 +1277,7 @@ function Checkout() {
           );
 
           realTransactionId = transactionResponse.data.transaction.transaction_id;
+          sessionStorage.removeItem('parkedByEmployee'); // consumed — clear it
 
           // Step 2.5: Post buy_ticket and sale_ticket records for each unique ticket_id
           // Separate buy and sale tickets
@@ -1943,6 +1987,14 @@ function Checkout() {
             }
           }
 
+          // After workspace checkout, wipe the entire workspace for this customer
+          if (checkoutSource === 'workspace') {
+            const customerId = selectedCustomer?.id;
+            const wsKey = customerId ? `workspace_${customerId}` : 'workspace_global';
+            localStorage.removeItem(wsKey);
+            sessionStorage.removeItem('checkoutFrom');
+          }
+
           // Display success message and navigate
           setLoading(false);
           setSnackbar({
@@ -2022,14 +2074,7 @@ const handleBackToEstimation = () => {
       setCustomer(null);
       navigate('/quote-manager');
     } else if (checkoutSource === 'coinsbullions') {
-      // Save the cart items to session storage before navigating back to CoinsBullions
-      sessionStorage.setItem('coinsbullionsState', JSON.stringify({
-        items: cartItems
-      }));
-      clearCart();
-      setCustomer(null);
-      // Go back to coins bullions estimator
-      navigate('/bullion-estimator');
+      navigate('/modern-transactions');
     } else if (checkoutSource === 'sale-ticket') {
       navigate('/modern-transactions', { state: { returnToSale: true } });
     } else if (checkoutSource === 'buy-ticket') {
@@ -2038,6 +2083,8 @@ const handleBackToEstimation = () => {
       navigate('/modern-transactions', { state: { returnToTrade: true } });
     } else if (checkoutSource === 'payment-ticket') {
       navigate('/modern-transactions', { state: { returnToPayment: true } });
+    } else if (checkoutSource === 'workspace') {
+      navigate('/modern-transactions');
     } else if (checkoutSource === 'cart') {
       // Check if this is a pawn-only checkout — navigate back to pawn screen
       const isPawnCheckout = checkoutItems.length > 0 &&
@@ -2098,31 +2145,8 @@ const handleBackToEstimation = () => {
         }
       });
     } else {
-      // Ensure items are properly formatted before saving to session storage
-      const formattedCartItems = cartItems.map(item => {
-        if (Array.isArray(item)) {
-          return {
-            id: item[0].id || null,
-            description: item[0].description || '',
-            category: item[0].category || '',
-            value: item[0].value || '',
-            transaction_type: item[0].transaction_type || 'pawn',
-            customer: item[0].customer  || null,
-            employee: item[0].employee || null
-          };
-        }
-        return item;
-      });
-      
-      // Save the formatted cart items to session storage before navigating back
-      sessionStorage.setItem('jewelryState', JSON.stringify({
-        items: formattedCartItems
-      }));
-      clearCart();
-      setCustomer(null);
-      // Go back to gem estimator
-      navigate('/jewel-estimator');
-    }  
+      navigate('/modern-transactions');
+    }
   };
 
   // This useEffect is now redundant - all initialization logic is handled in the first useEffect (lines 108-210)
@@ -2199,9 +2223,8 @@ const handleBackToEstimation = () => {
     : isBuyCheckout     ? 'Buy Transaction'
     : isTradeCheckout   ? 'Trade Ticket'
     : isPaymentCheckout ? 'Payment Ticket'
-    : checkoutSource === 'coinsbullions' ? 'Coins & Bullions'
     : checkoutSource === 'cart' ? 'Cart'
-    : 'Estimator';
+    : 'Transactions';
 
   // Payment ticket ID shown in the breadcrumb (derived from cart items)
   const paymentTicketId = isPaymentCheckout ? (checkoutItems[0]?.paymentTicketId || '') : '';
@@ -3154,10 +3177,14 @@ const handleBackToEstimation = () => {
             variant="outlined"
             onClick={() => {
               setCashDrawerDialogOpen(false);
-              navigate('/cart');
+              if (checkoutSource === 'workspace') {
+                navigate('/modern-transactions');
+              } else {
+                navigate('/cart');
+              }
             }}
           >
-            Return to Cart
+            {checkoutSource === 'workspace' ? 'Return to Workspace' : 'Return to Cart'}
           </Button>
           <Button
             variant="contained"
@@ -3167,7 +3194,8 @@ const handleBackToEstimation = () => {
               navigate('/cash-drawer', {
                 state: {
                   message: 'Please open a cash drawer to continue with transactions',
-                  returnTo: '/checkout'
+                  returnTo: '/checkout',
+                  originalFrom: checkoutSource,
                 }
               });
             }}

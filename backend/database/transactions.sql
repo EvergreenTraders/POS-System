@@ -308,3 +308,6 @@ BEGIN
         CREATE INDEX IF NOT EXISTS idx_transactions_session_id ON transactions(session_id);
     END IF;
 END $$;
+
+-- Track which employee parked the workspace before another employee completed checkout
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS parked_by_employee_id INTEGER REFERENCES employees(employee_id);

@@ -415,6 +415,18 @@ function cleanupExpiredWorkspaces() {
   }
 }
 
+// Strip base64 image fields before sending workspace to server (keeps payload small)
+function stripImages(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(stripImages);
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === 'image' && typeof v === 'string' && v.length > 200) continue; // base64 blob
+    out[k] = stripImages(v);
+  }
+  return out;
+}
+
 function BuyTransactionCard({ tx, buyIcon, buyColor, onOpen, onVoid }) {
   const fmt    = (n) => `$${Number(n).toFixed(2)}`;
   const accent = buyColor || BUY_BLUE;
@@ -692,13 +704,15 @@ export default function ModernTransactions() {
     return null;
   });
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
-  const [noCustomerWarning, setNoCustomerWarning] = useState(false);
+  const [noCustomerWarning, setNoCustomerWarning] = useState('');
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
+  const [parkSnackbar, setParkSnackbar]   = useState(null); // { severity, message }
 
   // Refs for localStorage persistence (mirrors CustomerTicket.js pattern)
   const customerIdRef = useRef(undefined);
   const workspaceTransactionsRef = useRef(workspaceTransactions);
   const initialLoadCompleteRef = useRef(false);
+  const pendingResumeWorkspaceRef = useRef(null); // workspace to load on next customer change
 
   // Customer state
   const [customer, setCustomer] = useState(null);
@@ -718,6 +732,8 @@ export default function ModernTransactions() {
   // Clean up expired workspace entries on mount
   useEffect(() => { cleanupExpiredWorkspaces(); }, []);
 
+
+
   // On customer change: save old customer's workspace, load new customer's workspace
   useEffect(() => {
     const prevId = customerIdRef.current;
@@ -728,8 +744,13 @@ export default function ModernTransactions() {
       if (customerChanged && prevId !== undefined) {
         saveWorkspaceForId(prevId, workspaceTransactionsRef.current);
       }
-      const saved = loadWorkspaceForId(newId);
-      setWorkspaceTransactions(saved || []);
+      if (pendingResumeWorkspaceRef.current !== null) {
+        setWorkspaceTransactions(pendingResumeWorkspaceRef.current);
+        pendingResumeWorkspaceRef.current = null;
+      } else {
+        const saved = loadWorkspaceForId(newId);
+        setWorkspaceTransactions(saved || []);
+      }
       customerIdRef.current = newId;
       initialLoadCompleteRef.current = true;
     }
@@ -755,6 +776,24 @@ export default function ModernTransactions() {
       )
     );
   }, [customerStats]);
+
+  // Load a resumed workspace when navigated here from the Navbar resume dialog
+  useEffect(() => {
+    if (!location.state?.resumedWorkspace) return;
+    const { resumedWorkspace, resumedCustomerId } = location.state;
+    pendingResumeWorkspaceRef.current = resumedWorkspace || [];
+    if (resumedCustomerId) {
+      const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+      axios.get(`${config.apiUrl}/customers/${resumedCustomerId}`, { headers })
+        .then(res => setCustomer(res.data))
+        .catch(() => {
+          setWorkspaceTransactions(resumedWorkspace || []);
+          setParkSnackbar({ severity: 'warning', message: 'Workspace restored. Please re-select the customer.' });
+          pendingResumeWorkspaceRef.current = null;
+        });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state?.resumedWorkspace]);
 
   // Restore pawn screen after returning from Checkout (user pressed Cancel/Back)
   useEffect(() => {
@@ -1041,6 +1080,206 @@ export default function ModernTransactions() {
     setVoidConfirm(null);
   };
 
+  const handleParkTransaction = async () => {
+    if (!customer) {
+      setParkSnackbar({ severity: 'warning', message: 'Select a customer before parking.' });
+      return;
+    }
+    if (workspaceTransactions.length === 0) {
+      setParkSnackbar({ severity: 'warning', message: 'Workspace is empty — nothing to park.' });
+      return;
+    }
+    const u = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+    try {
+      const res = await axios.post(`${config.apiUrl}/parked-workspaces`, {
+        customer_id: customer.id,
+        workspace_data: stripImages(workspaceTransactions),
+        parked_by_employee_id: u.id || null,
+      }, { headers });
+      setWorkspaceTransactions([]);
+      setCustomer(null);
+      window.dispatchEvent(new CustomEvent('parkedWorkspacesChanged'));
+      setParkSnackbar({ severity: 'success', message: `Workspace parked for ${customer.first_name}. Any employee can resume it.` });
+    } catch {
+      setParkSnackbar({ severity: 'error', message: 'Failed to park workspace. Try again.' });
+    }
+  };
+
+
+  const handleCheckoutAll = () => {
+    if (workspaceTransactions.length === 0) return;
+    const isQuickSale = !customer && workspaceTransactions.every(tx => tx.type === 'SALE');
+    if (!customer && !isQuickSale) return;
+    const u = JSON.parse(localStorage.getItem('user') || '{}');
+
+    // For quick sale, cartCustomer is null — Checkout.js will create a walk-in customer in handleSubmit
+    const cartCustomer = customer ? {
+      id: customer.id,
+      first_name: customer.first_name,
+      last_name: customer.last_name,
+      name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+      phone: customer.phone || '',
+      email: customer.email || '',
+      tax_exempt: customer.tax_exempt || false,
+    } : null;
+    const employeeObj = u.id
+      ? { id: u.id, name: `${u.firstName || ''} ${u.lastName || ''}`.trim(), role: u.role }
+      : null;
+
+    const checkoutItems = workspaceTransactions.flatMap(tx => {
+      if (tx.type === 'PAWN') {
+        const rawTotal = (tx.pawnItems || []).reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+        const scale = rawTotal > 0 ? (parseFloat(tx.totalPawnAmount) || rawTotal) / rawTotal : 1;
+        return (tx.pawnItems || []).map(item => ({
+          ...item,
+          transaction_type: 'pawn',
+          pawnTicketId: tx.ticketId,
+          buyTicketId: tx.ticketId,
+          price: (parseFloat(item.amount) || 0) * scale,
+          value: (parseFloat(item.amount) || 0) * scale,
+          ticket_note: tx.ticketNote || null,
+          show_on_receipt: tx.showOnReceipt,
+          customer: cartCustomer,
+          employee: employeeObj,
+        }));
+      }
+      if (tx.type === 'SALE') {
+        return (tx.saleItems || []).flatMap(item =>
+          Array.from({ length: parseInt(item.quantity) || 1 }, () => ({
+            ...item,
+            id: `${tx.ticketId}_${item.item_id}_${Date.now()}_${Math.random()}`,
+            description: item.name,
+            price: item.price,
+            retail_price: item.price,
+            value: item.price,
+            transaction_type: 'sale',
+            fromInventory: true,
+            buyTicketId: tx.ticketId,
+            globalDiscount: tx.globalDiscount || 0,
+            ticket_note: tx.ticketNote || null,
+            show_on_receipt: tx.showOnReceipt,
+            customer: cartCustomer,
+            employee: employeeObj,
+          }))
+        );
+      }
+      if (tx.type === 'BUY') {
+        const rawTotal = (tx.buyItems || []).reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
+        const scale = rawTotal > 0 ? (parseFloat(tx.totalPaid) || rawTotal) / rawTotal : 1;
+        return (tx.buyItems || []).flatMap(item => {
+          const jewelryBase = item.jewelryData ? { ...item.jewelryData } : {};
+          const itemPaid = (parseFloat(item.paid) || 0) * scale;
+          return Array.from({ length: parseInt(item.qty) || 1 }, () => ({
+            ...jewelryBase,
+            ...item,
+            id: `${tx.ticketId}_${item._lineId}_${Date.now()}`,
+            description: item.description || item.jewelryData?.short_desc || item.part_no,
+            short_desc: item.description || item.jewelryData?.short_desc || '',
+            long_desc: item.jewelryData?.long_desc || item.description || '',
+            price: itemPaid,
+            value: itemPaid,
+            transaction_type: 'buy',
+            buyTicketId: tx.ticketId,
+            ticket_note: tx.ticketNote || null,
+            show_on_receipt: tx.showOnReceipt,
+            customer: cartCustomer,
+            employee: employeeObj,
+          }));
+        });
+      }
+      if (tx.type === 'TRADE') {
+        const saleId = tx.saleTicketId || tx.ticketId;
+        const buyId = tx.buyTicketId || tx.ticketId;
+        return [
+          ...(tx.saleItems || []).flatMap(item =>
+            Array.from({ length: parseInt(item.quantity) || 1 }, () => ({
+              ...item,
+              id: `${tx.ticketId}_sale_${item._lineId}_${Date.now()}`,
+              description: item.name || item.sku,
+              short_desc: item.name || '',
+              price: parseFloat(item.price) || 0,
+              value: parseFloat(item.price) || 0,
+              transaction_type: 'trade_sale',
+              fromInventory: true,
+              tradeTicketId: tx.ticketId,
+              saleTicketId: saleId,
+              ticket_note: tx.ticketNote || null,
+              show_on_receipt: tx.showOnReceipt,
+              customer: cartCustomer,
+              employee: employeeObj,
+            }))
+          ),
+          ...(tx.tradeItems || []).map(item => {
+            const jewelryBase = item.jewelryData ? { ...item.jewelryData } : {};
+            return {
+              ...jewelryBase,
+              ...item,
+              id: `${tx.ticketId}_trade_${item._lineId}_${Date.now()}`,
+              description: item.description || item.jewelryData?.short_desc || item.part_no,
+              short_desc: item.description || item.jewelryData?.short_desc || '',
+              long_desc: item.jewelryData?.long_desc || item.description || '',
+              price: -((parseFloat(item.tradeAllowance) || 0) * (parseInt(item.qty) || 1)),
+              value: -((parseFloat(item.tradeAllowance) || 0) * (parseInt(item.qty) || 1)),
+              transaction_type: 'trade_in',
+              tradeTicketId: tx.ticketId,
+              buyTicketId: buyId,
+              ticket_note: tx.ticketNote || null,
+              show_on_receipt: tx.showOnReceipt,
+              customer: cartCustomer,
+              employee: employeeObj,
+            };
+          }),
+        ];
+      }
+      if (tx.type === 'PAYMENT') {
+        return (tx.selectedPayments || [])
+          .filter(p => p.type === 'pawn_extension')
+          .map(p => {
+            const numPeriods = p.numPeriods || 1;
+            const extensionDays = (p.frequency_days || 30) * numPeriods;
+            const prevDate = p.due_date_raw || null;
+            const newDate = p.newDueDateRaw ? new Date(p.newDueDateRaw).toISOString().split('T')[0] : null;
+            const interestPaid = Math.round(p.principal * (p.interest_rate / 100) * numPeriods * 100) / 100;
+            const feePaid = Math.round((p.principal * (p.insurance_rate / 100) + (p.storage_fee || 0)) * numPeriods * 100) / 100;
+            return {
+              id: `${tx.ticketId}_${p.ref}_${Date.now()}`,
+              description: `${p.ref} — ${p.description}`,
+              price: parseFloat(p.paymentAmount) || 0,
+              value: parseFloat(p.paymentAmount) || 0,
+              transaction_type: 'payment',
+              pawnTicketId: p.ref,
+              paymentTicketId: tx.ticketId,
+              principal: p.principal,
+              interest_paid: interestPaid,
+              fee_paid: feePaid,
+              total_paid: parseFloat(p.paymentAmount) || 0,
+              previous_due_date: prevDate,
+              new_due_date: newDate,
+              extension_days: extensionDays,
+              numPeriods,
+              ticket_note: tx.ticketNote || null,
+              show_on_receipt: tx.showOnReceipt,
+              customer: cartCustomer,
+              employee: employeeObj,
+            };
+          });
+      }
+      return [];
+    });
+
+    sessionStorage.setItem('checkoutItems', JSON.stringify(checkoutItems));
+    if (cartCustomer) {
+      sessionStorage.setItem('selectedCustomer', JSON.stringify(cartCustomer));
+    } else {
+      sessionStorage.removeItem('selectedCustomer');
+    }
+    sessionStorage.setItem('checkoutFrom', 'workspace');
+    navigate('/checkout', {
+      state: { items: checkoutItems, allCartItems: checkoutItems, customer: cartCustomer, from: 'workspace' },
+    });
+  };
+
   const summaryLines = workspaceTransactions.map(tx => {
     if (tx.type === 'PAWN') {
       const count = tx.pawnItems?.length || 0;
@@ -1086,20 +1325,23 @@ export default function ModernTransactions() {
   }, 0);
 
   const handleTransactionTypeClick = (type) => {
-    if (type === 'pawn') {
-      if (!customer) { setNoCustomerWarning(true); return; }
+    if (type === 'quick_sale') {
+      setSaleOpen(true);
+    } else if (type === 'pawn') {
+      if (!customer) { setNoCustomerWarning('pawn ticket'); return; }
       if (customerLoading) return;
       setPawnOpen(true);
     } else if (type === 'sale') {
+      if (!customer) { setNoCustomerWarning('sale ticket'); return; }
       setSaleOpen(true);
     } else if (type === 'buy') {
-      if (!customer) { setNoCustomerWarning(true); return; }
+      if (!customer) { setNoCustomerWarning('buy ticket'); return; }
       setBuyOpen(true);
     } else if (type === 'trade') {
-      if (!customer) { setNoCustomerWarning(true); return; }
+      if (!customer) { setNoCustomerWarning('trade ticket'); return; }
       setTradeOpen(true);
     } else if (type === 'payment') {
-      if (!customer) { setNoCustomerWarning(true); return; }
+      if (!customer) { setNoCustomerWarning('payment ticket'); return; }
       setPaymentOpen(true);
     }
   };
@@ -1412,11 +1654,14 @@ export default function ModernTransactions() {
           }}
           sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
         />
-        <Button variant="outlined" startIcon={<MuiIcons.LocalParking />} sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}>
+        <Button
+          variant="outlined"
+          startIcon={<MuiIcons.LocalParking />}
+          onClick={handleParkTransaction}
+          disabled={!customer || workspaceTransactions.length === 0}
+          sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}
+        >
           Park Transaction
-        </Button>
-        <Button variant="outlined" startIcon={<MuiIcons.PlayArrow />} sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}>
-          Resume
         </Button>
       </Paper>
 
@@ -1707,8 +1952,9 @@ export default function ModernTransactions() {
             </Typography>
 
             <Button fullWidth variant="contained" size="small" disabled={workspaceTransactions.length === 0}
+              onClick={handleCheckoutAll}
               sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, borderRadius: 2, fontWeight: 700, mb: { md: 2, xl: 1 } }}>
-              Checkout / Payment
+              Checkout
             </Button>
 
             <Divider sx={{ mb: 1.5 }} />
@@ -1787,13 +2033,13 @@ export default function ModernTransactions() {
       </Box>{/* end body wrapper */}
 
       <Snackbar
-        open={noCustomerWarning}
+        open={!!noCustomerWarning}
         autoHideDuration={4000}
-        onClose={() => setNoCustomerWarning(false)}
+        onClose={() => setNoCustomerWarning('')}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert severity="warning" onClose={() => setNoCustomerWarning(false)} sx={{ fontWeight: 600 }}>
-          Please select a customer before opening a pawn ticket.
+        <Alert severity="warning" onClose={() => setNoCustomerWarning('')} sx={{ fontWeight: 600 }}>
+          Please select a customer before opening a {noCustomerWarning}.
         </Alert>
       </Snackbar>
 
@@ -1809,6 +2055,18 @@ export default function ModernTransactions() {
           <Button variant="contained" color="error" onClick={handleConfirmVoid}>Void Ticket</Button>
         </DialogActions>
       </Dialog>
+
+      {/* ── Park feedback snackbar ── */}
+      <Snackbar
+        open={!!parkSnackbar}
+        autoHideDuration={4000}
+        onClose={() => setParkSnackbar(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={parkSnackbar?.severity || 'info'} onClose={() => setParkSnackbar(null)} sx={{ width: '100%' }}>
+          {parkSnackbar?.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

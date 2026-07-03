@@ -205,6 +205,23 @@ BEGIN
            'Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us'
     WHERE NOT EXISTS (SELECT 1 FROM receipt_config LIMIT 1);
 
+    -- Create parked_workspace_config table for storing anonymous parked workspace retention period
+    CREATE TABLE IF NOT EXISTS parked_workspace_config (
+        id SERIAL PRIMARY KEY,
+        hours INTEGER NOT NULL DEFAULT 24,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP,
+        CONSTRAINT valid_retention_hours CHECK (hours > 0)
+    );
+
+    COMMENT ON TABLE parked_workspace_config IS 'Stores configuration for how long anonymous (no customer) parked workspaces remain available';
+    COMMENT ON COLUMN parked_workspace_config.hours IS 'Number of hours to keep anonymous parked workspaces before they are automatically removed';
+
+    -- Insert default configuration if table is empty
+    INSERT INTO parked_workspace_config (hours)
+    SELECT 24
+    WHERE NOT EXISTS (SELECT 1 FROM parked_workspace_config LIMIT 1);
+
 END $$;
 
 -- Store-scope all system config tables
@@ -216,3 +233,4 @@ ALTER TABLE price_estimates ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES
 ALTER TABLE carat_to_gram_conversion ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
 ALTER TABLE inventory_hold_period ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
 ALTER TABLE receipt_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+ALTER TABLE parked_workspace_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);

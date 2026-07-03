@@ -344,7 +344,8 @@ function TransactionJournals() {
         <div class="info-row"><span class="info-label">Date &amp; Time:</span><span>${formattedDate} ${formattedTime}</span></div>
         <div class="info-row"><span class="info-label">Customer:</span><span>${selectedTransaction?.customer_name || 'N/A'}</span></div>
         ${selectedTransaction?.customer_phone ? `<div class="info-row"><span class="info-label">Phone:</span><span>${selectedTransaction.customer_phone}</span></div>` : ''}
-        <div class="info-row"><span class="info-label">Employee:</span><span>${selectedTransaction?.employee_name || 'N/A'}</span></div>
+        <div class="info-row"><span class="info-label">${selectedTransaction?.parked_by_employee_name ? 'Completed By:' : 'Employee:'}</span><span>${selectedTransaction?.employee_name || 'N/A'}</span></div>
+        ${selectedTransaction?.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Parked By:</span><span>${selectedTransaction.parked_by_employee_name}</span></div>` : ''}
       </div>
       ${tradeInItems.length > 0 ? `
       <div class="section-title">TRADE-IN ITEMS</div>
@@ -451,7 +452,8 @@ function TransactionJournals() {
         <div class="info-row"><span class="info-label">Date & Time:</span><span>${formattedDate} ${formattedTime}</span></div>
         <div class="info-row"><span class="info-label">Customer:</span><span>${selectedTransaction?.customer_name || 'N/A'}</span></div>
         ${selectedTransaction?.customer_phone ? `<div class="info-row"><span class="info-label">Phone:</span><span>${selectedTransaction.customer_phone}</span></div>` : ''}
-        <div class="info-row"><span class="info-label">Employee:</span><span>${selectedTransaction?.employee_name || 'N/A'}</span></div>
+        <div class="info-row"><span class="info-label">${selectedTransaction?.parked_by_employee_name ? 'Completed By:' : 'Employee:'}</span><span>${selectedTransaction?.employee_name || 'N/A'}</span></div>
+        ${selectedTransaction?.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Parked By:</span><span>${selectedTransaction.parked_by_employee_name}</span></div>` : ''}
       </div>
 
       <div class="section-title">Pawn Extensions</div>
@@ -713,9 +715,14 @@ function TransactionJournals() {
             </div>
             ` : ''}
             <div class="info-row">
-              <span class="info-label">Employee:</span>
+              <span class="info-label">${selectedTransaction?.parked_by_employee_name ? 'Completed By:' : 'Employee:'}</span>
               <span>${selectedTransaction?.employee_name || 'N/A'}</span>
             </div>
+            ${selectedTransaction?.parked_by_employee_name ? `
+            <div class="info-row">
+              <span class="info-label">Parked By:</span>
+              <span>${selectedTransaction.parked_by_employee_name}</span>
+            </div>` : ''}
           </div>
 
           <table class="items-table">
@@ -1004,9 +1011,14 @@ function TransactionJournals() {
           </div>
           ` : ''}
           <div class="info-row">
-            <span class="info-label">Employee:</span>
+            <span class="info-label">${selectedTransaction.parked_by_employee_name ? 'Completed By:' : 'Employee:'}</span>
             <span>${selectedTransaction.employee_name || 'N/A'}</span>
           </div>
+          ${selectedTransaction.parked_by_employee_name ? `
+          <div class="info-row">
+            <span class="info-label">Parked By:</span>
+            <span>${selectedTransaction.parked_by_employee_name}</span>
+          </div>` : ''}
         </div>
 
         ${Object.entries(allTicketGroups).map(([ticketId, items]) => `
@@ -1544,9 +1556,15 @@ function TransactionJournals() {
                       <TableCell>{selectedTransaction.customer_name || 'N/A'}</TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell variant="head">Employee</TableCell>
+                      <TableCell variant="head">Completed By</TableCell>
                       <TableCell>{selectedTransaction.employee_name || 'N/A'}</TableCell>
                     </TableRow>
+                    {selectedTransaction.parked_by_employee_name && (
+                      <TableRow>
+                        <TableCell variant="head">Parked By</TableCell>
+                        <TableCell>{selectedTransaction.parked_by_employee_name}</TableCell>
+                      </TableRow>
+                    )}
                     <TableRow>
                       <TableCell variant="head">Amount</TableCell>
                       <TableCell>${(Math.abs(parseFloat(selectedTransaction.total_amount || 0))).toFixed(2)}</TableCell>
