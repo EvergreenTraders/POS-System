@@ -251,6 +251,7 @@ const storeClosedMiddleware = async (req, res, next) => {
     '/api/tax-config',
     '/api/quote-expiration/config',
     '/api/inventory-hold-period/config',
+    '/api/parked-workspace-config',
     '/api/customer-preferences/',
     '/api/diamond_estimates',
     '/api/user_preferences',
@@ -8738,8 +8739,60 @@ app.post('/api/payment-ticket', async (req, res) => {
 
 // ── Parked Workspaces ─────────────────────────────────────────────────────────
 
+// Anonymous (no customer) parked workspace retention configuration
+app.get('/api/parked-workspace-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM parked_workspace_config ORDER BY created_at DESC LIMIT 1');
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No parked workspace configuration found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching parked workspace config:', err);
+    res.status(500).json({ error: 'Failed to fetch parked workspace configuration' });
+  }
+});
+
+app.put('/api/parked-workspace-config', async (req, res) => {
+  try {
+    const { hours } = req.body;
+
+    if (!(hours > 0)) {
+      return res.status(400).json({ error: 'Retention hours must be greater than 0' });
+    }
+
+    const checkResult = await pool.query('SELECT * FROM parked_workspace_config');
+
+    let result;
+    if (checkResult.rows.length === 0) {
+      result = await pool.query(
+        'INSERT INTO parked_workspace_config (hours) VALUES ($1) RETURNING *',
+        [hours]
+      );
+    } else {
+      result = await pool.query(
+        'UPDATE parked_workspace_config SET hours = $1, updated_at = CURRENT_TIMESTAMP RETURNING *',
+        [hours]
+      );
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating parked workspace config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 app.get('/api/parked-workspaces', async (req, res) => {
   try {
+    // Anonymous (no customer) parked workspaces expire after the configured retention period
+    const configResult = await pool.query('SELECT hours FROM parked_workspace_config ORDER BY created_at DESC LIMIT 1');
+    const retentionHours = configResult.rows[0]?.hours || 24;
+    await pool.query(
+      `DELETE FROM parked_workspaces WHERE customer_id IS NULL AND parked_at < NOW() - ($1 || ' hours')::interval`,
+      [retentionHours]
+    );
+
     const result = await pool.query(`
       SELECT
         pw.id,
