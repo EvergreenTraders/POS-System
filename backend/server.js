@@ -307,34 +307,6 @@ pool.query(`
   ALTER TABLE trade_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE
 `).catch(err => console.error('trade_ticket note/receipt migration:', err.message));
 
-// Ensure payment_ticket table exists
-pool.query(`
-  CREATE TABLE IF NOT EXISTS payment_ticket (
-    id                 SERIAL PRIMARY KEY,
-    payment_ticket_id  VARCHAR(50) NOT NULL,
-    pawn_ticket_id     VARCHAR(50),
-    transaction_id     VARCHAR(50),
-    ticket_note        TEXT,
-    show_on_receipt    BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )
-`).catch(err => console.error('payment_ticket create migration:', err.message));
-
-// Ensure parked_workspaces table exists
-pool.query(`
-  CREATE TABLE IF NOT EXISTS parked_workspaces (
-    id                      SERIAL PRIMARY KEY,
-    customer_id             INTEGER,
-    customer_name           VARCHAR(200),
-    customer_data           JSONB,
-    workspace_data          JSONB NOT NULL DEFAULT '[]',
-    parked_by_employee_id   INTEGER,
-    parked_by_employee_name VARCHAR(200),
-    store_id                INTEGER,
-    parked_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )
-`).catch(err => console.error('parked_workspaces create:', err.message));
-
 // Authentication route
 // Ensure track_hours column exists on employees table
 pool.query(`
@@ -8769,10 +8741,20 @@ app.post('/api/payment-ticket', async (req, res) => {
 app.get('/api/parked-workspaces', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT * FROM parked_workspaces
-      WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
-         OR store_id IS NULL
-      ORDER BY parked_at DESC
+      SELECT
+        pw.id,
+        pw.customer_id,
+        pw.workspace_data,
+        pw.parked_by_employee_id,
+        pw.parked_at,
+        c.first_name || ' ' || c.last_name AS customer_name,
+        e.first_name || ' ' || e.last_name AS parked_by_employee_name
+      FROM parked_workspaces pw
+      LEFT JOIN customers  c ON pw.customer_id           = c.id
+      LEFT JOIN employees  e ON pw.parked_by_employee_id = e.employee_id
+      WHERE pw.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+         OR pw.store_id IS NULL
+      ORDER BY pw.parked_at DESC
     `);
     res.json(result.rows);
   } catch (err) {
@@ -8783,19 +8765,14 @@ app.get('/api/parked-workspaces', async (req, res) => {
 
 app.post('/api/parked-workspaces', async (req, res) => {
   try {
-    const { customer_id, customer_name, customer_data, workspace_data,
-            parked_by_employee_id, parked_by_employee_name } = req.body;
+    const { customer_id, workspace_data, parked_by_employee_id } = req.body;
     const storeRes = await pool.query(`SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1`);
     const store_id = storeRes.rows[0]?.store_id || null;
     const result = await pool.query(`
-      INSERT INTO parked_workspaces
-        (customer_id, customer_name, customer_data, workspace_data,
-         parked_by_employee_id, parked_by_employee_name, store_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO parked_workspaces (customer_id, workspace_data, parked_by_employee_id, store_id)
+      VALUES ($1, $2, $3, $4)
       RETURNING *
-    `, [customer_id, customer_name,
-        JSON.stringify(customer_data), JSON.stringify(workspace_data),
-        parked_by_employee_id, parked_by_employee_name, store_id]);
+    `, [customer_id, JSON.stringify(workspace_data), parked_by_employee_id || null, store_id]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error parking workspace:', err);
@@ -11697,6 +11674,8 @@ app.get('/api/transactions', async (req, res) => {
         )) as customer_address,
         e.first_name || ' ' || e.last_name as employee_name,
         e.employee_id,
+        t.parked_by_employee_id,
+        pe.first_name || ' ' || pe.last_name as parked_by_employee_name,
         t.total_amount,
         t.transaction_date,
         t.created_at,
@@ -11706,13 +11685,15 @@ app.get('/api/transactions', async (req, res) => {
       FROM transactions t
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN employees e ON t.employee_id = e.employee_id
+      LEFT JOIN employees pe ON t.parked_by_employee_id = pe.employee_id
       LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
       WHERE t.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       GROUP BY
         t.transaction_id, t.customer_id, c.first_name, c.last_name, c.phone,
         c.address_line1, c.address_line2, c.city, c.state, c.postal_code,
-        e.first_name, e.last_name, e.employee_id, t.total_amount,
-        t.transaction_date, t.created_at, t.updated_at, tic.item_count
+        e.first_name, e.last_name, e.employee_id,
+        t.parked_by_employee_id, pe.first_name, pe.last_name,
+        t.total_amount, t.transaction_date, t.created_at, t.updated_at, tic.item_count
       ORDER BY t.created_at DESC`;
     
     const result = await pool.query(query);
@@ -11769,6 +11750,7 @@ app.post('/api/transactions', async (req, res) => {
         const {
             customer_id,
             employee_id,
+            parked_by_employee_id,
             total_amount,
             cartItems,
             transaction_date = new Date().toISOString().split('T')[0]
@@ -11802,9 +11784,9 @@ app.post('/api/transactions', async (req, res) => {
         const transactionQuery = `
             INSERT INTO transactions (
                 transaction_id, customer_id, employee_id, session_id,
-                total_amount, transaction_date, store_id
+                total_amount, transaction_date, store_id, parked_by_employee_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1))
+            VALUES ($1, $2, $3, $4, $5, $6, (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1), $7)
             RETURNING *
         `;
 
@@ -11814,7 +11796,8 @@ app.post('/api/transactions', async (req, res) => {
             employee_id,
             sessionId,
             total_amount,
-            transaction_date
+            transaction_date,
+            parked_by_employee_id || null
         ]);
 
         // Items are now stored in buy_ticket and sale_ticket tables instead of transaction_items

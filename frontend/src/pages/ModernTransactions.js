@@ -1085,11 +1085,8 @@ export default function ModernTransactions() {
     try {
       const res = await axios.post(`${config.apiUrl}/parked-workspaces`, {
         customer_id: customer.id,
-        customer_name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-        customer_data: stripImages(customer),
         workspace_data: stripImages(workspaceTransactions),
         parked_by_employee_id: u.id || null,
-        parked_by_employee_name: (`${u.firstName || ''} ${u.lastName || ''}`).trim() || u.username || null,
       }, { headers });
       setParkedWorkspaces(prev => [...prev, res.data]);
       setWorkspaceTransactions([]);
@@ -1113,13 +1110,19 @@ export default function ModernTransactions() {
     const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
     axios.delete(`${config.apiUrl}/parked-workspaces/${pw.id}`, { headers }).catch(() => {});
     setParkedWorkspaces(prev => prev.filter(p => p.id !== pw.id));
+    // Store parked-by info so Checkout can attach it to the transaction record
+    if (pw.parked_by_employee_id) {
+      sessionStorage.setItem('parkedByEmployee', JSON.stringify({
+        id: pw.parked_by_employee_id,
+        name: pw.parked_by_employee_name || '',
+      }));
+    }
     pendingResumeWorkspaceRef.current = pw.workspace_data || [];
     if (pw.customer_id) {
       try {
         const res = await axios.get(`${config.apiUrl}/customers/${pw.customer_id}`, { headers });
         setCustomer(res.data);
       } catch {
-        // Customer fetch failed — still load workspace, let employee re-select customer
         setWorkspaceTransactions(pw.workspace_data || []);
         setParkSnackbar({ severity: 'warning', message: 'Workspace restored. Please re-select the customer.' });
         pendingResumeWorkspaceRef.current = null;

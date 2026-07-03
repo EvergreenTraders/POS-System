@@ -1145,9 +1145,17 @@ function Checkout() {
           // Step 2: Create transaction with PENDING status
           // For jewelry items: use createdJewelryItems
           // For non-jewelry items: use cartItems directly (no item_id needed)
+          // Read parked-by employee if this workspace was resumed from a park
+          let parkedByEmployeeId = null;
+          try {
+            const parkedBy = JSON.parse(sessionStorage.getItem('parkedByEmployee') || 'null');
+            if (parkedBy?.id) parkedByEmployeeId = parkedBy.id;
+          } catch {}
+
           const transactionPayload = {
             customer_id: selectedCustomer.id,
             employee_id: employeeId,
+            parked_by_employee_id: parkedByEmployeeId,
             total_amount: parseFloat(calculateTotal().toFixed(2)), // Round to 2 decimal places
             transaction_date: getCurrentDate() // Use working date from context
           };
@@ -1234,6 +1242,7 @@ function Checkout() {
           );
 
           realTransactionId = transactionResponse.data.transaction.transaction_id;
+          sessionStorage.removeItem('parkedByEmployee'); // consumed — clear it
 
           // Step 2.5: Post buy_ticket and sale_ticket records for each unique ticket_id
           // Separate buy and sale tickets
