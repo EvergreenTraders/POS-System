@@ -327,6 +327,9 @@ pool.query(`
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_view_safe BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('can_view_safe migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_resume_parked_workspaces BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_resume_parked_workspaces migration:', err.message));
 
 // Transfer and cash handling permissions
 pool.query(`
@@ -740,7 +743,8 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
     const { id } = req.params;
     const { trackHours, canOpenStore, canOpenDrawer, canViewDrawer, canViewSafe,
             transferAllowedDrawer, transferAllowedSafe, transferAllowedBank, transferAllowedStore,
-            transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold, employmentType } = req.body;
+            transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold, employmentType,
+            canResumeParkedWorkspaces } = req.body;
 
     const empType = employmentType === 'salary' ? 'salary' : 'hourly';
     // Salary employees are always exempt from clocking in
@@ -754,12 +758,14 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
           transfer_allowed_bank = $8, transfer_allowed_store = $9,
           transfer_limit = $10, can_petty_cash = $11, petty_cash_limit = $12,
           discrepancy_threshold = $13, employment_type = $14,
+          can_resume_parked_workspaces = $15,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $15
+      WHERE employee_id = $16
       RETURNING employee_id, username, first_name, last_name, role,
         track_hours, can_open_store, can_open_drawer, can_view_drawer, can_view_safe,
         transfer_allowed_drawer, transfer_allowed_safe, transfer_allowed_bank, transfer_allowed_store,
-        transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold, employment_type
+        transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold, employment_type,
+        can_resume_parked_workspaces
     `;
     const result = await pool.query(query, [
       effectiveTrackHours,
@@ -776,6 +782,7 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
       pettyCashLimit != null && pettyCashLimit !== '' ? parseFloat(pettyCashLimit) : null,
       discrepancyThreshold != null && discrepancyThreshold !== '' ? parseFloat(discrepancyThreshold) : null,
       empType,
+      canResumeParkedWorkspaces !== false,
       id
     ]);
 

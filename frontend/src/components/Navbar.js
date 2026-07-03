@@ -145,6 +145,19 @@ function Navbar() {
 
   const [parkedWorkspaces, setParkedWorkspaces] = useState([]);
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
+  const [canResumeParkedWorkspaces, setCanResumeParkedWorkspaces] = useState(true);
+
+  useEffect(() => {
+    if (!user || !user.id) return;
+    const token = localStorage.getItem('token');
+    fetch(`${config.apiUrl}/employees`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : []))
+      .then(list => {
+        const me = (Array.isArray(list) ? list : []).find(e => e.employee_id == user.id);
+        setCanResumeParkedWorkspaces(me ? me.can_resume_parked_workspaces !== false : true);
+      })
+      .catch(() => {});
+  }, [user]);
 
   const fetchParkedWorkspaces = async () => {
     if (!user) return;
@@ -725,13 +738,19 @@ function Navbar() {
                 </Tooltip>
               )}
 
-              <Tooltip title={parkedWorkspaces.length > 0 ? `${parkedWorkspaces.length} parked workspace${parkedWorkspaces.length !== 1 ? 's' : ''}` : 'No parked workspaces'}>
+              <Tooltip title={
+                !canResumeParkedWorkspaces
+                  ? "You don't have permission to resume parked workspaces"
+                  : parkedWorkspaces.length > 0
+                    ? `${parkedWorkspaces.length} parked workspace${parkedWorkspaces.length !== 1 ? 's' : ''}`
+                    : 'No parked workspaces'
+              }>
                 <span>
                   <IconButton
                     color="inherit"
                     onClick={handleOpenResumeDialog}
                     sx={{ mr: 1 }}
-                    disabled={parkedWorkspaces.length === 0}
+                    disabled={parkedWorkspaces.length === 0 || !canResumeParkedWorkspaces}
                   >
                     <Badge badgeContent={parkedWorkspaces.length || null} color="warning">
                       <ResumeIcon />

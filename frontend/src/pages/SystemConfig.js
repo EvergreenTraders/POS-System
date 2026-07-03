@@ -1032,6 +1032,7 @@ function SystemConfig() {
       pettyCashLimit: overrideField === 'petty_cash_limit' ? overrideValue : (employee.petty_cash_limit != null ? employee.petty_cash_limit : null),
       discrepancyThreshold: overrideField === 'discrepancy_threshold' ? overrideValue : (employee.discrepancy_threshold != null ? employee.discrepancy_threshold : null),
       employmentType: overrideField === 'employment_type' ? overrideValue : (employee.employment_type || 'hourly'),
+      canResumeParkedWorkspaces: get('can_resume_parked_workspaces', true),
     };
   };
 
@@ -5239,6 +5240,7 @@ const handleTabChange = (event, newValue) => {
                       <TableCell align="center">Transfer Limit</TableCell>
                       <TableCell align="center">Petty Cash</TableCell>
                       <TableCell align="center">Petty Cash Limit</TableCell>
+                      <TableCell align="center">Resume Parked Workspaces</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -5390,6 +5392,14 @@ const handleTabChange = (event, newValue) => {
                             sx={{ width: 110 }}
                             disabled={emp.can_petty_cash === false}
                             InputProps={{ startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography> }}
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.can_resume_parked_workspaces !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_resume_parked_workspaces', emp.can_resume_parked_workspaces !== false)}
+                            color="primary"
+                            size="small"
                           />
                         </TableCell>
                       </TableRow>
