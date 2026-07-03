@@ -467,6 +467,17 @@ function Navbar() {
       await axios.post(`${config.apiUrl}/store-sessions/close`, {
         employee_id: user?.id || user?.employee_id,
       });
+      // Clear all parked workspaces at end of day
+      try {
+        const token = localStorage.getItem('token');
+        await fetch(`${config.apiUrl}/parked-workspaces`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setParkedWorkspaces([]);
+      } catch {
+        // non-critical — store still closes successfully
+      }
       await refreshStatus();
       window.dispatchEvent(new Event('storeStatusChanged'));
       setCloseStoreDialogOpen(false);

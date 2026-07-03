@@ -8790,6 +8790,18 @@ app.delete('/api/parked-workspaces/:id', async (req, res) => {
   }
 });
 
+app.delete('/api/parked-workspaces', async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM parked_workspaces WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)'
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error clearing parked workspaces:', err);
+    res.status(500).json({ error: 'Failed to clear parked workspaces' });
+  }
+});
+
 app.get('/api/trade-ticket', async (req, res) => {
   try {
     const { trade_ticket_id, transaction_id } = req.query;
