@@ -704,7 +704,7 @@ export default function ModernTransactions() {
     return null;
   });
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
-  const [noCustomerWarning, setNoCustomerWarning] = useState(false);
+  const [noCustomerWarning, setNoCustomerWarning] = useState('');
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
   const [parkSnackbar, setParkSnackbar]   = useState(null); // { severity, message }
 
@@ -1108,9 +1108,13 @@ export default function ModernTransactions() {
 
 
   const handleCheckoutAll = () => {
-    if (!customer || workspaceTransactions.length === 0) return;
+    if (workspaceTransactions.length === 0) return;
+    const isQuickSale = !customer && workspaceTransactions.every(tx => tx.type === 'SALE');
+    if (!customer && !isQuickSale) return;
     const u = JSON.parse(localStorage.getItem('user') || '{}');
-    const cartCustomer = {
+
+    // For quick sale, cartCustomer is null — Checkout.js will create a walk-in customer in handleSubmit
+    const cartCustomer = customer ? {
       id: customer.id,
       first_name: customer.first_name,
       last_name: customer.last_name,
@@ -1118,7 +1122,7 @@ export default function ModernTransactions() {
       phone: customer.phone || '',
       email: customer.email || '',
       tax_exempt: customer.tax_exempt || false,
-    };
+    } : null;
     const employeeObj = u.id
       ? { id: u.id, name: `${u.firstName || ''} ${u.lastName || ''}`.trim(), role: u.role }
       : null;
@@ -1265,7 +1269,11 @@ export default function ModernTransactions() {
     });
 
     sessionStorage.setItem('checkoutItems', JSON.stringify(checkoutItems));
-    sessionStorage.setItem('selectedCustomer', JSON.stringify(cartCustomer));
+    if (cartCustomer) {
+      sessionStorage.setItem('selectedCustomer', JSON.stringify(cartCustomer));
+    } else {
+      sessionStorage.removeItem('selectedCustomer');
+    }
     sessionStorage.setItem('checkoutFrom', 'workspace');
     navigate('/checkout', {
       state: { items: checkoutItems, allCartItems: checkoutItems, customer: cartCustomer, from: 'workspace' },
@@ -1317,20 +1325,23 @@ export default function ModernTransactions() {
   }, 0);
 
   const handleTransactionTypeClick = (type) => {
-    if (type === 'pawn') {
-      if (!customer) { setNoCustomerWarning(true); return; }
+    if (type === 'quick_sale') {
+      setSaleOpen(true);
+    } else if (type === 'pawn') {
+      if (!customer) { setNoCustomerWarning('pawn ticket'); return; }
       if (customerLoading) return;
       setPawnOpen(true);
     } else if (type === 'sale') {
+      if (!customer) { setNoCustomerWarning('sale ticket'); return; }
       setSaleOpen(true);
     } else if (type === 'buy') {
-      if (!customer) { setNoCustomerWarning(true); return; }
+      if (!customer) { setNoCustomerWarning('buy ticket'); return; }
       setBuyOpen(true);
     } else if (type === 'trade') {
-      if (!customer) { setNoCustomerWarning(true); return; }
+      if (!customer) { setNoCustomerWarning('trade ticket'); return; }
       setTradeOpen(true);
     } else if (type === 'payment') {
-      if (!customer) { setNoCustomerWarning(true); return; }
+      if (!customer) { setNoCustomerWarning('payment ticket'); return; }
       setPaymentOpen(true);
     }
   };
@@ -2022,13 +2033,13 @@ export default function ModernTransactions() {
       </Box>{/* end body wrapper */}
 
       <Snackbar
-        open={noCustomerWarning}
+        open={!!noCustomerWarning}
         autoHideDuration={4000}
-        onClose={() => setNoCustomerWarning(false)}
+        onClose={() => setNoCustomerWarning('')}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert severity="warning" onClose={() => setNoCustomerWarning(false)} sx={{ fontWeight: 600 }}>
-          Please select a customer before opening a pawn ticket.
+        <Alert severity="warning" onClose={() => setNoCustomerWarning('')} sx={{ fontWeight: 600 }}>
+          Please select a customer before opening a {noCustomerWarning}.
         </Alert>
       </Snackbar>
 

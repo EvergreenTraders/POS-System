@@ -692,6 +692,10 @@ function Checkout() {
       return;
     }
 
+    // effectiveCustomer tracks the real customer to use in this transaction,
+    // since React state (selectedCustomer) doesn't update synchronously.
+    let effectiveCustomer = selectedCustomer;
+
     // Handle fast sale customer creation
     if (selectedCustomer?.isFastSale && !selectedCustomer?.id) {
       // Validate fast sale customer data
@@ -736,6 +740,7 @@ function Checkout() {
           name: `${createdCustomer.first_name} ${createdCustomer.last_name}`
         };
         setCustomer(updatedCustomer);
+        effectiveCustomer = updatedCustomer;
 
         setSnackbar({
           open: true,
@@ -750,6 +755,36 @@ function Checkout() {
           message: `Error creating customer: ${error.message}`,
           severity: 'error'
         });
+        return;
+      }
+    } else if ((checkoutSource === 'workspace' || checkoutSource === 'sale-ticket') && !selectedCustomer?.id) {
+      // Quick sale (from workspace or sale ticket): create a walk-in customer so the transaction has a valid customer_id
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Authentication token not found');
+        const formData = new FormData();
+        formData.append('first_name', 'Walk-in');
+        formData.append('last_name', 'Customer');
+        formData.append('status', 'active');
+        const res = await fetch(`${config.apiUrl}/customers`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        if (!res.ok) throw new Error('Failed to create walk-in customer');
+        const created = await res.json();
+        effectiveCustomer = {
+          id: created.id,
+          first_name: 'Walk-in',
+          last_name: 'Customer',
+          name: 'Walk-in Customer',
+          phone: '',
+          email: '',
+          tax_exempt: false,
+        };
+        setCustomer(effectiveCustomer);
+      } catch (err) {
+        setSnackbar({ open: true, message: 'Failed to create walk-in customer. Please try again.', severity: 'error' });
         return;
       }
     } else if (!selectedCustomer?.id) {
@@ -1153,7 +1188,7 @@ function Checkout() {
           } catch {}
 
           const transactionPayload = {
-            customer_id: selectedCustomer.id,
+            customer_id: effectiveCustomer.id,
             employee_id: employeeId,
             parked_by_employee_id: parkedByEmployeeId,
             total_amount: parseFloat(calculateTotal().toFixed(2)), // Round to 2 decimal places
