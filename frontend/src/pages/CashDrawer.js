@@ -1690,13 +1690,15 @@ function CashDrawer() {
           const parsedItems = checkoutItems ? JSON.parse(checkoutItems) : null;
           const parsedCustomer = selectedCustomer ? JSON.parse(selectedCustomer) : null;
           const parsedCartItems = cartItems ? JSON.parse(cartItems) : null;
+          // Restore original source so Checkout.js can navigate back correctly
+          const originalFrom = location.state?.originalFrom || sessionStorage.getItem('checkoutFrom') || 'cash-drawer';
 
           navigate('/checkout', {
             state: {
               items: parsedItems,
               customer: parsedCustomer,
               allCartItems: parsedCartItems,
-              from: 'cash-drawer'
+              from: originalFrom,
             }
           });
         }, 500);

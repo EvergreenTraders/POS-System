@@ -21,6 +21,8 @@ import {
   FormControlLabel,
   Checkbox,
   CircularProgress,
+  Stack,
+  Divider,
 } from '@mui/material';
 import axios from 'axios';
 import {
@@ -32,6 +34,10 @@ import {
   WarningAmber as WarningIcon,
   ArrowBack as ArrowBackIcon,
   ArrowForward as ArrowForwardIcon,
+  Restore as ResumeIcon,
+  PlayArrow as PlayArrowIcon,
+  Delete as DeleteIcon,
+  LocalParking as ParkingIcon,
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -136,6 +142,78 @@ function Navbar() {
     const interval = setInterval(checkBalanceAlerts, 30000);
     return () => clearInterval(interval);
   }, [user]);
+
+  const [parkedWorkspaces, setParkedWorkspaces] = useState([]);
+  const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
+
+  const fetchParkedWorkspaces = async () => {
+    if (!user) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${config.apiUrl}/parked-workspaces`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setParkedWorkspaces(Array.isArray(data) ? data : []);
+      }
+    } catch {
+      // non-critical
+    }
+  };
+
+  useEffect(() => {
+    fetchParkedWorkspaces();
+    const interval = setInterval(fetchParkedWorkspaces, 30000);
+    window.addEventListener('parkedWorkspacesChanged', fetchParkedWorkspaces);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('parkedWorkspacesChanged', fetchParkedWorkspaces);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  const handleOpenResumeDialog = () => {
+    fetchParkedWorkspaces();
+    setResumeDialogOpen(true);
+  };
+
+  const handleResume = async (pw) => {
+    const token = localStorage.getItem('token');
+    const headers = { Authorization: `Bearer ${token}` };
+    try {
+      await fetch(`${config.apiUrl}/parked-workspaces/${pw.id}`, { method: 'DELETE', headers });
+    } catch {
+      // proceed anyway
+    }
+    setParkedWorkspaces(prev => prev.filter(p => p.id !== pw.id));
+    setResumeDialogOpen(false);
+    if (pw.parked_by_employee_id) {
+      sessionStorage.setItem('parkedByEmployee', JSON.stringify({
+        id: pw.parked_by_employee_id,
+        name: pw.parked_by_employee_name || '',
+      }));
+    }
+    navigate('/modern-transactions', {
+      state: {
+        resumedWorkspace: pw.workspace_data || [],
+        resumedCustomerId: pw.customer_id,
+      },
+    });
+  };
+
+  const handleDiscardParked = async (pw) => {
+    const token = localStorage.getItem('token');
+    try {
+      await fetch(`${config.apiUrl}/parked-workspaces/${pw.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setParkedWorkspaces(prev => prev.filter(p => p.id !== pw.id));
+    } catch {
+      // non-critical
+    }
+  };
 
   // Poll for store closing notification
   useEffect(() => {
@@ -636,6 +714,21 @@ function Navbar() {
                 </Tooltip>
               )}
 
+              <Tooltip title={parkedWorkspaces.length > 0 ? `${parkedWorkspaces.length} parked workspace${parkedWorkspaces.length !== 1 ? 's' : ''}` : 'No parked workspaces'}>
+                <span>
+                  <IconButton
+                    color="inherit"
+                    onClick={handleOpenResumeDialog}
+                    sx={{ mr: 1 }}
+                    disabled={parkedWorkspaces.length === 0}
+                  >
+                    <Badge badgeContent={parkedWorkspaces.length || null} color="warning">
+                      <ResumeIcon />
+                    </Badge>
+                  </IconButton>
+                </span>
+              </Tooltip>
+
               <IconButton
                 color="inherit"
                 onClick={() => setCartOpen(true)}
@@ -818,6 +911,59 @@ function Navbar() {
           >
             Close Store
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Resume Parked Workspace Dialog */}
+      <Dialog open={resumeDialogOpen} onClose={() => setResumeDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <ParkingIcon sx={{ color: '#f9a825' }} />
+          Parked Workspaces
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {parkedWorkspaces.length === 0 ? (
+            <Box sx={{ py: 4, textAlign: 'center' }}>
+              <ParkingIcon sx={{ fontSize: 48, color: '#ccc', mb: 1 }} />
+              <Typography color="text.secondary">No parked workspaces</Typography>
+            </Box>
+          ) : (
+            <Stack spacing={0} divider={<Divider />}>
+              {parkedWorkspaces.map(pw => {
+                const counts = {};
+                (pw.workspace_data || []).forEach(tx => { counts[tx.type] = (counts[tx.type] || 0) + 1; });
+                const summary = Object.entries(counts).map(([t, n]) => `${n} ${t[0] + t.slice(1).toLowerCase()}`).join(' · ') || 'Empty';
+                const diff = Date.now() - new Date(pw.parked_at).getTime();
+                const mins = Math.floor(diff / 60000);
+                const ago = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
+                return (
+                  <Box key={pw.id} sx={{ px: 2.5, py: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Avatar sx={{ bgcolor: '#2e7d32', width: 42, height: 42, fontWeight: 700 }}>
+                      {(pw.customer_name || '?')[0]}
+                    </Avatar>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography fontWeight={700} noWrap>{pw.customer_name || 'Unknown Customer'}</Typography>
+                      <Typography variant="caption" color="text.secondary" display="block">{summary}</Typography>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        Parked by {pw.parked_by_employee_name || 'unknown'} · {ago}
+                      </Typography>
+                    </Box>
+                    <Stack direction="row" spacing={1}>
+                      <Button size="small" variant="contained" color="success"
+                        startIcon={<PlayArrowIcon />} onClick={() => handleResume(pw)}>
+                        Resume
+                      </Button>
+                      <IconButton size="small" color="error" onClick={() => handleDiscardParked(pw)} title="Discard">
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </Box>
+                );
+              })}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setResumeDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
 
