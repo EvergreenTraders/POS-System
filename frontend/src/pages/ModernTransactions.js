@@ -415,6 +415,18 @@ function cleanupExpiredWorkspaces() {
   }
 }
 
+// Strip base64 image fields before sending workspace to server (keeps payload small)
+function stripImages(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(stripImages);
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === 'image' && typeof v === 'string' && v.length > 200) continue; // base64 blob
+    out[k] = stripImages(v);
+  }
+  return out;
+}
+
 function BuyTransactionCard({ tx, buyIcon, buyColor, onOpen, onVoid }) {
   const fmt    = (n) => `$${Number(n).toFixed(2)}`;
   const accent = buyColor || BUY_BLUE;
@@ -694,11 +706,15 @@ export default function ModernTransactions() {
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
   const [noCustomerWarning, setNoCustomerWarning] = useState(false);
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
+  const [parkSnackbar, setParkSnackbar]   = useState(null); // { severity, message }
+  const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
+  const [parkedWorkspaces, setParkedWorkspaces] = useState([]);
 
   // Refs for localStorage persistence (mirrors CustomerTicket.js pattern)
   const customerIdRef = useRef(undefined);
   const workspaceTransactionsRef = useRef(workspaceTransactions);
   const initialLoadCompleteRef = useRef(false);
+  const pendingResumeWorkspaceRef = useRef(null); // workspace to load on next customer change
 
   // Customer state
   const [customer, setCustomer] = useState(null);
@@ -718,6 +734,15 @@ export default function ModernTransactions() {
   // Clean up expired workspace entries on mount
   useEffect(() => { cleanupExpiredWorkspaces(); }, []);
 
+  // Fetch parked workspaces count on mount for badge
+  useEffect(() => {
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+    axios.get(`${config.apiUrl}/parked-workspaces`, { headers })
+      .then(res => setParkedWorkspaces(res.data || []))
+      .catch(() => {});
+  }, []);
+
+
   // On customer change: save old customer's workspace, load new customer's workspace
   useEffect(() => {
     const prevId = customerIdRef.current;
@@ -728,8 +753,13 @@ export default function ModernTransactions() {
       if (customerChanged && prevId !== undefined) {
         saveWorkspaceForId(prevId, workspaceTransactionsRef.current);
       }
-      const saved = loadWorkspaceForId(newId);
-      setWorkspaceTransactions(saved || []);
+      if (pendingResumeWorkspaceRef.current !== null) {
+        setWorkspaceTransactions(pendingResumeWorkspaceRef.current);
+        pendingResumeWorkspaceRef.current = null;
+      } else {
+        const saved = loadWorkspaceForId(newId);
+        setWorkspaceTransactions(saved || []);
+      }
       customerIdRef.current = newId;
       initialLoadCompleteRef.current = true;
     }
@@ -1039,6 +1069,72 @@ export default function ModernTransactions() {
     }
     setWorkspaceTransactions(prev => prev.filter(t => t.id !== voidConfirm.id));
     setVoidConfirm(null);
+  };
+
+  const handleParkTransaction = async () => {
+    if (!customer) {
+      setParkSnackbar({ severity: 'warning', message: 'Select a customer before parking.' });
+      return;
+    }
+    if (workspaceTransactions.length === 0) {
+      setParkSnackbar({ severity: 'warning', message: 'Workspace is empty — nothing to park.' });
+      return;
+    }
+    const u = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+    try {
+      const res = await axios.post(`${config.apiUrl}/parked-workspaces`, {
+        customer_id: customer.id,
+        customer_name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+        customer_data: stripImages(customer),
+        workspace_data: stripImages(workspaceTransactions),
+        parked_by_employee_id: u.id || null,
+        parked_by_employee_name: (`${u.firstName || ''} ${u.lastName || ''}`).trim() || u.username || null,
+      }, { headers });
+      setParkedWorkspaces(prev => [...prev, res.data]);
+      setWorkspaceTransactions([]);
+      setCustomer(null);
+      setParkSnackbar({ severity: 'success', message: `Workspace parked for ${customer.first_name}. Any employee can resume it.` });
+    } catch {
+      setParkSnackbar({ severity: 'error', message: 'Failed to park workspace. Try again.' });
+    }
+  };
+
+  const handleOpenResume = async () => {
+    setResumeDialogOpen(true);
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+    axios.get(`${config.apiUrl}/parked-workspaces`, { headers })
+      .then(res => setParkedWorkspaces(res.data || []))
+      .catch(() => {});
+  };
+
+  const handleResume = async (pw) => {
+    setResumeDialogOpen(false);
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+    axios.delete(`${config.apiUrl}/parked-workspaces/${pw.id}`, { headers }).catch(() => {});
+    setParkedWorkspaces(prev => prev.filter(p => p.id !== pw.id));
+    pendingResumeWorkspaceRef.current = pw.workspace_data || [];
+    if (pw.customer_id) {
+      try {
+        const res = await axios.get(`${config.apiUrl}/customers/${pw.customer_id}`, { headers });
+        setCustomer(res.data);
+      } catch {
+        // Customer fetch failed — still load workspace, let employee re-select customer
+        setWorkspaceTransactions(pw.workspace_data || []);
+        setParkSnackbar({ severity: 'warning', message: 'Workspace restored. Please re-select the customer.' });
+        pendingResumeWorkspaceRef.current = null;
+      }
+    }
+  };
+
+  const handleDiscardParked = async (pw) => {
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+    try {
+      await axios.delete(`${config.apiUrl}/parked-workspaces/${pw.id}`, { headers });
+      setParkedWorkspaces(prev => prev.filter(p => p.id !== pw.id));
+    } catch {
+      setParkSnackbar({ severity: 'error', message: 'Failed to discard parked workspace.' });
+    }
   };
 
   const summaryLines = workspaceTransactions.map(tx => {
@@ -1412,12 +1508,25 @@ export default function ModernTransactions() {
           }}
           sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
         />
-        <Button variant="outlined" startIcon={<MuiIcons.LocalParking />} sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}>
+        <Button
+          variant="outlined"
+          startIcon={<MuiIcons.LocalParking />}
+          onClick={handleParkTransaction}
+          disabled={!customer || workspaceTransactions.length === 0}
+          sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}
+        >
           Park Transaction
         </Button>
-        <Button variant="outlined" startIcon={<MuiIcons.PlayArrow />} sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}>
-          Resume
-        </Button>
+        <Badge badgeContent={parkedWorkspaces.length || null} color="warning">
+          <Button
+            variant="outlined"
+            startIcon={<MuiIcons.PlayArrow />}
+            onClick={handleOpenResume}
+            sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}
+          >
+            Resume
+          </Button>
+        </Badge>
       </Paper>
 
       {/* ── Body (three columns + full-width bottom bar) ── */}
@@ -1809,6 +1918,76 @@ export default function ModernTransactions() {
           <Button variant="contained" color="error" onClick={handleConfirmVoid}>Void Ticket</Button>
         </DialogActions>
       </Dialog>
+
+      {/* ── Resume Parked Workspace Dialog ── */}
+      <Dialog open={resumeDialogOpen} onClose={() => setResumeDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <MuiIcons.LocalParking sx={{ color: '#f9a825' }} />
+          Parked Workspaces
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {parkedWorkspaces.length === 0 ? (
+            <Box sx={{ py: 4, textAlign: 'center' }}>
+              <MuiIcons.LocalParking sx={{ fontSize: 48, color: '#ccc', mb: 1 }} />
+              <Typography color="text.secondary">No parked workspaces</Typography>
+            </Box>
+          ) : (
+            <Stack spacing={0} divider={<Divider />}>
+              {parkedWorkspaces.map(pw => {
+                const counts = {};
+                (pw.workspace_data || []).forEach(tx => { counts[tx.type] = (counts[tx.type] || 0) + 1; });
+                const summary = Object.entries(counts).map(([t, n]) => `${n} ${t[0]+t.slice(1).toLowerCase()}`).join(' · ') || 'Empty';
+                const diff = Date.now() - new Date(pw.parked_at).getTime();
+                const mins = Math.floor(diff / 60000);
+                const ago = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins/60)}h ago`;
+                return (
+                  <Box key={pw.id} sx={{ px: 2.5, py: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Avatar sx={{ bgcolor: GREEN, width: 42, height: 42, fontWeight: 700 }}>
+                      {(pw.customer_name || '?')[0]}
+                    </Avatar>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography fontWeight={700} noWrap>{pw.customer_name || 'Unknown Customer'}</Typography>
+                      <Typography variant="caption" color="text.secondary">{summary}</Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        Parked by {pw.parked_by_employee_name || 'unknown'} · {ago}
+                      </Typography>
+                    </Box>
+                    <Stack direction="row" spacing={1}>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="success"
+                        startIcon={<MuiIcons.PlayArrow />}
+                        onClick={() => handleResume(pw)}
+                      >
+                        Resume
+                      </Button>
+                      <IconButton size="small" color="error" onClick={() => handleDiscardParked(pw)} title="Discard">
+                        <MuiIcons.Delete fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </Box>
+                );
+              })}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setResumeDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Park feedback snackbar ── */}
+      <Snackbar
+        open={!!parkSnackbar}
+        autoHideDuration={4000}
+        onClose={() => setParkSnackbar(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={parkSnackbar?.severity || 'info'} onClose={() => setParkSnackbar(null)} sx={{ width: '100%' }}>
+          {parkSnackbar?.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

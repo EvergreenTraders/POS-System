@@ -26,7 +26,7 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 // Serve uploaded files statically
 app.use('/uploads', express.static('uploads'));
 
@@ -319,6 +319,21 @@ pool.query(`
     created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )
 `).catch(err => console.error('payment_ticket create migration:', err.message));
+
+// Ensure parked_workspaces table exists
+pool.query(`
+  CREATE TABLE IF NOT EXISTS parked_workspaces (
+    id                      SERIAL PRIMARY KEY,
+    customer_id             INTEGER,
+    customer_name           VARCHAR(200),
+    customer_data           JSONB,
+    workspace_data          JSONB NOT NULL DEFAULT '[]',
+    parked_by_employee_id   INTEGER,
+    parked_by_employee_name VARCHAR(200),
+    store_id                INTEGER,
+    parked_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`).catch(err => console.error('parked_workspaces create:', err.message));
 
 // Authentication route
 // Ensure track_hours column exists on employees table
@@ -8746,6 +8761,55 @@ app.post('/api/payment-ticket', async (req, res) => {
     res.status(500).json({ error: 'Failed to create payment ticket' });
   } finally {
     client.release();
+  }
+});
+
+// ── Parked Workspaces ─────────────────────────────────────────────────────────
+
+app.get('/api/parked-workspaces', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM parked_workspaces
+      WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+         OR store_id IS NULL
+      ORDER BY parked_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching parked workspaces:', err);
+    res.status(500).json({ error: 'Failed to fetch parked workspaces' });
+  }
+});
+
+app.post('/api/parked-workspaces', async (req, res) => {
+  try {
+    const { customer_id, customer_name, customer_data, workspace_data,
+            parked_by_employee_id, parked_by_employee_name } = req.body;
+    const storeRes = await pool.query(`SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1`);
+    const store_id = storeRes.rows[0]?.store_id || null;
+    const result = await pool.query(`
+      INSERT INTO parked_workspaces
+        (customer_id, customer_name, customer_data, workspace_data,
+         parked_by_employee_id, parked_by_employee_name, store_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `, [customer_id, customer_name,
+        JSON.stringify(customer_data), JSON.stringify(workspace_data),
+        parked_by_employee_id, parked_by_employee_name, store_id]);
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error parking workspace:', err);
+    res.status(500).json({ error: 'Failed to park workspace' });
+  }
+});
+
+app.delete('/api/parked-workspaces/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM parked_workspaces WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting parked workspace:', err);
+    res.status(500).json({ error: 'Failed to delete parked workspace' });
   }
 });
 
