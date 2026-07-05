@@ -8,6 +8,7 @@ import {
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   CircularProgress, Menu, MenuItem, Dialog, DialogTitle, DialogContent, DialogActions,
   Select, InputLabel, FormControl, Grid, Alert, Snackbar, Tooltip,
+  List, ListItemButton, ListItemText,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
@@ -92,7 +93,19 @@ function commitPawnTicketId() {
   localStorage.removeItem(PENDING_KEY);
 }
 
-export default function PawnTransactionScreen({ customer, customerStats: initialStats, onClose, onConvertTo, onAddToWorkspace, existingPawnData }) {
+function voidPawnTicketId(id) {
+  const voided = JSON.parse(localStorage.getItem('voidedPawnTickets') || '[]');
+  if (!voided.includes(id)) {
+    voided.push(id);
+    localStorage.setItem('voidedPawnTickets', JSON.stringify(voided));
+  }
+  if (localStorage.getItem(PENDING_KEY) === id) localStorage.removeItem(PENDING_KEY);
+}
+
+export default function PawnTransactionScreen({
+  customer, customerStats: initialStats, onClose, onConvertTo, onAddToWorkspace,
+  onRemoveFromWorkspace, existingPawnData, workspaceBuyTickets = [],
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user: currentUser } = useAuth();
@@ -113,6 +126,10 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [photoTargetId,    setPhotoTargetId]    = useState(null);
   const [convertAnchor,    setConvertAnchor]    = useState(null);
   const [convertRow,       setConvertRow]       = useState(null);
+  const [buyPickerOpen,    setBuyPickerOpen]    = useState(false);
+  const [selectedBuyId,    setSelectedBuyId]    = useState(null);
+  const [pendingConvert,   setPendingConvert]   = useState(null); // { type, item, targetTicketId }
+  const [emptyTicketDialogOpen, setEmptyTicketDialogOpen] = useState(false);
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
   const [cameraStream,     setCameraStream]     = useState(null);
@@ -136,6 +153,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const quickDescRef    = useRef(null);
   const quickSerialRef  = useRef(null);
   const quickAmtRef     = useRef(null);
+  const prevItemCountRef = useRef(pawnItems.length);
   const [quickAddRow, setQuickAddRow] = useState(null);
   const [rePawnSelectorOpen, setRePawnSelectorOpen] = useState(false);
   const [rePawnSelectedItem, setRePawnSelectedItem] = useState(null);
@@ -263,6 +281,24 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const initials = `${customer?.first_name?.[0] ?? ''}${customer?.last_name?.[0] ?? ''}`.toUpperCase();
 
   const handleDeleteItem = (id) => setPawnItems(prev => prev.filter(i => i.id !== id));
+
+  useEffect(() => {
+    if (prevItemCountRef.current > 0 && pawnItems.length === 0) {
+      setEmptyTicketDialogOpen(true);
+    }
+    prevItemCountRef.current = pawnItems.length;
+  }, [pawnItems.length]);
+
+  const handleConvertItem = (type, item, targetTicketId) => {
+    const isLast = pawnItems.length === 1;
+    setPawnItems(prev => prev.filter(i => i.id !== item.id));
+    if (isLast) {
+      setPendingConvert({ type, item, targetTicketId });
+      // onConvertTo deferred — committed only if user confirms Void in the empty-ticket dialog
+    } else {
+      onConvertTo?.({ type, item, targetTicketId, sourceTicketId: ticketId });
+    }
+  };
 
   const handleItemSizeChange = (id, sizeName) => {
     const sizeObj = itemSizes.find(s => s.name === sizeName);
@@ -1252,11 +1288,20 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           const TradeIcon = MuiIcons[trade.icon] ?? MuiIcons.CompareArrows;
           return (
             <>
-              <MenuItem onClick={() => { onConvertTo?.({ type: 'buy', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
+              <MenuItem onClick={() => {
+                setConvertAnchor(null);
+                if (workspaceBuyTickets.length > 0) {
+                  setSelectedBuyId(null);
+                  setBuyPickerOpen(true);
+                } else {
+                  handleConvertItem('buy', convertRow, null);
+                  setConvertRow(null);
+                }
+              }}>
                 <BuyIcon sx={{ fontSize: 16, mr: 1.5, color: buy.color ?? PURPLE }} />
                 <Typography variant="body2">Buy Ticket</Typography>
               </MenuItem>
-              <MenuItem onClick={() => { onConvertTo?.({ type: 'trade', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
+              <MenuItem onClick={() => { handleConvertItem('trade', convertRow, null); setConvertAnchor(null); setConvertRow(null); }}>
                 <TradeIcon sx={{ fontSize: 16, mr: 1.5, color: trade.color ?? '#388e3c' }} />
                 <Typography variant="body2">Trade Ticket</Typography>
               </MenuItem>
@@ -1264,6 +1309,84 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           );
         })()}
       </Menu>
+
+      {/* Buy ticket picker */}
+      <Dialog open={buyPickerOpen} onClose={() => { setBuyPickerOpen(false); setConvertRow(null); }} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ pb: 1 }}>Move to Buy Ticket</DialogTitle>
+        <DialogContent sx={{ pt: 0 }}>
+          <Typography variant="body2" color="text.secondary" mb={1}>
+            Choose a buy ticket to move this item into, or create a new one.
+          </Typography>
+          <List dense disablePadding>
+            {workspaceBuyTickets.map(t => {
+              const total = t.totalPaid || (t.buyItems || []).reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
+              return (
+                <ListItemButton key={t.ticketId} selected={selectedBuyId === t.ticketId}
+                  onClick={() => setSelectedBuyId(t.ticketId)}
+                  sx={{ borderRadius: 1, mb: 0.5, border: '1px solid', borderColor: selectedBuyId === t.ticketId ? PURPLE : 'transparent' }}>
+                  <ListItemText
+                    primary={<Typography fontWeight={700} fontSize={13}>{t.ticketId}</Typography>}
+                    secondary={`${(t.buyItems || []).length} item${(t.buyItems || []).length !== 1 ? 's' : ''} · $${Number(total).toFixed(2)}`}
+                  />
+                </ListItemButton>
+              );
+            })}
+            <ListItemButton selected={selectedBuyId === '__new__'} onClick={() => setSelectedBuyId('__new__')}
+              sx={{ borderRadius: 1, border: '1px solid', borderColor: selectedBuyId === '__new__' ? PURPLE : 'transparent' }}>
+              <MuiIcons.AddCircleOutline sx={{ mr: 1.5, fontSize: 18, color: PURPLE }} />
+              <ListItemText primary={<Typography fontSize={13}>Create new Buy Ticket</Typography>} />
+            </ListItemButton>
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setBuyPickerOpen(false); setConvertRow(null); }}>Cancel</Button>
+          <Button variant="contained" disabled={!selectedBuyId}
+            sx={{ bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}
+            onClick={() => {
+              handleConvertItem('buy', convertRow, selectedBuyId === '__new__' ? null : selectedBuyId);
+              setBuyPickerOpen(false);
+              setConvertRow(null);
+              setSelectedBuyId(null);
+            }}>
+            Move Item
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Empty ticket dialog */}
+      <Dialog open={emptyTicketDialogOpen} onClose={() => setEmptyTicketDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Pawn Ticket is Empty</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            {pendingConvert
+              ? `This item was about to be moved to a ${pendingConvert.type} ticket. Void to confirm the move, or Cancel to keep the item here.`
+              : 'All items have been removed. Void to remove this ticket from the workspace, or Cancel to keep it open.'}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            if (pendingConvert) {
+              setPawnItems([pendingConvert.item]);
+              setPendingConvert(null);
+            }
+            setEmptyTicketDialogOpen(false);
+          }}>
+            Cancel
+          </Button>
+          <Button variant="contained" color="error"
+            onClick={() => {
+              if (pendingConvert) {
+                onConvertTo?.({ type: pendingConvert.type, item: pendingConvert.item, targetTicketId: pendingConvert.targetTicketId, sourceTicketId: ticketId });
+                setPendingConvert(null);
+              }
+              voidPawnTicketId(ticketId);
+              onRemoveFromWorkspace?.(ticketId);
+              setEmptyTicketDialogOpen(false);
+            }}>
+            Void Ticket
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {receiptLoading && (
         <Box sx={{ position: 'fixed', inset: 0, bgcolor: 'rgba(0,0,0,0.35)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

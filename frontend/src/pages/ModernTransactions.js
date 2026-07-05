@@ -1538,17 +1538,120 @@ export default function ModernTransactions() {
     }
   };
 
+  const handlePawnConvertTo = ({ type, item, targetTicketId, sourceTicketId }) => {
+    const removePawnItem = (t) => {
+      if (!(t.type === 'PAWN' && t.ticketId === sourceTicketId)) return t;
+      const newPawnItems = (t.pawnItems || []).filter(i => i.id !== item.id);
+      const newTotal = newPawnItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+      return { ...t, pawnItems: newPawnItems, totalPawnAmount: newTotal };
+    };
+
+    // Pawn items store jewelry fields flattened on the item itself (no nested
+    // jewelryData wrapper, unlike Buy/Trade items) — so a jewelry-sourced pawn
+    // item IS its own jewelryData once converted.
+    const jewelryData = item.jewelryData || (item.sourceEstimator === 'jewelry' ? item : undefined);
+
+    if (type === 'buy') {
+      const buyItem = {
+        _lineId: item.id,
+        part_no: item.part_number || '',
+        category_id: item.category_id || '',
+        category_name: item.category || '',
+        description: item.item || '',
+        serial_number: item.serial_number || item.serial || '',
+        qty: item.qty || 1,
+        paid: parseFloat(item.amount) || 0,
+        images: item.images || [],
+        sourceEstimator: item.sourceEstimator,
+        jewelryData,
+        ...(item.fromInventory && { fromInventory: true, item_id: item.item_id }),
+      };
+      setWorkspaceTransactions(prev => {
+        const withPawnUpdated = prev.map(removePawnItem);
+        if (targetTicketId) {
+          return withPawnUpdated.map(t => {
+            if (!(t.type === 'BUY' && t.ticketId === targetTicketId)) return t;
+            return { ...t, buyItems: [...(t.buyItems || []), buyItem] };
+          });
+        } else {
+          const last = parseInt(localStorage.getItem('lastBTTicketNumber') || '0') + 1;
+          localStorage.setItem('lastBTTicketNumber', last.toString());
+          const newTicketId = `BT-${last.toString().padStart(8, '0')}`;
+          return [
+            ...withPawnUpdated,
+            { id: Date.now(), type: 'BUY', ticketId: newTicketId, buyItems: [buyItem], customer },
+          ];
+        }
+      });
+    }
+
+    if (type === 'trade') {
+      const tradeAllowance = parseFloat(item.amount) || 0;
+      const qty = item.qty || 1;
+      const tradeItem = {
+        _lineId: item.id,
+        part_no: item.part_number || '',
+        category_id: item.category_id || '',
+        category_name: item.category || '',
+        description: item.item || '',
+        serial_number: item.serial_number || item.serial || '',
+        qty,
+        tradeAllowance,
+        images: item.images || [],
+        sourceEstimator: item.sourceEstimator,
+        jewelryData,
+        ...(item.fromInventory && { fromInventory: true, item_id: item.item_id }),
+      };
+      setWorkspaceTransactions(prev => {
+        const withPawnUpdated = prev.map(removePawnItem);
+        if (targetTicketId) {
+          return withPawnUpdated.map(t => {
+            if (!(t.type === 'TRADE' && t.ticketId === targetTicketId)) return t;
+            const newTradeItems = [...(t.tradeItems || []), tradeItem];
+            const newTotal = newTradeItems.reduce((s, i) => s + (parseFloat(i.tradeAllowance) || 0) * (parseInt(i.qty) || 1), 0);
+            return { ...t, tradeItems: newTradeItems, totalTradeAllowance: newTotal, netDueToCustomer: newTotal - (t.totalSaleAfterTax || 0) };
+          });
+        } else {
+          const last = parseInt(localStorage.getItem('lastTTTicketNumber') || '100000') + 1;
+          localStorage.setItem('lastTTTicketNumber', last.toString());
+          const newTicketId = `TT-${last}`;
+          return [
+            ...withPawnUpdated,
+            {
+              id: Date.now(), type: 'TRADE', ticketId: newTicketId,
+              tradeItems: [tradeItem], saleItems: [],
+              totalTradeAllowance: tradeAllowance * qty,
+              totalSaleAfterTax: 0,
+              netDueToCustomer: tradeAllowance * qty,
+              taxAmount: 0, taxRate: 0.07,
+              customer,
+            },
+          ];
+        }
+      });
+    }
+  };
+
   if (pawnOpen) {
     const existingPawnData = openingTxId
       ? workspaceTransactions.find(t => t.id === openingTxId)
       : restoredPawnData;
+    const workspaceBuyTickets = workspaceTransactions.filter(t => t.type === 'BUY');
     return (
       <PawnTransactionScreen
         customer={customer}
         customerStats={customerStats}
         onClose={() => { setPawnOpen(false); setOpeningTxId(null); setRestoredPawnData(null); }}
         onAddToWorkspace={(data) => { handleAddPawnToWorkspace(data); setRestoredPawnData(null); }}
+        onConvertTo={handlePawnConvertTo}
+        onRemoveFromWorkspace={(ticketId) => {
+          setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'PAWN' && t.ticketId === ticketId)));
+          setPawnOpen(false);
+          setOpeningTxId(null);
+          setRestoredPawnData(null);
+        }}
         existingPawnData={existingPawnData}
+        workspaceBuyTickets={workspaceBuyTickets}
       />
     );
   }
