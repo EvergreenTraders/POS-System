@@ -50,17 +50,22 @@ export default function RePawnIntakeScreen({
 
   const backendBase = config.apiUrl.replace('/api', '');
 
+  // The original item's id — buildItem() no longer keeps it as item_id (a
+  // re-pawn gets its own fresh item_id), but .id is preserved across
+  // create/edit so history lookups keep working either way.
+  const originalItemId = selectedItem?.item_id || selectedItem?.id;
+
   useEffect(() => {
-    if (!selectedItem?.item_id) return;
+    if (!originalItemId) return;
     const token = localStorage.getItem('token');
     axios
-      .get(`${config.apiUrl}/jewelry/${selectedItem.item_id}/repawn-history`, {
+      .get(`${config.apiUrl}/jewelry/${originalItemId}/repawn-history`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       .then(res => setPawnHistory(res.data || []))
       .catch(err => console.error('Error fetching repawn history:', err))
       .finally(() => setHistoryLoading(false));
-  }, [selectedItem?.item_id]);
+  }, [originalItemId]);
 
   const histStats = useMemo(() => {
     if (!pawnHistory.length) return null;
@@ -87,30 +92,38 @@ export default function RePawnIntakeScreen({
     setPhotoPreview(URL.createObjectURL(file));
   };
 
-  const buildItem = () => ({
-    ...selectedItem,
-    id:          selectedItem.item_id,
-    item_id:     selectedItem.item_id,
-    item:        selectedItem.short_desc || selectedItem.long_desc || '',
-    long_desc:   selectedItem.long_desc  || selectedItem.short_desc || '',
-    short_desc:  selectedItem.short_desc || '',
-    category:    selectedItem.category   || '',
-    metal_category: selectedItem.category || '',
-    serial:      selectedItem.serial_number || '',
-    serial_number: selectedItem.serial_number || '',
-    amount:      parseFloat(pawnAmount) || 0,
-    price:       parseFloat(pawnAmount) || 0,
-    qty:         1,
-    condition,
-    notes,
-    verification,
-    isRePawn:    true,
-    sourceEstimator: 'jewelry',
-    // Preserve original server images for the "Previous Item" thumbnail on re-edit
-    sourceImages: selectedItem.sourceImages || selectedItem.images || [],
-    // Only the intake photo goes into images (used by checkout for upload)
-    images: photoFile ? [{ url: photoPreview, file: photoFile, isPrimary: true }] : [],
-  });
+  const buildItem = () => {
+    // item_id is intentionally dropped here — a re-pawned item gets a brand
+    // new item_id (assigned server-side from the new pawn_ticket_id, same as
+    // any other freshly-intaked pawn item) instead of reusing the original
+    // item's id. That's what makes checkout create a genuinely new jewelry
+    // record (with this item's own photo/condition/notes) rather than
+    // silently colliding with and reusing the old record.
+    const { item_id: _originalItemId, ...rest } = selectedItem;
+    return {
+      ...rest,
+      id:          selectedItem.id || selectedItem.item_id,
+      item:        selectedItem.short_desc || selectedItem.long_desc || '',
+      long_desc:   selectedItem.long_desc  || selectedItem.short_desc || '',
+      short_desc:  selectedItem.short_desc || '',
+      category:    selectedItem.category   || '',
+      metal_category: selectedItem.category || '',
+      serial:      selectedItem.serial_number || '',
+      serial_number: selectedItem.serial_number || '',
+      amount:      parseFloat(pawnAmount) || 0,
+      price:       parseFloat(pawnAmount) || 0,
+      qty:         1,
+      condition,
+      notes,
+      verification,
+      isRePawn:    true,
+      sourceEstimator: 'jewelry',
+      // Preserve original server images for the "Previous Item" thumbnail on re-edit
+      sourceImages: selectedItem.sourceImages || selectedItem.images || [],
+      // Only the intake photo goes into images (used by checkout for upload)
+      images: photoFile ? [{ url: photoPreview, file: photoFile, isPrimary: true }] : [],
+    };
+  };
 
   const allVerified  = VERIFY_ITEMS.every(v => !!verification[v]);
   const canSave      = !!photoPreview && !!condition && allVerified;
