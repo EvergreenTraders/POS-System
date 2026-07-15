@@ -268,6 +268,26 @@ export default function PawnTransactionScreen({
     setTotalPawnOverride(null);
   }, [pawnItems]);
 
+  // Editing the Total Pawn Amount proportionally rescales every item's own
+  // amount to match, so the item list itself reflects the adjustment instead
+  // of only the summary total.
+  const handleTotalPawnAmountBlur = () => {
+    if (totalPawnOverride === null || totalPawnOverride === undefined) return;
+    if (pawnItems.length === 0 || autoTotalPawnAmount <= 0) { setTotalPawnOverride(null); return; }
+    const newTotal = Math.round(totalPawnOverride * 100) / 100;
+    const scale = newTotal / autoTotalPawnAmount;
+    setPawnItems(prev => {
+      const scaledAmounts = prev.map(item => Math.round((item.amount || 0) * scale * 100) / 100);
+      // Nudge the last item so the items sum exactly to the typed total
+      // (per-item rounding can otherwise drift a cent or two off).
+      const lastIdx = scaledAmounts.length - 1;
+      const sumExceptLast = scaledAmounts.slice(0, -1).reduce((s, v) => s + v, 0);
+      scaledAmounts[lastIdx] = Math.round((newTotal - sumExceptLast) * 100) / 100;
+      return prev.map((item, i) => ({ ...item, amount: scaledAmounts[i] }));
+    });
+    setTotalPawnOverride(null);
+  };
+
   const totalPawnAmount = totalPawnOverride ?? autoTotalPawnAmount;
   const interestRate    = parseFloat(pawnConfig?.interest_rate)  || 0;
   const insuranceRate   = parseFloat(pawnConfig?.insurance_rate) || 0;
@@ -1208,6 +1228,7 @@ export default function PawnTransactionScreen({
               fullWidth
               value={totalPawnOverride ?? autoTotalPawnAmount}
               onChange={e => setTotalPawnOverride(e.target.value === '' ? null : parseFloat(e.target.value) || 0)}
+              onBlur={handleTotalPawnAmountBlur}
               inputProps={{ min: 0, step: 0.01, style: { fontWeight: 800, fontSize: 24, color: (totalPawnOverride ?? autoTotalPawnAmount) > 0 ? '#c62828' : undefined } }}
               sx={{ mt: 0.5, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
               InputProps={{
