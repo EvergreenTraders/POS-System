@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
@@ -14,6 +14,7 @@ import BuyTransactionScreen from './BuyTransactionScreen';
 import TradeTransactionScreen from './TradeTransactionScreen';
 import PaymentTransactionScreen from './PaymentTransactionScreen';
 import RedeemTransactionScreen from './RedeemTransactionScreen';
+import { useWorkspaceGuard } from '../context/WorkspaceGuardContext';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
@@ -417,38 +418,13 @@ function TransactionTypeButton({ label, icon, color, onClick, count }) {
   );
 }
 
-// ── Workspace localStorage helpers (mirrors CustomerTicket.js pattern) ────────
+// ── Workspace localStorage cleanup (legacy) ───────────────────────────────────
+// The workspace no longer auto-persists to localStorage or auto-restores on
+// customer switch/reload — an unfinished workspace only survives via explicit
+// "Park" (backed by the parked_workspaces table). This just clears out any
+// stale workspace_* entries left over from before that change.
 
 const WORKSPACE_EXPIRY_MS = 24 * 60 * 60 * 1000;
-
-function saveWorkspaceForId(customerId, transactions) {
-  try {
-    const key = customerId ? `workspace_${customerId}` : 'workspace_global';
-    localStorage.setItem(key, JSON.stringify({ transactions, timestamp: Date.now() }));
-  } catch (e) {
-    console.error('Error saving workspace:', e);
-  }
-}
-
-function loadWorkspaceForId(customerId) {
-  try {
-    const key = customerId ? `workspace_${customerId}` : 'workspace_global';
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed?.timestamp) {
-      if (Date.now() - parsed.timestamp > WORKSPACE_EXPIRY_MS) {
-        localStorage.removeItem(key);
-        return null;
-      }
-      return parsed.transactions;
-    }
-    return null;
-  } catch (e) {
-    console.error('Error loading workspace:', e);
-    return null;
-  }
-}
 
 function cleanupExpiredWorkspaces() {
   try {
@@ -643,6 +619,7 @@ function TradeTransactionCard({ tx, tradeIcon, tradeColor, onOpen, onVoid }) {
 export default function ModernTransactions() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { registerGuard } = useWorkspaceGuard();
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [quickSaleMaxAmount, setQuickSaleMaxAmount] = useState(100);
@@ -793,11 +770,8 @@ export default function ModernTransactions() {
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
   const [parkSnackbar, setParkSnackbar]   = useState(null); // { severity, message }
 
-  // Refs for localStorage persistence (mirrors CustomerTicket.js pattern)
   const customerIdRef = useRef(undefined);
-  const workspaceTransactionsRef = useRef(workspaceTransactions);
-  const initialLoadCompleteRef = useRef(false);
-  const pendingResumeWorkspaceRef = useRef(null); // workspace to load on next customer change
+  const pendingResumeWorkspaceRef = useRef(null); // workspace to load on next customer change (from Park resume)
 
   // Customer state
   const [customer, setCustomer] = useState(null);
@@ -822,35 +796,25 @@ export default function ModernTransactions() {
 
 
 
-  // On customer change: save old customer's workspace, load new customer's workspace
+  // On customer change: the workspace is never auto-restored — it starts
+  // empty for whichever customer is now selected. The one exception is
+  // resuming an explicitly Parked workspace (pendingResumeWorkspaceRef, set
+  // by the "Resume" flow below), which supplies its own transactions.
+  // Actually switching customers while there's unparked work is gated
+  // upstream by confirmLeaveWorkspace (see handleSelectCustomer/handleClearCustomer),
+  // so by the time this effect runs, workspaceTransactions is already safe to reset.
   useEffect(() => {
     const prevId = customerIdRef.current;
     const newId = customer?.id;
-    const customerChanged = prevId !== newId;
-
-    if (!initialLoadCompleteRef.current || customerChanged) {
-      if (customerChanged && prevId !== undefined) {
-        saveWorkspaceForId(prevId, workspaceTransactionsRef.current);
-      }
-      if (pendingResumeWorkspaceRef.current !== null) {
-        setWorkspaceTransactions(pendingResumeWorkspaceRef.current);
-        pendingResumeWorkspaceRef.current = null;
-      } else {
-        const saved = loadWorkspaceForId(newId);
-        setWorkspaceTransactions(saved || []);
-      }
-      customerIdRef.current = newId;
-      initialLoadCompleteRef.current = true;
+    if (prevId === newId) return;
+    if (pendingResumeWorkspaceRef.current !== null) {
+      setWorkspaceTransactions(pendingResumeWorkspaceRef.current);
+      pendingResumeWorkspaceRef.current = null;
+    } else {
+      setWorkspaceTransactions([]);
     }
+    customerIdRef.current = newId;
   }, [customer?.id]);
-
-  // Keep ref in sync and auto-save to localStorage whenever workspace changes
-  useEffect(() => {
-    workspaceTransactionsRef.current = workspaceTransactions;
-    if (initialLoadCompleteRef.current) {
-      saveWorkspaceForId(customer?.id, workspaceTransactions);
-    }
-  }, [workspaceTransactions, customer?.id]);
 
   // When customerStats loads, refresh overduePawnCount on all PAWN cards in the workspace
   // (handles stale localStorage cards and race conditions during card creation)
@@ -1166,6 +1130,9 @@ export default function ModernTransactions() {
   };
 
   const handleSelectCustomer = async (c) => {
+    const proceed = await confirmLeaveWorkspace();
+    if (!proceed) return;
+
     setCustomerStats(null);
     setCustomerSearch('');
     setCustomerResults([]);
@@ -1192,7 +1159,12 @@ export default function ModernTransactions() {
     }
   };
 
-  const handleClearCustomer = () => { setCustomer(null); setCustomerStats(null); };
+  const handleClearCustomer = async () => {
+    const proceed = await confirmLeaveWorkspace();
+    if (!proceed) return;
+    setCustomer(null);
+    setCustomerStats(null);
+  };
 
   const handleAddPawnToWorkspace = (pawnData) => {
     setWorkspaceTransactions(prev => {
@@ -1213,6 +1185,25 @@ export default function ModernTransactions() {
     setVoidConfirm(null);
   };
 
+  // Core park POST, shared by the "Park" button and the leave-workspace
+  // warning dialog's "Park" option. Does not touch customer/workspace state —
+  // callers decide what to reset after a successful park.
+  const parkWorkspace = async (targetCustomer, targetTransactions) => {
+    const u = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+    try {
+      await axios.post(`${config.apiUrl}/parked-workspaces`, {
+        customer_id: targetCustomer.id,
+        workspace_data: stripImages(targetTransactions),
+        parked_by_employee_id: u.id || null,
+      }, { headers });
+      window.dispatchEvent(new CustomEvent('parkedWorkspacesChanged'));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const handleParkTransaction = async () => {
     if (!customer) {
       setParkSnackbar({ severity: 'warning', message: 'Select a customer before parking.' });
@@ -1222,22 +1213,73 @@ export default function ModernTransactions() {
       setParkSnackbar({ severity: 'warning', message: 'Workspace is empty — nothing to park.' });
       return;
     }
-    const u = JSON.parse(localStorage.getItem('user') || '{}');
-    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
-    try {
-      const res = await axios.post(`${config.apiUrl}/parked-workspaces`, {
-        customer_id: customer.id,
-        workspace_data: stripImages(workspaceTransactions),
-        parked_by_employee_id: u.id || null,
-      }, { headers });
+    const ok = await parkWorkspace(customer, workspaceTransactions);
+    if (ok) {
       setWorkspaceTransactions([]);
-      setCustomer(null);
-      window.dispatchEvent(new CustomEvent('parkedWorkspacesChanged'));
       setParkSnackbar({ severity: 'success', message: `Workspace parked for ${customer.first_name}. Any employee can resume it.` });
-    } catch {
+      setCustomer(null);
+    } else {
       setParkSnackbar({ severity: 'error', message: 'Failed to park workspace. Try again.' });
     }
   };
+
+  // ── Leave-workspace guard ──────────────────────────────────────────────────
+  // Anything sitting in the workspace that hasn't been explicitly Parked is
+  // considered "unsaved" — switching customers or navigating away (via the
+  // Sidebar) triggers this dialog instead of silently carrying it along or
+  // silently discarding it.
+  const [leaveWarningOpen, setLeaveWarningOpen] = useState(false);
+  const leaveResolveRef = useRef(null);
+
+  const confirmLeaveWorkspace = useCallback(() => {
+    if (workspaceTransactions.length === 0) return Promise.resolve(true);
+    return new Promise(resolve => {
+      leaveResolveRef.current = resolve;
+      setLeaveWarningOpen(true);
+    });
+  }, [workspaceTransactions.length]);
+
+  const resolveLeaveWarning = (proceed) => {
+    setLeaveWarningOpen(false);
+    const resolve = leaveResolveRef.current;
+    leaveResolveRef.current = null;
+    resolve?.(proceed);
+  };
+
+  const handleLeaveDelete = () => {
+    setWorkspaceTransactions([]);
+    setParkSnackbar({ severity: 'info', message: 'Workspace items discarded.' });
+    resolveLeaveWarning(true);
+  };
+
+  const handleLeaveReturn = () => resolveLeaveWarning(false);
+
+  const handleLeavePark = async () => {
+    if (!customer) {
+      setParkSnackbar({ severity: 'warning', message: 'Select a customer before parking.' });
+      resolveLeaveWarning(false);
+      return;
+    }
+    const ok = await parkWorkspace(customer, workspaceTransactions);
+    if (ok) {
+      setWorkspaceTransactions([]);
+      setParkSnackbar({ severity: 'success', message: `Workspace parked for ${customer.first_name}. Any employee can resume it.` });
+      resolveLeaveWarning(true);
+    } else {
+      setParkSnackbar({ severity: 'error', message: 'Failed to park workspace. Try again.' });
+      resolveLeaveWarning(false);
+    }
+  };
+
+  // Let the Sidebar (or anything else using WorkspaceGuardContext) ask
+  // permission before navigating away from this page.
+  useEffect(() => {
+    const unregister = registerGuard({
+      hasUnparkedWork: workspaceTransactions.length > 0,
+      confirmLeave: confirmLeaveWorkspace,
+    });
+    return unregister;
+  }, [registerGuard, workspaceTransactions.length, confirmLeaveWorkspace]);
 
 
   const handleCheckoutAll = () => {
@@ -2378,6 +2420,25 @@ export default function ModernTransactions() {
         <DialogActions>
           <Button onClick={() => setVoidConfirm(null)}>Cancel</Button>
           <Button variant="contained" color="error" onClick={handleConfirmVoid}>Void Ticket</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Leave-workspace warning: shown when switching customers or navigating
+          away while the workspace has unparked items ── */}
+      <Dialog open={leaveWarningOpen} onClose={handleLeaveReturn} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Open Ticket in Workspace</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            You have {workspaceTransactions.length} unsaved transaction{workspaceTransactions.length !== 1 ? 's' : ''} in the workspace.
+            Park it to save for later, delete it, or go back and finish it now.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 2.5, py: 1.5, gap: 1 }}>
+          <Button color="error" onClick={handleLeaveDelete}>Delete</Button>
+          <Button onClick={handleLeaveReturn}>Return to Workspace</Button>
+          <Button variant="contained" sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT } }} onClick={handleLeavePark}>
+            Park
+          </Button>
         </DialogActions>
       </Dialog>
 

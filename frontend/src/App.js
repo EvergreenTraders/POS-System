@@ -12,6 +12,7 @@ import { CartProvider } from './context/CartContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WorkingDateProvider } from './context/WorkingDateContext';
 import { StoreStatusProvider, useStoreStatus } from './context/StoreStatusContext';
+import { WorkspaceGuardProvider } from './context/WorkspaceGuardContext';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import Login from './components/Login';
@@ -300,6 +301,7 @@ function App() {
           <WorkingDateProvider>
             <StoreStatusProvider>
             <CartProvider>
+            <WorkspaceGuardProvider>
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route
@@ -702,6 +704,7 @@ function App() {
               />
               <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
+            </WorkspaceGuardProvider>
             </CartProvider>
             </StoreStatusProvider>
           </WorkingDateProvider>
