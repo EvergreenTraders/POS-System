@@ -19,6 +19,11 @@ CREATE TABLE IF NOT EXISTS jewelry_item_history (
     FOREIGN KEY (changed_by) REFERENCES employees(employee_id)
 );
 
+-- item_id was originally VARCHAR(10), too narrow for real item ids like
+-- "PT-00000069-01" — widen to match jewelry.item_id (VARCHAR(30)) so status
+-- history logging doesn't silently fail with "value too long" for existing deployments
+ALTER TABLE jewelry_item_history ALTER COLUMN item_id TYPE VARCHAR(30);
+
 -- =============================================
 -- 2. Create indexes for better performance
 -- =============================================

@@ -248,7 +248,7 @@ function Checkout() {
 
         setIsInitialized(true);
       }
-      else if (fromSource === 'cart' || fromSource === 'workspace' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket' || fromSource === 'trade-ticket' || fromSource === 'payment-ticket') {
+      else if (fromSource === 'cart' || fromSource === 'workspace' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket' || fromSource === 'trade-ticket' || fromSource === 'payment-ticket' || fromSource === 'redeem-ticket') {
         // Store the items to checkout and all cart items separately
         const items = itemsToCheckout;
 

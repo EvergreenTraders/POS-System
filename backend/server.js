@@ -9230,7 +9230,7 @@ app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
     if (actionType) {
       await client.query(`
         INSERT INTO pawn_history (pawn_ticket_id, action_type, performed_by, notes)
-        SELECT $1, $2, $3, $4
+        SELECT $1::varchar, $2::varchar, $3, $4
         WHERE NOT EXISTS (
           SELECT 1 FROM pawn_history
           WHERE pawn_ticket_id = $1 AND action_type = $2

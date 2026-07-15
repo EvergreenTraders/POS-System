@@ -214,7 +214,9 @@ export default function RedeemTransactionScreen({
   };
 
   return (
-    <Box sx={{ display: 'flex', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
+
+      <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
       {/* ── Main content ── */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
@@ -399,48 +401,6 @@ export default function RedeemTransactionScreen({
           )}
 
         </Box>
-
-        {/* Bottom action bar */}
-        <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-            <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-              Ticket Note
-            </Typography>
-            <TextField
-              fullWidth size="small"
-              placeholder="Add a note for this ticket (optional)"
-              value={ticketNote}
-              onChange={e => setTicketNote(e.target.value)}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-            />
-          </Box>
-          <FormControlLabel
-            control={<Checkbox size="small" checked={showOnReceipt} onChange={e => setShowOnReceipt(e.target.checked)} />}
-            label={<Typography variant="caption">Show on receipt</Typography>}
-            sx={{ whiteSpace: 'nowrap', mr: 0 }}
-          />
-          <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-          <Button variant="outlined" onClick={onClose} sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-            Cancel
-          </Button>
-          <Button
-            variant="outlined"
-            onClick={handleAddToWorkspace}
-            disabled={selectedRedemptions.length === 0}
-            sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, borderColor: REDEEM_TEAL, color: REDEEM_TEAL, '&:hover': { borderColor: REDEEM_DARK, bgcolor: '#f0fdfa' } }}
-          >
-            Add to Workspace
-          </Button>
-          <Button
-            variant="contained"
-            endIcon={<MuiIcons.ArrowForward />}
-            disabled={selectedRedemptions.length === 0}
-            onClick={handleCheckoutNow}
-            sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, fontWeight: 700 }}
-          >
-            Checkout Now
-          </Button>
-        </Paper>
       </Box>
 
       {/* ── Right: Customer + Summary panel ── */}
@@ -572,6 +532,50 @@ export default function RedeemTransactionScreen({
             </Box>
           </Stack>
         </Box>
+      </Paper>
+
+      </Box>
+
+      {/* Bottom action bar — spans the full screen width, below both the main content and the customer panel */}
+      <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+          <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+            Ticket Note
+          </Typography>
+          <TextField
+            fullWidth size="small"
+            placeholder="Add a note for this ticket (optional)"
+            value={ticketNote}
+            onChange={e => setTicketNote(e.target.value)}
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+          />
+        </Box>
+        <FormControlLabel
+          control={<Checkbox size="small" checked={showOnReceipt} onChange={e => setShowOnReceipt(e.target.checked)} />}
+          label={<Typography variant="caption">Show on receipt</Typography>}
+          sx={{ whiteSpace: 'nowrap', mr: 0 }}
+        />
+        <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+        <Button variant="outlined" onClick={onClose} sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+          Cancel
+        </Button>
+        <Button
+          variant="outlined"
+          onClick={handleAddToWorkspace}
+          disabled={selectedRedemptions.length === 0}
+          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, borderColor: REDEEM_TEAL, color: REDEEM_TEAL, '&:hover': { borderColor: REDEEM_DARK, bgcolor: '#f0fdfa' } }}
+        >
+          Add to Workspace
+        </Button>
+        <Button
+          variant="contained"
+          endIcon={<MuiIcons.ArrowForward />}
+          disabled={selectedRedemptions.length === 0}
+          onClick={handleCheckoutNow}
+          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, fontWeight: 700 }}
+        >
+          Checkout Now
+        </Button>
       </Paper>
 
       <Snackbar
