@@ -240,6 +240,7 @@ function SystemConfig() {
   const [diamondEstimates, setDiamondEstimates] = useState([]);
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
   const [parkedWorkspaceRetention, setParkedWorkspaceRetention] = useState({ hours: 24, id: null });
+  const [quickSaleConfig, setQuickSaleConfig] = useState({ max_amount: 100, id: null });
   const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
   const [drawers, setDrawers] = useState([]);
   const [numberOfSafeDrawers, setNumberOfSafeDrawers] = useState({ count: 0, id: null });
@@ -713,6 +714,21 @@ function SystemConfig() {
       }
     };
 
+    const fetchQuickSaleConfig = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/quick-sale-config`);
+        if (response.data) {
+          setQuickSaleConfig({
+            max_amount: parseFloat(response.data.max_amount) ?? 100,
+            id: response.data.id || null
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching quick sale config:', error);
+        setQuickSaleConfig({ max_amount: 100, id: null });
+      }
+    };
+
     const fetchTaxConfig = async () => {
       try {
         const response = await axios.get(`${API_BASE_URL}/tax-config`);
@@ -816,6 +832,7 @@ function SystemConfig() {
     fetchCaratConversion();
     fetchInventoryHoldPeriod();
     fetchParkedWorkspaceRetention();
+    fetchQuickSaleConfig();
     fetchDrawerConfig();
     fetchDrawers();
     fetchCasesConfig();
@@ -1713,6 +1730,42 @@ const handleTabChange = (event, newValue) => {
       setSnackbar({
         open: true,
         message: 'Failed to update parked workspace retention configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleQuickSaleConfigChange = async (event) => {
+    const newMax = parseFloat(event.target.value);
+    if (isNaN(newMax) || newMax < 0) {
+      setSnackbar({
+        open: true,
+        message: 'Quick sale max amount must be a number >= 0',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.put(`${API_BASE_URL}/quick-sale-config`, {
+        max_amount: newMax
+      });
+
+      setQuickSaleConfig({
+        max_amount: parseFloat(response.data.max_amount),
+        id: response.data.id
+      });
+
+      setSnackbar({
+        open: true,
+        message: `Quick sale limit set to $${newMax.toFixed(2)}.`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating quick sale config:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update quick sale configuration',
         severity: 'error'
       });
     }
@@ -4056,6 +4109,29 @@ const handleTabChange = (event, newValue) => {
                     endAdornment: <InputAdornment position="end">hours</InputAdornment>,
                   }}
                   helperText="How long anonymous (no customer) parked workspaces remain available before being automatically removed"
+                  fullWidth
+                />
+              </Grid>
+            </Grid>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Quick Sale Limit
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={4}>
+                <TextField
+                  label="Max Quick Sale Amount"
+                  type="number"
+                  value={quickSaleConfig.max_amount}
+                  onChange={(e) => setQuickSaleConfig(prev => ({ ...prev, max_amount: e.target.value }))}
+                  onBlur={(e) => handleQuickSaleConfigChange(e)}
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                  }}
+                  inputProps={{ min: 0, step: 0.01 }}
+                  helperText="Above this total, a quick sale (no customer selected) requires selecting a real customer, like a normal sale"
                   fullWidth
                 />
               </Grid>

@@ -242,6 +242,23 @@ BEGIN
     SELECT 'size', 0
     WHERE NOT EXISTS (SELECT 1 FROM storage_fee_config LIMIT 1);
 
+    -- Create quick_sale_config table for the max amount a no-customer "quick
+    -- sale" checkout is allowed to total before a real customer is required
+    CREATE TABLE IF NOT EXISTS quick_sale_config (
+        id SERIAL PRIMARY KEY,
+        max_amount NUMERIC(10,2) NOT NULL DEFAULT 100.00,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP,
+        CONSTRAINT valid_quick_sale_max_amount CHECK (max_amount >= 0)
+    );
+
+    COMMENT ON TABLE quick_sale_config IS 'Stores the max total a no-customer quick sale checkout is allowed before a real customer must be selected';
+
+    -- Insert default configuration if table is empty
+    INSERT INTO quick_sale_config (max_amount)
+    SELECT 100.00
+    WHERE NOT EXISTS (SELECT 1 FROM quick_sale_config LIMIT 1);
+
 END $$;
 
 -- Store-scope all system config tables
@@ -255,3 +272,4 @@ ALTER TABLE inventory_hold_period ADD COLUMN IF NOT EXISTS store_id INTEGER REFE
 ALTER TABLE receipt_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
 ALTER TABLE parked_workspace_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
 ALTER TABLE storage_fee_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+ALTER TABLE quick_sale_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);

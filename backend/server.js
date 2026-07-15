@@ -253,6 +253,7 @@ const storeClosedMiddleware = async (req, res, next) => {
     '/api/inventory-hold-period/config',
     '/api/parked-workspace-config',
     '/api/storage-fee-config',
+    '/api/quick-sale-config',
     '/api/item-sizes',
     '/api/customer-preferences/',
     '/api/diamond_estimates',
@@ -9839,6 +9840,48 @@ app.put('/api/storage-fee-config', async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating storage fee config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Quick Sale Configuration API Endpoints (max total allowed for a no-customer checkout)
+app.get('/api/quick-sale-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM quick_sale_config ORDER BY created_at DESC LIMIT 1');
+    if (result.rows.length === 0) {
+      return res.json({ max_amount: 100.00 });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching quick sale config:', err);
+    res.status(500).json({ error: 'Failed to fetch quick sale configuration' });
+  }
+});
+
+app.put('/api/quick-sale-config', async (req, res) => {
+  try {
+    const { max_amount } = req.body;
+    const maxAmount = parseFloat(max_amount);
+    if (isNaN(maxAmount) || maxAmount < 0) {
+      return res.status(400).json({ error: 'max_amount must be a number >= 0' });
+    }
+
+    const checkResult = await pool.query('SELECT * FROM quick_sale_config');
+    let result;
+    if (checkResult.rows.length === 0) {
+      result = await pool.query(
+        'INSERT INTO quick_sale_config (max_amount) VALUES ($1) RETURNING *',
+        [maxAmount]
+      );
+    } else {
+      result = await pool.query(
+        'UPDATE quick_sale_config SET max_amount = $1, updated_at = CURRENT_TIMESTAMP RETURNING *',
+        [maxAmount]
+      );
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating quick sale config:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

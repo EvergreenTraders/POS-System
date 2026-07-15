@@ -7,6 +7,7 @@ import {
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions,
   Tooltip, Snackbar, Alert, Stack, Menu, MenuItem,
+  Grid, List, ListItem, ListItemAvatar, ListItemText,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
@@ -124,6 +125,7 @@ export default function SaleTransactionScreen({
   onClose,
   onAddToWorkspace,
   onRemoveFromWorkspace,
+  onSelectCustomer,
   existingSaleData,
 }) {
   const navigate = useNavigate();
@@ -153,6 +155,12 @@ export default function SaleTransactionScreen({
   const [custStats,      setCustStats]      = useState(customerStats || null);
   const [custSalesStats, setCustSalesStats] = useState(null);
 
+  // Customer picker (search + select — used when no customer is set yet, e.g. quick sale)
+  const [customerPickerOpen,       setCustomerPickerOpen]       = useState(false);
+  const [customerPickerForm,       setCustomerPickerForm]       = useState({ first_name: '', last_name: '', id_number: '', phone: '' });
+  const [customerPickerResults,    setCustomerPickerResults]    = useState([]);
+  const [customerPickerSearching,  setCustomerPickerSearching]  = useState(false);
+
   // Discount
   const [discountDialog,    setDiscountDialog]    = useState(false);
   const [globalDiscount,    setGlobalDiscount]    = useState(existingSaleData?.globalDiscount || 0);
@@ -168,6 +176,7 @@ export default function SaleTransactionScreen({
   const [convertAnchor, setConvertAnchor] = useState(null);
   const [convertRow,    setConvertRow]    = useState(null);
   const [transactionTypes, setTransactionTypes] = useState([]);
+  const [quickSaleMaxAmount, setQuickSaleMaxAmount] = useState(100);
 
   // Sync counter with DB on first open (skip for restored workspace tickets
   // which already have a committed ID).
@@ -183,6 +192,12 @@ export default function SaleTransactionScreen({
   useEffect(() => {
     axios.get(`${config.apiUrl}/transaction-types`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
       .then(res => setTransactionTypes(res.data))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    axios.get(`${config.apiUrl}/quick-sale-config`)
+      .then(res => setQuickSaleMaxAmount(parseFloat(res.data?.max_amount) || 0))
       .catch(() => {});
   }, []);
 
@@ -375,6 +390,43 @@ export default function SaleTransactionScreen({
     });
   };
 
+  const handleCustomerPickerSearch = async () => {
+    const { first_name, last_name, id_number, phone } = customerPickerForm;
+    if (!first_name && !last_name && !id_number && !phone) {
+      showSnackbar('Please enter at least one search criteria', 'warning');
+      return;
+    }
+    setCustomerPickerSearching(true);
+    try {
+      const params = {};
+      if (first_name.trim()) params.first_name = first_name.trim();
+      if (last_name.trim())  params.last_name  = last_name.trim();
+      if (id_number.trim())  params.id_number  = id_number.trim();
+      if (phone.trim())      params.phone      = phone.trim();
+      const queryParams = new URLSearchParams(params).toString();
+      const response = await fetch(`${config.apiUrl}/customers/search?${queryParams}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      if (!response.ok) throw new Error('Failed to search customers');
+      const data = await response.json();
+      setCustomerPickerResults(data);
+      if (data.length === 0) showSnackbar('No customers found matching your search criteria', 'info');
+      else if (data.length === 1) handleCustomerPickerSelect(data[0]);
+    } catch (error) {
+      console.error('Error searching customers:', error);
+      showSnackbar(`Error: ${error.message}`, 'error');
+    } finally {
+      setCustomerPickerSearching(false);
+    }
+  };
+
+  const handleCustomerPickerSelect = (customerData) => {
+    onSelectCustomer?.(customerData);
+    setCustomerPickerOpen(false);
+    setCustomerPickerForm({ first_name: '', last_name: '', id_number: '', phone: '' });
+    setCustomerPickerResults([]);
+  };
+
   const handleSaveAsQuote = async () => {
     if (!customer?.id) { showSnackbar('Please select a customer before saving as quote', 'error'); return; }
     if (saleItems.length === 0) { showSnackbar('Add at least one item to save as quote', 'warning'); return; }
@@ -424,6 +476,15 @@ export default function SaleTransactionScreen({
 
   const handleCheckoutNow = () => {
     if (saleItems.length === 0) { showSnackbar('Add at least one item to checkout', 'warning'); return; }
+    // A no-customer "quick sale" is only allowed under the configured limit —
+    // above it, a real customer must be selected, same as any other sale.
+    if (!customer && total > quickSaleMaxAmount) {
+      showSnackbar(
+        `Quick sale total ($${total.toFixed(2)}) exceeds the $${quickSaleMaxAmount.toFixed(2)} limit. Please select a customer to continue.`,
+        'warning'
+      );
+      return;
+    }
     const cartCustomer = customer
       ? { id: customer.id, first_name: customer.first_name, last_name: customer.last_name, name: `${customer.first_name} ${customer.last_name}`.trim(), phone: customer.phone || '', email: customer.email || '', tax_exempt: customer.tax_exempt || false }
       : { id: null, first_name: 'Walk-in', last_name: 'Customer', name: 'Walk-in Customer', phone: '', email: '' };
@@ -800,7 +861,11 @@ export default function SaleTransactionScreen({
                   <Typography fontSize={11} color="text.secondary" noWrap>{customer.phone}</Typography>
                 )}
               </Box>
-              <IconButton size="small" onClick={handleEditCustomer} disabled={!customer}>
+              <IconButton
+                size="small"
+                onClick={() => customer ? handleEditCustomer() : setCustomerPickerOpen(true)}
+                title={customer ? 'Edit customer' : 'Select customer'}
+              >
                 <MuiIcons.Edit sx={{ fontSize: 15, color: GREEN }} />
               </IconButton>
             </Box>
@@ -959,6 +1024,83 @@ export default function SaleTransactionScreen({
             sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_DARK } }}>
             Apply
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Customer picker (search + select) ── */}
+      <Dialog open={customerPickerOpen} onClose={() => setCustomerPickerOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Select Customer</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={1} sx={{ mt: 0.5, mb: 1 }}>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth size="small" label="First Name"
+                value={customerPickerForm.first_name}
+                onChange={e => setCustomerPickerForm(f => ({ ...f, first_name: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth size="small" label="Last Name"
+                value={customerPickerForm.last_name}
+                onChange={e => setCustomerPickerForm(f => ({ ...f, last_name: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth size="small" label="ID Number"
+                value={customerPickerForm.id_number}
+                onChange={e => setCustomerPickerForm(f => ({ ...f, id_number: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth size="small" label="Phone"
+                value={customerPickerForm.phone}
+                onChange={e => setCustomerPickerForm(f => ({ ...f, phone: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+              />
+            </Grid>
+          </Grid>
+          <Button
+            fullWidth variant="outlined"
+            onClick={handleCustomerPickerSearch}
+            disabled={customerPickerSearching}
+            sx={{ mb: 1.5, borderColor: GREEN, color: GREEN, '&:hover': { borderColor: GREEN_DARK, bgcolor: '#e8f5e9' } }}
+          >
+            {customerPickerSearching ? <CircularProgress size={18} /> : 'Search'}
+          </Button>
+          <Box sx={{ maxHeight: 280, overflow: 'auto', border: '1px solid #e0e0e0', borderRadius: 1 }}>
+            <List dense disablePadding>
+              {customerPickerResults.length > 0 ? (
+                customerPickerResults.map(c => (
+                  <ListItem key={c.id} button divider onClick={() => handleCustomerPickerSelect(c)}>
+                    <ListItemAvatar>
+                      <Avatar sx={{ width: 32, height: 32, fontSize: 13, bgcolor: '#e8f5e9', color: GREEN }}>
+                        {`${c.first_name?.[0] || ''}${c.last_name?.[0] || ''}`}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={`${c.first_name || ''} ${c.last_name || ''}`}
+                      secondary={[c.phone, c.email].filter(Boolean).join(' | ')}
+                    />
+                  </ListItem>
+                ))
+              ) : (
+                <Box sx={{ p: 2, textAlign: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Search by name, ID number, or phone to find a customer.
+                  </Typography>
+                </Box>
+              )}
+            </List>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCustomerPickerOpen(false)}>Cancel</Button>
         </DialogActions>
       </Dialog>
 

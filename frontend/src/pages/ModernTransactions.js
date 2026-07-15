@@ -592,6 +592,7 @@ export default function ModernTransactions() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
+  const [quickSaleMaxAmount, setQuickSaleMaxAmount] = useState(100);
   const [pawnOpen, setPawnOpen]           = useState(false);
   const [buyOpen, setBuyOpen] = useState(() => {
     if (location.state?.customerUpdated) {
@@ -727,6 +728,9 @@ export default function ModernTransactions() {
     axios.get(`${config.apiUrl}/transaction-types`)
       .then(res => setTransactionTypes(res.data))
       .catch(err => console.error('Failed to load transaction types:', err));
+    axios.get(`${config.apiUrl}/quick-sale-config`)
+      .then(res => setQuickSaleMaxAmount(parseFloat(res.data?.max_amount) || 0))
+      .catch(err => console.error('Failed to load quick sale config:', err));
   }, []);
 
   // Clean up expired workspace entries on mount
@@ -1109,8 +1113,22 @@ export default function ModernTransactions() {
 
   const handleCheckoutAll = () => {
     if (workspaceTransactions.length === 0) return;
-    const isQuickSale = !customer && workspaceTransactions.every(tx => tx.type === 'SALE');
-    if (!customer && !isQuickSale) return;
+    const isAllSale = workspaceTransactions.every(tx => tx.type === 'SALE');
+    const quickSaleTotal = isAllSale
+      ? workspaceTransactions.reduce((sum, tx) => sum + Number(tx.total || 0), 0)
+      : 0;
+    // A no-customer "quick sale" is only allowed under the configured limit —
+    // above it, require a real customer just like any other sale.
+    const isQuickSale = !customer && isAllSale && quickSaleTotal <= quickSaleMaxAmount;
+    if (!customer && !isQuickSale) {
+      if (isAllSale && quickSaleTotal > quickSaleMaxAmount) {
+        setParkSnackbar({
+          severity: 'warning',
+          message: `Quick sale total ($${quickSaleTotal.toFixed(2)}) exceeds the $${quickSaleMaxAmount.toFixed(2)} limit — select a customer to continue.`,
+        });
+      }
+      return;
+    }
     const u = JSON.parse(localStorage.getItem('user') || '{}');
 
     // For quick sale, cartCustomer is null — Checkout.js will create a walk-in customer in handleSubmit
@@ -1668,6 +1686,7 @@ export default function ModernTransactions() {
           setSaleOpen(false);
           setExistingSaleData(null);
         }}
+        onSelectCustomer={handleSelectCustomer}
         existingSaleData={existingSaleData}
       />
     );
