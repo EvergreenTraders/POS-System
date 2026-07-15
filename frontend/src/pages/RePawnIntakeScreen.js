@@ -32,13 +32,12 @@ export default function RePawnIntakeScreen({
   backLabel = 'Back to Re-Pawn List',
 }) {
   // In edit mode, selectedItem is the already-built row which may carry a previously captured intake photo
-  const intakeImage = selectedItem?.images?.find(img => img.file instanceof File);
+  const intakeImage = selectedItem?.images?.[0];
 
   const [pawnHistory,    setPawnHistory]    = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [condition,      setCondition]      = useState(selectedItem?.condition || '');
   const [verification,   setVerification]   = useState(selectedItem?.verification || {});
-  const [photoFile,      setPhotoFile]      = useState(intakeImage?.file || null);
   const [photoPreview,   setPhotoPreview]   = useState(intakeImage?.url  || null);
   const [notes,          setNotes]          = useState(selectedItem?.notes || '');
   const [saveTried,      setSaveTried]      = useState(false);
@@ -88,8 +87,13 @@ export default function RePawnIntakeScreen({
   const handlePhotoChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setPhotoFile(file);
-    setPhotoPreview(URL.createObjectURL(file));
+    // Read as a data URL (not a blob: object URL) so the intake photo survives
+    // being persisted to the workspace/localStorage and reopening the ticket
+    // later — blob URLs die on reload and a File object can't survive a JSON
+    // round-trip.
+    const reader = new FileReader();
+    reader.onload = () => setPhotoPreview(reader.result);
+    reader.readAsDataURL(file);
   };
 
   const buildItem = () => {
@@ -121,7 +125,7 @@ export default function RePawnIntakeScreen({
       // Preserve original server images for the "Previous Item" thumbnail on re-edit
       sourceImages: selectedItem.sourceImages || selectedItem.images || [],
       // Only the intake photo goes into images (used by checkout for upload)
-      images: photoFile ? [{ url: photoPreview, file: photoFile, isPrimary: true }] : [],
+      images: photoPreview ? [{ url: photoPreview, isPrimary: true }] : [],
     };
   };
 

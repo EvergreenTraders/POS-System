@@ -859,16 +859,20 @@ export default function JewelryIntakeScreen({
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-    const newImages = files.map((file, i) => ({
-      file,
-      url: URL.createObjectURL(file),
-      isPrimary: false,
-    }));
-    setImages(prev => {
-      if (prev.length === 0) newImages[0].isPrimary = true;
-      const next = [...prev, ...newImages];
-      setSelectedImg(prev.length);
-      return next;
+    // Read as a data URL (not a blob: object URL) so the image survives being
+    // persisted to the workspace/localStorage and reopening the ticket later —
+    // blob URLs die on reload and a File object can't survive a JSON round-trip.
+    Promise.all(files.map(file => new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({ url: reader.result, isPrimary: false });
+      reader.readAsDataURL(file);
+    }))).then(newImages => {
+      setImages(prev => {
+        if (prev.length === 0 && newImages.length > 0) newImages[0].isPrimary = true;
+        const next = [...prev, ...newImages];
+        setSelectedImg(prev.length);
+        return next;
+      });
     });
     e.target.value = '';
   };
@@ -904,16 +908,17 @@ export default function JewelryIntakeScreen({
     canvas.width  = videoRef.current.videoWidth  || 1280;
     canvas.height = videoRef.current.videoHeight || 720;
     canvas.getContext('2d').drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob(blob => {
-      if (!blob) { alert('Failed to capture image. Please try again.'); return; }
-      const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      setImages(prev => {
-        const newImg = { file, url: URL.createObjectURL(file), type: 'capture', isPrimary: prev.length === 0 };
-        setSelectedImg(prev.length);
-        return [...prev, newImg];
-      });
-      stopCamera();
-    }, 'image/jpeg', 0.9);
+    // Use a data URL (not a blob: object URL) so the captured photo survives
+    // being persisted to the workspace/localStorage and reopening the ticket
+    // later — blob URLs die on reload and a File object can't survive a JSON
+    // round-trip.
+    const url = canvas.toDataURL('image/jpeg', 0.9);
+    setImages(prev => {
+      const newImg = { url, type: 'capture', isPrimary: prev.length === 0 };
+      setSelectedImg(prev.length);
+      return [...prev, newImg];
+    });
+    stopCamera();
   };
 
   useEffect(() => {

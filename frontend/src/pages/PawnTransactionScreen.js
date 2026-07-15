@@ -515,17 +515,17 @@ export default function PawnTransactionScreen({
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
-    canvas.toBlob(blob => {
-      if (!blob) return;
-      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      const url = URL.createObjectURL(file);
-      setPawnItems(prev => prev.map(item =>
-        item.id === photoTargetId
-          ? { ...item, images: [...(item.images || []), { url, file, isPrimary: !(item.images?.length), type: 'capture' }] }
-          : item
-      ));
-      closeItemCamera();
-    }, 'image/jpeg', 0.9);
+    // Use a data URL (not a blob: object URL) so the captured photo survives
+    // being persisted to the workspace/localStorage and reopening the ticket
+    // later — blob URLs die on reload and a File object can't survive a JSON
+    // round-trip.
+    const url = canvas.toDataURL('image/jpeg', 0.9);
+    setPawnItems(prev => prev.map(item =>
+      item.id === photoTargetId
+        ? { ...item, images: [...(item.images || []), { url, isPrimary: !(item.images?.length), type: 'capture' }] }
+        : item
+    ));
+    closeItemCamera();
   };
 
   const closeItemCamera = () => {
