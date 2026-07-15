@@ -115,6 +115,7 @@ export default function PawnTransactionScreen({
   const [showOnReceipt, setShowOnReceipt] = useState(existingPawnData?.showOnReceipt || false);
   const [pawnConfig, setPawnConfig]       = useState(null);
   const [itemSizes, setItemSizes]         = useState([]);
+  const [storageFeeConfig, setStorageFeeConfig] = useState({ method: 'size', rate_per_cubic_foot: 0 });
   const [pawnItems, setPawnItems]         = useState(existingPawnData?.pawnItems || []);
   const [activePawns, setActivePawns]     = useState([]);
   const [stats, setStats]                 = useState(initialStats);
@@ -203,6 +204,12 @@ export default function PawnTransactionScreen({
     axios.get(`${config.apiUrl}/item-sizes`, { headers })
       .then(res => setItemSizes(res.data))
       .catch(err => console.error('Failed to load item sizes:', err));
+    axios.get(`${config.apiUrl}/storage-fee-config`, { headers })
+      .then(res => setStorageFeeConfig({
+        method: res.data?.method === 'cubic_feet' ? 'cubic_feet' : 'size',
+        rate_per_cubic_foot: parseFloat(res.data?.rate_per_cubic_foot) || 0,
+      }))
+      .catch(err => console.error('Failed to load storage fee config:', err));
   }, []);
 
   useEffect(() => {
@@ -274,9 +281,9 @@ export default function PawnTransactionScreen({
   // so the total updates live as its size dropdown is changed, not just after
   // the item is actually added.
   const itemsForStorageFee = quickAddRow
-    ? [...pawnItems, { size: quickAddRow.size, storage_fee: quickAddRow.storage_fee }]
+    ? [...pawnItems, { size: quickAddRow.size, cubic_feet: quickAddRow.cubic_feet, storage_fee: quickAddRow.storage_fee }]
     : pawnItems;
-  const anySizeSelected     = itemsForStorageFee.some(item => item.size);
+  const anySizeSelected     = itemsForStorageFee.some(item => item.size || item.cubic_feet);
   const itemStorageFeeTotal = itemsForStorageFee.reduce((sum, item) => sum + (parseFloat(item.storage_fee) || 0), 0);
   const storageFee      = anySizeSelected ? itemStorageFeeTotal : (parseFloat(pawnConfig?.storage_fee) || 0);
   const interestAmt     = totalPawnAmount * interestRate  / 100;
@@ -317,6 +324,16 @@ export default function PawnTransactionScreen({
     setPawnItems(prev => prev.map(item =>
       item.id === id
         ? { ...item, size: sizeName, storage_fee: sizeObj ? parseFloat(sizeObj.storage_fee) : 0 }
+        : item
+    ));
+  };
+
+  const handleItemCubicFeetChange = (id, cubicFeetValue) => {
+    const cubicFeet = parseFloat(cubicFeetValue) || 0;
+    const fee = cubicFeet * (parseFloat(storageFeeConfig.rate_per_cubic_foot) || 0);
+    setPawnItems(prev => prev.map(item =>
+      item.id === id
+        ? { ...item, cubic_feet: cubicFeetValue, storage_fee: fee }
         : item
     ));
   };
@@ -591,7 +608,7 @@ export default function PawnTransactionScreen({
   };
 
   const openQuickAdd = () => {
-    setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', storage_fee: 0 });
+    setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', cubic_feet: '', storage_fee: 0 });
     setTimeout(() => quickDescRef.current?.focus(), 50);
   };
 
@@ -613,6 +630,7 @@ export default function PawnTransactionScreen({
         serial_number: quickAddRow.serial || '',
         qty:          1,
         size:         quickAddRow.size || '',
+        cubic_feet:   quickAddRow.cubic_feet || '',
         storage_fee:  quickAddRow.storage_fee || 0,
         amount:       amt,
         price:        amt,
@@ -621,7 +639,7 @@ export default function PawnTransactionScreen({
         metal_weight: 0,
       }];
     });
-    setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', storage_fee: 0 });
+    setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', cubic_feet: '', storage_fee: 0 });
     setTimeout(() => quickDescRef.current?.focus(), 50);
   };
 
@@ -919,7 +937,7 @@ export default function PawnTransactionScreen({
               { label: 'Item',        align: 'left'   },
               { label: 'Serial #',    align: 'left'   },
               { label: 'Qty',         align: 'center' },
-              { label: 'Size',        align: 'center' },
+              { label: storageFeeConfig.method === 'cubic_feet' ? 'Cu. Ft' : 'Size', align: 'center' },
               { label: 'Pawn Amount', align: 'left'   },
               { label: 'Actions',     align: 'right'  },
             ].map(({ label, align }) => (
@@ -957,19 +975,32 @@ export default function PawnTransactionScreen({
                   <Typography variant="caption" fontWeight={500}>{row.item}</Typography>
                   <Typography variant="caption" color="text.secondary">{row.serial || '—'}</Typography>
                   <Typography variant="caption" align="center">{row.qty}</Typography>
-                  <FormControl size="small" fullWidth>
-                    <Select
-                      value={row.size || ''}
-                      displayEmpty
-                      onChange={e => handleItemSizeChange(row.id, e.target.value)}
-                      sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
-                    >
-                      <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
-                      {itemSizes.map(s => (
-                        <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
+                  {storageFeeConfig.method === 'cubic_feet' ? (
+                    <TextField
+                      size="small"
+                      type="number"
+                      fullWidth
+                      placeholder="cu. ft"
+                      value={row.cubic_feet ?? ''}
+                      onChange={e => handleItemCubicFeetChange(row.id, e.target.value)}
+                      inputProps={{ min: 0, step: 0.01, style: { fontSize: 11 } }}
+                      sx={{ '& .MuiOutlinedInput-root': { fontSize: 11 } }}
+                    />
+                  ) : (
+                    <FormControl size="small" fullWidth>
+                      <Select
+                        value={row.size || ''}
+                        displayEmpty
+                        onChange={e => handleItemSizeChange(row.id, e.target.value)}
+                        sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
+                      >
+                        <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
+                        {itemSizes.map(s => (
+                          <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
                   <Typography variant="caption" fontWeight={700} color="#2e7d32">{fmt(row.amount)}</Typography>
                   <Box sx={{ display: 'flex', gap: 0, alignItems: 'center', justifyContent: 'flex-end' }}>
                     <IconButton size="small" sx={{ color: PURPLE }} onClick={() => {
@@ -1035,22 +1066,39 @@ export default function PawnTransactionScreen({
                     sx={{ '& .MuiOutlinedInput-root': { fontSize: 12, borderRadius: 1.5 } }}
                   />
                   <Typography variant="caption" align="center" color="text.secondary">1</Typography>
-                  <FormControl size="small" fullWidth>
-                    <Select
-                      value={quickAddRow.size || ''}
-                      displayEmpty
+                  {storageFeeConfig.method === 'cubic_feet' ? (
+                    <TextField
+                      size="small"
+                      type="number"
+                      fullWidth
+                      placeholder="cu. ft"
+                      value={quickAddRow.cubic_feet || ''}
                       onChange={e => {
-                        const sizeObj = itemSizes.find(s => s.name === e.target.value);
-                        setQuickAddRow(r => ({ ...r, size: e.target.value, storage_fee: sizeObj ? parseFloat(sizeObj.storage_fee) : 0 }));
+                        const cubicFeet = parseFloat(e.target.value) || 0;
+                        const fee = cubicFeet * (parseFloat(storageFeeConfig.rate_per_cubic_foot) || 0);
+                        setQuickAddRow(r => ({ ...r, cubic_feet: e.target.value, storage_fee: fee }));
                       }}
-                      sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
-                    >
-                      <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
-                      {itemSizes.map(s => (
-                        <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
+                      inputProps={{ min: 0, step: 0.01, style: { fontSize: 11 } }}
+                      sx={{ '& .MuiOutlinedInput-root': { fontSize: 11, borderRadius: 1.5 } }}
+                    />
+                  ) : (
+                    <FormControl size="small" fullWidth>
+                      <Select
+                        value={quickAddRow.size || ''}
+                        displayEmpty
+                        onChange={e => {
+                          const sizeObj = itemSizes.find(s => s.name === e.target.value);
+                          setQuickAddRow(r => ({ ...r, size: e.target.value, storage_fee: sizeObj ? parseFloat(sizeObj.storage_fee) : 0 }));
+                        }}
+                        sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
+                      >
+                        <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
+                        {itemSizes.map(s => (
+                          <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
                   <TextField
                     inputRef={quickAmtRef}
                     size="small"

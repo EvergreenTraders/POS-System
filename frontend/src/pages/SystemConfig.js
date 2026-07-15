@@ -232,6 +232,7 @@ function SystemConfig() {
     forfeiture_mode: 'manual',
     storage_fee: 10.00
   });
+  const [storageFeeConfig, setStorageFeeConfig] = useState({ method: 'size', rate_per_cubic_foot: 0 });
   const [caratConversion, setCaratConversion] = useState(null);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [isInventoryHoldPeriodEnabled, setIsInventoryHoldPeriodEnabled] = useState(false);
@@ -789,6 +790,20 @@ function SystemConfig() {
       }
     };
 
+    const fetchStorageFeeConfig = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/storage-fee-config`);
+        if (response.data) {
+          setStorageFeeConfig({
+            method: response.data.method === 'cubic_feet' ? 'cubic_feet' : 'size',
+            rate_per_cubic_foot: parseFloat(response.data.rate_per_cubic_foot) || 0,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching storage fee config:', error);
+      }
+    };
+
     // Fetch data on component mount
     fetchCustomerHeaderPreferences();
     fetchTransactionTypes();
@@ -812,6 +827,7 @@ function SystemConfig() {
     fetchReceiptConfig();
     fetchPettyCashExpenses();
     fetchPawnConfig();
+    fetchStorageFeeConfig();
     fetchBankAccounts();
     fetchBusinessHours();
     axios.get(`${API_BASE_URL}/stores/current`).then(res => setCurrentStoreId(res.data.store_id)).catch(() => {});
@@ -1732,6 +1748,30 @@ const handleTabChange = (event, newValue) => {
       setSnackbar({
         open: true,
         message: 'Failed to save pawn configuration',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleStorageFeeConfigChange = async (field, value) => {
+    const updatedConfig = { ...storageFeeConfig, [field]: value };
+    setStorageFeeConfig(updatedConfig);
+
+    try {
+      await axios.put(`${API_BASE_URL}/storage-fee-config`, {
+        method: updatedConfig.method,
+        rate_per_cubic_foot: parseFloat(updatedConfig.rate_per_cubic_foot) || 0,
+      });
+      setSnackbar({
+        open: true,
+        message: 'Storage fee configuration saved',
+        severity: 'success',
+      });
+    } catch (error) {
+      console.error('Error saving storage fee config:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save storage fee configuration',
         severity: 'error',
       });
     }
@@ -4539,6 +4579,41 @@ const handleTabChange = (event, newValue) => {
                   helperText="Flat storage fee per pawn"
                 />
               </Grid>
+            </Grid>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Storage Fee Method
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={storageFeeConfig.method === 'cubic_feet' ? 6 : 12}>
+                <TextField
+                  select
+                  label="Storage Fee Input"
+                  value={storageFeeConfig.method}
+                  onChange={(e) => handleStorageFeeConfigChange('method', e.target.value)}
+                  fullWidth
+                  helperText="How storage fee is entered when adding a pawn item"
+                >
+                  <MenuItem value="size">By Size (Small, Medium, Large, Oversize)</MenuItem>
+                  <MenuItem value="cubic_feet">By Cubic Feet</MenuItem>
+                </TextField>
+              </Grid>
+              {storageFeeConfig.method === 'cubic_feet' && (
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    label="Rate per Cubic Foot ($)"
+                    type="number"
+                    value={storageFeeConfig.rate_per_cubic_foot}
+                    onChange={(e) => setStorageFeeConfig(prev => ({ ...prev, rate_per_cubic_foot: e.target.value }))}
+                    onBlur={(e) => handleStorageFeeConfigChange('rate_per_cubic_foot', e.target.value)}
+                    fullWidth
+                    inputProps={{ min: 0, step: 0.01 }}
+                    helperText="Storage fee = cubic feet entered × this rate"
+                  />
+                </Grid>
+              )}
             </Grid>
           </ConfigSection>
         </StyledPaper>

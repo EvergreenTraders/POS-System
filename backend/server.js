@@ -252,6 +252,8 @@ const storeClosedMiddleware = async (req, res, next) => {
     '/api/quote-expiration/config',
     '/api/inventory-hold-period/config',
     '/api/parked-workspace-config',
+    '/api/storage-fee-config',
+    '/api/item-sizes',
     '/api/customer-preferences/',
     '/api/diamond_estimates',
     '/api/user_preferences',
@@ -9793,6 +9795,51 @@ app.get('/api/item-sizes', async (req, res) => {
   } catch (err) {
     console.error('Error fetching item sizes:', err);
     res.status(500).json({ error: 'Failed to fetch item sizes' });
+  }
+});
+
+// Storage Fee Configuration API Endpoints (by named size, or by a flat rate per cubic foot)
+app.get('/api/storage-fee-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM storage_fee_config ORDER BY created_at DESC LIMIT 1');
+    if (result.rows.length === 0) {
+      return res.json({ method: 'size', rate_per_cubic_foot: 0 });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching storage fee config:', err);
+    res.status(500).json({ error: 'Failed to fetch storage fee configuration' });
+  }
+});
+
+app.put('/api/storage-fee-config', async (req, res) => {
+  try {
+    const { method, rate_per_cubic_foot } = req.body;
+    if (!['size', 'cubic_feet'].includes(method)) {
+      return res.status(400).json({ error: "method must be 'size' or 'cubic_feet'" });
+    }
+    const rate = parseFloat(rate_per_cubic_foot);
+    if (isNaN(rate) || rate < 0) {
+      return res.status(400).json({ error: 'rate_per_cubic_foot must be a number >= 0' });
+    }
+
+    const checkResult = await pool.query('SELECT * FROM storage_fee_config');
+    let result;
+    if (checkResult.rows.length === 0) {
+      result = await pool.query(
+        'INSERT INTO storage_fee_config (method, rate_per_cubic_foot) VALUES ($1, $2) RETURNING *',
+        [method, rate]
+      );
+    } else {
+      result = await pool.query(
+        'UPDATE storage_fee_config SET method = $1, rate_per_cubic_foot = $2, updated_at = CURRENT_TIMESTAMP RETURNING *',
+        [method, rate]
+      );
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating storage fee config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
