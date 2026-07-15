@@ -7205,16 +7205,26 @@ app.put('/api/jewelry/:id/status', async (req, res) => {
 
     const oldStatus = checkResult.rows[0].status;
 
-    // Update the status and item_price when sold
+    // Update the status and item_price when sold. A sold item must also drop
+    // out of sellable_status, otherwise it keeps showing up in sale item
+    // search (which filters on sellable_status=SELLABLE, not status).
     let updateQuery, queryParams;
     if (status === 'SOLD' && item_price !== undefined && item_price !== null) {
       updateQuery = `
         UPDATE jewelry
-        SET status = $1, item_price = $2, updated_at = CURRENT_TIMESTAMP
+        SET status = $1, item_price = $2, sellable_status = 'NOT_SELLABLE', updated_at = CURRENT_TIMESTAMP
         WHERE item_id = $3
         RETURNING *
       `;
       queryParams = [status, item_price, id];
+    } else if (status === 'SOLD') {
+      updateQuery = `
+        UPDATE jewelry
+        SET status = $1, sellable_status = 'NOT_SELLABLE', updated_at = CURRENT_TIMESTAMP
+        WHERE item_id = $2
+        RETURNING *
+      `;
+      queryParams = [status, id];
     } else {
       updateQuery = `
         UPDATE jewelry
