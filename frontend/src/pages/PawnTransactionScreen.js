@@ -265,8 +265,20 @@ export default function PawnTransactionScreen({
   const interestRate    = parseFloat(pawnConfig?.interest_rate)  || 0;
   const insuranceRate   = parseFloat(pawnConfig?.insurance_rate) || 0;
   const termDays        = parseInt(pawnConfig?.term_days)        || 0;
-  const itemStorageFeeTotal = pawnItems.reduce((sum, item) => sum + (parseFloat(item.storage_fee) || 0), 0);
-  const storageFee      = itemStorageFeeTotal > 0 ? itemStorageFeeTotal : (parseFloat(pawnConfig?.storage_fee) || 0);
+  // Once any item has a size picked, the fee must reflect the item_size table
+  // (summed per item, even if a size's fee happens to be 0) — falling back to
+  // the shop's flat default only when nothing has been sized yet. Comparing
+  // itemStorageFeeTotal > 0 instead of checking for a selected size masked
+  // real updates whenever the picked size's fee equaled the flat default.
+  // Include the in-progress quick-add row (not yet confirmed into pawnItems)
+  // so the total updates live as its size dropdown is changed, not just after
+  // the item is actually added.
+  const itemsForStorageFee = quickAddRow
+    ? [...pawnItems, { size: quickAddRow.size, storage_fee: quickAddRow.storage_fee }]
+    : pawnItems;
+  const anySizeSelected     = itemsForStorageFee.some(item => item.size);
+  const itemStorageFeeTotal = itemsForStorageFee.reduce((sum, item) => sum + (parseFloat(item.storage_fee) || 0), 0);
+  const storageFee      = anySizeSelected ? itemStorageFeeTotal : (parseFloat(pawnConfig?.storage_fee) || 0);
   const interestAmt     = totalPawnAmount * interestRate  / 100;
   const insuranceAmt    = totalPawnAmount * insuranceRate / 100;
   const totalToRedeem   = totalPawnAmount + interestAmt + insuranceAmt + storageFee;
