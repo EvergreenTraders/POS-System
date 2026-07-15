@@ -13,6 +13,7 @@ import SaleTransactionScreen from './SaleTransactionScreen';
 import BuyTransactionScreen from './BuyTransactionScreen';
 import TradeTransactionScreen from './TradeTransactionScreen';
 import PaymentTransactionScreen from './PaymentTransactionScreen';
+import RedeemTransactionScreen from './RedeemTransactionScreen';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
@@ -22,10 +23,11 @@ const BUY_BLUE = '#0284c7';
 // to track voided ticket numbers (so they're never reused) and the in-flight
 // "pending" ticket id (so a voided-but-uncommitted id isn't handed out again).
 const VOID_STORAGE_KEYS = {
-  PAWN:  { voided: 'voidedPawnTickets',  pending: 'pendingPTTicketId' },
-  BUY:   { voided: 'voidedBuyTickets',   pending: 'pendingBTTicketId' },
-  TRADE: { voided: 'voidedTradeTickets', pending: 'pendingTTTicketId' },
-  SALE:  { voided: 'voidedSaleTickets',  pending: 'pendingSTTicketId' },
+  PAWN:   { voided: 'voidedPawnTickets',  pending: 'pendingPTTicketId' },
+  BUY:    { voided: 'voidedBuyTickets',   pending: 'pendingBTTicketId' },
+  TRADE:  { voided: 'voidedTradeTickets', pending: 'pendingTTTicketId' },
+  SALE:   { voided: 'voidedSaleTickets',  pending: 'pendingSTTicketId' },
+  REDEEM: { voided: 'voidedRDMTickets',   pending: 'pendingRDMTicketId' },
 };
 
 function voidTicketId(type, ticketId) {
@@ -330,6 +332,57 @@ function PaymentTransactionCard({ tx, onOpen, onVoid }) {
           <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
             onClick={onOpen}
             sx={{ flex: 1, fontSize: 11, borderColor: PAYMENT_AMBER, color: PAYMENT_AMBER, '&:hover': { borderColor: '#b45309' } }}>
+            Open
+          </Button>
+          <IconButton size="small" color="error" onClick={onVoid}
+            sx={{ border: '1px solid', borderColor: 'error.main', borderRadius: 1 }}>
+            <MuiIcons.Block fontSize="small" />
+          </IconButton>
+        </Box>
+      </Box>
+    </Paper>
+  );
+}
+
+const REDEEM_ACCENT = '#0d9488'; // fallback only — actual color comes from the transaction_type DB row
+
+function RedeemTransactionCard({ tx, redeemIcon, redeemColor, onOpen, onVoid }) {
+  const fmt = (n) => `$${Number(n).toFixed(2)}`;
+  const itemCount = (tx.selectedRedemptions || []).length;
+  const accent = redeemColor || REDEEM_ACCENT;
+  const RedeemIconComponent = redeemIcon ? (MuiIcons[redeemIcon] ?? MuiIcons.Redeem) : MuiIcons.Redeem;
+
+  return (
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <RedeemIconComponent sx={{ fontSize: 20, color: accent }} />
+          <Typography fontWeight={700} fontSize={13} color={accent}>REDEEM</Typography>
+        </Box>
+        <Chip label={tx.ticketId} size="small"
+          sx={{ fontWeight: 700, fontSize: 11, height: 20, bgcolor: '#f5f5f5', border: '1px solid #e0e0e0' }} />
+      </Box>
+
+      <Box sx={{ px: 1.5, pb: 1.25 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75, mt: 0.75 }}>
+          <Chip
+            icon={<MuiIcons.Savings sx={{ fontSize: 14 }} />}
+            label={`${itemCount} pawn${itemCount === 1 ? '' : 's'}`}
+            size="small"
+            sx={{ fontSize: 11, height: 22, bgcolor: '#ccfbf1', color: accent, '& .MuiChip-icon': { color: accent } }} />
+        </Box>
+
+        <Divider sx={{ my: 1 }} />
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+          <Typography variant="caption" fontWeight={600} color={accent}>Total Due</Typography>
+          <Typography variant="caption" fontWeight={700} color={accent}>{fmt(tx.totalRedeem || 0)}</Typography>
+        </Box>
+
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
+            onClick={onOpen}
+            sx={{ flex: 1, fontSize: 11, borderColor: accent, color: accent }}>
             Open
           </Button>
           <IconButton size="small" color="error" onClick={onVoid}
@@ -704,6 +757,37 @@ export default function ModernTransactions() {
     }
     return null;
   });
+
+  const [redeemOpen, setRedeemOpen] = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingRedeemState');
+      return !!raw;
+    }
+    if (location.state?.returnToRedeem) {
+      const raw = sessionStorage.getItem('pendingRedeemReturn');
+      return !!raw;
+    }
+    return false;
+  });
+  const [existingRedeemData, setExistingRedeemData] = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingRedeemState');
+      if (!raw) return null;
+      try {
+        const { ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt } = JSON.parse(raw);
+        return { ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt };
+      } catch { return null; }
+    }
+    if (location.state?.returnToRedeem) {
+      const raw = sessionStorage.getItem('pendingRedeemReturn');
+      if (!raw) return null;
+      try {
+        const { ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt } = JSON.parse(raw);
+        return { ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt };
+      } catch { return null; }
+    }
+    return null;
+  });
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
   const [noCustomerWarning, setNoCustomerWarning] = useState('');
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
@@ -1023,6 +1107,46 @@ export default function ModernTransactions() {
       .catch(err => console.error('Failed to refresh customer after checkout back:', err));
   }, [location.state]);
 
+  // Restore redeem screen after returning from CustomerEditor
+  useEffect(() => {
+    if (!location.state?.customerUpdated) return;
+    const raw = sessionStorage.getItem('pendingRedeemState');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingRedeemState');
+    const { customerId, customer: savedCustomer, ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt } = pending;
+    if (!customerId) return;
+    if (savedCustomer) setCustomer(savedCustomer);
+    setExistingRedeemData({ ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt });
+    setRedeemOpen(true);
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after redeem edit:', err));
+  }, [location.state]);
+
+  // Restore redeem screen after navigating back from Checkout
+  useEffect(() => {
+    if (!location.state?.returnToRedeem) return;
+    const raw = sessionStorage.getItem('pendingRedeemReturn');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingRedeemReturn');
+    const { customerId, customer: savedCustomer, ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt } = pending;
+    if (!customerId) return;
+    if (savedCustomer) setCustomer(savedCustomer);
+    setExistingRedeemData({ ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt });
+    setRedeemOpen(true);
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after redeem checkout back:', err));
+  }, [location.state]);
+
   const handleCustomerSearch = async (query) => {
     setCustomerSearch(query);
     if (!query.trim()) { setCustomerResults([]); setShowResults(false); return; }
@@ -1288,6 +1412,34 @@ export default function ModernTransactions() {
             };
           });
       }
+      if (tx.type === 'REDEEM') {
+        // One cart item per physical item in the pawn ticket — only the first
+        // item of each ticket carries the redemption price/principal (the
+        // rest price at 0), matching Checkout.js's redeem handling.
+        return (tx.selectedRedemptions || []).flatMap(p => {
+          const items = (p.items && p.items.length > 0) ? p.items : [{ item_id: null, description: p.description, location: null }];
+          return items.map((it, idx) => ({
+            id: `${tx.ticketId}_${p.ref}_${it.item_id || idx}_${Date.now()}`,
+            description: it.description || p.description,
+            long_desc: it.description || p.description,
+            short_desc: it.description || p.description,
+            price: idx === 0 ? (parseFloat(p.redeem_amount) || 0) : 0,
+            value: idx === 0 ? (parseFloat(p.redeem_amount) || 0) : 0,
+            transaction_type: 'redeem',
+            pawnTicketId: p.ref,
+            redeemTicketId: tx.ticketId,
+            item_id: it.item_id,
+            location: it.location,
+            principal: idx === 0 ? p.principal : 0,
+            interest: idx === 0 ? (parseFloat(p.interest_amount) || 0) + (parseFloat(p.insurance_amount) || 0) : 0,
+            totalRedemptionAmount: idx === 0 ? (parseFloat(p.redeem_amount) || 0) : 0,
+            ticket_note: tx.ticketNote || null,
+            show_on_receipt: tx.showOnReceipt,
+            customer: cartCustomer,
+            employee: employeeObj,
+          }));
+        });
+      }
       return [];
     });
 
@@ -1335,6 +1487,14 @@ export default function ModernTransactions() {
         color: PAYMENT_AMBER,
       };
     }
+    if (tx.type === 'REDEEM') {
+      const count = tx.selectedRedemptions?.length || 0;
+      return {
+        label: `Redeem (${count} pawn${count !== 1 ? 's' : ''})`,
+        value: `+$${Number(tx.totalRedeem || 0).toFixed(2)}`,
+        color: transactionTypes.find(t => t.type === 'redeem')?.color || REDEEM_ACCENT,
+      };
+    }
     return null;
   }).filter(Boolean);
 
@@ -1344,6 +1504,7 @@ export default function ModernTransactions() {
     if (tx.type === 'BUY')     return sum - Number(tx.totalPaid || 0);
     if (tx.type === 'TRADE')   return sum - Number(tx.netDueToCustomer || 0);
     if (tx.type === 'PAYMENT') return sum + Number(tx.totalPayment || 0);
+    if (tx.type === 'REDEEM')  return sum + Number(tx.totalRedeem || 0);
     return sum;
   }, 0);
 
@@ -1366,6 +1527,9 @@ export default function ModernTransactions() {
     } else if (type === 'payment') {
       if (!customer) { setNoCustomerWarning('payment ticket'); return; }
       setPaymentOpen(true);
+    } else if (type === 'redeem') {
+      if (!customer) { setNoCustomerWarning('redeem ticket'); return; }
+      setRedeemOpen(true);
     }
   };
 
@@ -1381,6 +1545,20 @@ export default function ModernTransactions() {
     });
     setPaymentOpen(false);
     setExistingPaymentData(null);
+  };
+
+  const handleAddRedeemToWorkspace = (redeemData) => {
+    setWorkspaceTransactions(prev => {
+      const existingIdx = prev.findIndex(t => t.type === 'REDEEM' && t.ticketId === redeemData.ticketId);
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx] = { ...updated[existingIdx], ...redeemData };
+        return updated;
+      }
+      return [...prev, { id: Date.now(), type: 'REDEEM', ...redeemData }];
+    });
+    setRedeemOpen(false);
+    setExistingRedeemData(null);
   };
 
   const handleAddBuyToWorkspace = (buyData) => {
@@ -1759,6 +1937,18 @@ export default function ModernTransactions() {
     );
   }
 
+  if (redeemOpen) {
+    return (
+      <RedeemTransactionScreen
+        customer={customer}
+        customerStats={customerStats}
+        onClose={() => { setRedeemOpen(false); setExistingRedeemData(null); }}
+        onAddToWorkspace={handleAddRedeemToWorkspace}
+        existingRedeemData={existingRedeemData}
+      />
+    );
+  }
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
 
@@ -2036,6 +2226,14 @@ export default function ModernTransactions() {
                       <PaymentTransactionCard
                         tx={tx}
                         onOpen={() => { setExistingPaymentData(tx); setPaymentOpen(true); }}
+                        onVoid={() => setVoidConfirm(tx)}
+                      />
+                    ) : tx.type === 'REDEEM' ? (
+                      <RedeemTransactionCard
+                        tx={tx}
+                        redeemIcon={transactionTypes.find(t => t.type === 'redeem')?.icon}
+                        redeemColor={transactionTypes.find(t => t.type === 'redeem')?.color}
+                        onOpen={() => { setExistingRedeemData(tx); setRedeemOpen(true); }}
                         onVoid={() => setVoidConfirm(tx)}
                       />
                     ) : null}

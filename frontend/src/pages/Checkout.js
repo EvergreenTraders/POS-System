@@ -2083,6 +2083,8 @@ const handleBackToEstimation = () => {
       navigate('/modern-transactions', { state: { returnToTrade: true } });
     } else if (checkoutSource === 'payment-ticket') {
       navigate('/modern-transactions', { state: { returnToPayment: true } });
+    } else if (checkoutSource === 'redeem-ticket') {
+      navigate('/modern-transactions', { state: { returnToRedeem: true } });
     } else if (checkoutSource === 'workspace') {
       navigate('/modern-transactions');
     } else if (checkoutSource === 'cart') {
@@ -2194,6 +2196,7 @@ const handleBackToEstimation = () => {
   const isBuyCheckout     = checkoutSource === 'buy-ticket';
   const isTradeCheckout   = checkoutSource === 'trade-ticket';
   const isPaymentCheckout = checkoutSource === 'payment-ticket';
+  const isRedeemCheckout  = checkoutSource === 'redeem-ticket';
 
   // Map checkout source → transaction_type key so we can look up the DB color
   const sourceToTxType = {
@@ -2201,19 +2204,20 @@ const handleBackToEstimation = () => {
     'buy-ticket':     'buy',
     'trade-ticket':   'trade',
     'payment-ticket': 'payment',
+    'redeem-ticket':  'redeem',
   };
   const txType = isPawnCheckout ? 'pawn' : (sourceToTxType[checkoutSource] || null);
 
   // Primary color: from DB when available, hardcoded fallbacks for safety
   const fallbackColors = {
     sale: '#2e7d32', buy: '#0284c7', trade: '#00695c',
-    payment: '#f9a825', pawn: PURPLE,
+    payment: '#f9a825', pawn: PURPLE, redeem: '#0d9488',
   };
   const themeColor = (txType && txTypeColors[txType]) || fallbackColors[txType] || PURPLE;
 
   // Dark + hover-bg variants (DB doesn't store these; keep a parallel map)
-  const darkColors   = { sale: '#1b5e20', buy: '#0369a1', trade: '#004d40', payment: '#f57f17', pawn: PURPLE_DARK };
-  const hoverBgColors = { sale: '#e8f5e9', buy: '#e0f2fe', trade: '#e0f2f1', payment: '#fff8e1', pawn: '#f3e5f5' };
+  const darkColors   = { sale: '#1b5e20', buy: '#0369a1', trade: '#004d40', payment: '#f57f17', pawn: PURPLE_DARK, redeem: '#0f766e' };
+  const hoverBgColors = { sale: '#e8f5e9', buy: '#e0f2fe', trade: '#e0f2f1', payment: '#fff8e1', pawn: '#f3e5f5', redeem: '#f0fdfa' };
   const themeDark    = darkColors[txType]   || PURPLE_DARK;
   const themeHoverBg = hoverBgColors[txType] || '#f3e5f5';
 
@@ -2223,18 +2227,20 @@ const handleBackToEstimation = () => {
     : isBuyCheckout     ? 'Buy Transaction'
     : isTradeCheckout   ? 'Trade Ticket'
     : isPaymentCheckout ? 'Payment Ticket'
+    : isRedeemCheckout  ? 'Redeem Ticket'
     : checkoutSource === 'cart' ? 'Cart'
     : 'Transactions';
 
-  // Payment ticket ID shown in the breadcrumb (derived from cart items)
+  // Payment/redeem ticket ID shown in the breadcrumb (derived from cart items)
   const paymentTicketId = isPaymentCheckout ? (checkoutItems[0]?.paymentTicketId || '') : '';
+  const redeemTicketId  = isRedeemCheckout  ? (checkoutItems[0]?.redeemTicketId || '')  : '';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
 
       {/* Breadcrumb */}
       <Box sx={{ bgcolor: themeColor, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        {(isBuyCheckout || isTradeCheckout || isPaymentCheckout) ? (
+        {(isBuyCheckout || isTradeCheckout || isPaymentCheckout || isRedeemCheckout) ? (
           <>
             <Typography variant="body2" fontWeight={400}
               sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
@@ -2247,6 +2253,7 @@ const handleBackToEstimation = () => {
               onClick={handleBackToEstimation}>
               {isTradeCheckout   ? 'Trade Ticket'
                : isPaymentCheckout ? `Payment Ticket${paymentTicketId ? ` (${paymentTicketId})` : ''}`
+               : isRedeemCheckout  ? `Redeem Ticket${redeemTicketId ? ` (${redeemTicketId})` : ''}`
                : 'Buy Ticket'}
             </Typography>
           </>

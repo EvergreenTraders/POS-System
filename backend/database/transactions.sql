@@ -174,7 +174,7 @@ INSERT INTO transaction_type (type, icon, color, sort_order) VALUES
     ('layaway',     'CalendarMonth',  '#37474f',  7),
     ('repair',      'Build',          '#c62828',  8),
     ('payment',     'MonetizationOn', '#f9a825',  9),
-    ('redeem',      'ExitToApp',      '#388e3c', 10),
+    ('redeem',      'Redeem',         '#0d9488', 10),
     ('refund',      'Undo',           '#e53935', 11)
 ON CONFLICT (type) DO UPDATE SET icon = EXCLUDED.icon, color = EXCLUDED.color, sort_order = EXCLUDED.sort_order;
 
