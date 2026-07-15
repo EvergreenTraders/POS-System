@@ -5,7 +5,8 @@ import config from '../config';
 import {
   Box, Typography, Paper, Grid, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Badge, Tooltip, Stack, Snackbar, Alert,
-  Dialog, DialogTitle, DialogContent, DialogActions
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  List, ListItem, ListItemText, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
@@ -19,6 +20,38 @@ import { useWorkspaceGuard } from '../context/WorkspaceGuardContext';
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 const BUY_BLUE = '#0284c7';
+
+// ── Dashboard-style placeholder cards shown when the workspace is empty ──────
+// Copied from Home.js's Messages/Tasks/Loans-Layaways widgets (same dummy data,
+// not wired to any live source) so this screen doubles as a landing page.
+const DASHBOARD_MESSAGES = [
+  { type: 'announcement', text: 'Easter Promotion starts today – click for details' },
+  { type: 'incoming text', text: "+1 (506)455-1234: I'll be in tomorrow to pay" },
+  { type: 'email', text: 'From: joe@gmail.com Subject: E-transfer Sent' },
+  { type: 'facebook', text: 'From: facebook_user – Can you give me a quote on the following items that I would...' },
+  { type: 'web', text: 'From: I want to sell gold | "I have 3 rings I want to sell."' },
+  { type: 'website', text: 'New online sale WEB-S876511 in for in-store pickup' },
+];
+
+const DASHBOARD_TASKS = [
+  '5 Items to be located',
+  '2 Online orders to fill (1 is in-store pickup)',
+  '23 Loans to be pulled',
+  '12 Buys to expire',
+  '87 Items to be priced',
+  '31 Items to be marked down',
+  '18 Loans to call',
+  '7 Layaways overdue',
+  '3 Returns to process',
+  '"Remerchandise the laptop cabinet"',
+  '"Ask 5 customers for reviews"',
+];
+
+const DASHBOARD_LOANS_LAYAWAYS_DUE_TODAY = [
+  { id: 'PT-00001234', name: 'John Smith', type: 'Loan', details: '$450.00 due' },
+  { id: 'LWY-00456', name: 'Maria Garcia', type: 'Layaway', details: '$120.00 payment due' },
+  { id: 'PT-00001198', name: 'Robert Chen', type: 'Loan', details: '$210.00 due' },
+];
 
 // Maps workspace transaction type to the localStorage keys each ticket screen uses
 // to track voided ticket numbers (so they're never reused) and the in-flight
@@ -2223,10 +2256,65 @@ export default function ModernTransactions() {
           {/* Transaction cards grid */}
           <Box sx={{ flex: 1, overflowY: 'auto' }}>
             {workspaceTransactions.length === 0 ? (
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 1.5, color: 'text.secondary' }}>
-                <MuiIcons.Receipt sx={{ fontSize: 48, opacity: 0.15 }} />
-                <Typography variant="body2" color="text.secondary">No transactions in workspace yet.</Typography>
-                <Typography variant="caption" color="text.secondary">Use the buttons below to start a pawn, sale, or other transaction.</Typography>
+              <Box sx={{ py: 1 }}>
+                <Grid container spacing={{ md: 1.5, xl: 1 }}>
+                  <Grid item xs={12} md={4}>
+                    <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
+                      <Typography variant="h6" fontSize={15} gutterBottom>Messages</Typography>
+                      <List dense sx={{ p: 0 }}>
+                        {DASHBOARD_MESSAGES.map((msg, idx) => (
+                          <ListItem key={idx} divider={idx < DASHBOARD_MESSAGES.length - 1} sx={{ px: 0 }}>
+                            <ListItemText
+                              primaryTypographyProps={{ fontSize: 12.5 }}
+                              secondaryTypographyProps={{ fontSize: 11 }}
+                              primary={`[${msg.type}] ${msg.text}`}
+                              secondary={msg.type === 'announcement' ? 'Pinned' : ''}
+                            />
+                          </ListItem>
+                        ))}
+                      </List>
+                    </Paper>
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
+                      <Typography variant="h6" fontSize={15} gutterBottom>Tasks</Typography>
+                      <List dense sx={{ p: 0 }}>
+                        {DASHBOARD_TASKS.map((task, idx) => (
+                          <ListItem key={idx} divider={idx < DASHBOARD_TASKS.length - 1} sx={{ px: 0 }}>
+                            <ListItemText primaryTypographyProps={{ fontSize: 12.5 }} primary={task} />
+                          </ListItem>
+                        ))}
+                      </List>
+                    </Paper>
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
+                      <Typography variant="h6" fontSize={15} gutterBottom>Loans/Layaways Due Today</Typography>
+                      <TableContainer>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontSize: 11 }}>ID</TableCell>
+                              <TableCell sx={{ fontSize: 11 }}>Name</TableCell>
+                              <TableCell sx={{ fontSize: 11 }}>Type</TableCell>
+                              <TableCell sx={{ fontSize: 11 }}>Details</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {DASHBOARD_LOANS_LAYAWAYS_DUE_TODAY.map((item, idx) => (
+                              <TableRow key={idx}>
+                                <TableCell sx={{ fontSize: 12 }}>{item.id}</TableCell>
+                                <TableCell sx={{ fontSize: 12 }}>{item.name}</TableCell>
+                                <TableCell sx={{ fontSize: 12 }}>{item.type}</TableCell>
+                                <TableCell sx={{ fontSize: 12 }}>{item.details}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Paper>
+                  </Grid>
+                </Grid>
               </Box>
             ) : (
               <Grid container spacing={{ md: 1.5, xl: 1 }}>

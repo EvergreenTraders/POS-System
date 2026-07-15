@@ -129,8 +129,17 @@ function Sidebar() {
           </IconButton>
         </ListItem>
 
+        <StyledLink to="/modern-transactions">
+          <StyledListItem active={isActive('/modern-transactions')}>
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+              <ModernTransactionsIcon />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Modern Transactions" />}
+          </StyledListItem>
+        </StyledLink>
+
         <StyledLink to="/">
-          <StyledListItem active={isActive('/')}> 
+          <StyledListItem active={isActive('/')}>
             <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
             <StorefrontIcon />
             </ListItemIcon>
@@ -162,15 +171,6 @@ function Sidebar() {
               <QuoteIcon />
             </ListItemIcon>
             {isOpen && <ListItemText primary="Quotes" />}
-          </StyledListItem>
-        </StyledLink>
-
-        <StyledLink to="/modern-transactions">
-          <StyledListItem active={isActive('/modern-transactions')}>
-            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
-              <ModernTransactionsIcon />
-            </ListItemIcon>
-            {isOpen && <ListItemText primary="Modern Transactions" />}
           </StyledListItem>
         </StyledLink>
 
