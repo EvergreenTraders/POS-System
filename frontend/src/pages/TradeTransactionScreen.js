@@ -1471,13 +1471,13 @@ export default function TradeTransactionScreen({
           Cancel
         </Button>
         <Button size="small" variant="outlined"
-          disabled={tradeItems.length === 0 && saleItems.length === 0}
+          disabled={tradeItems.length === 0 || saleItems.length === 0}
           onClick={handleAddToWorkspace}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
           Add to Workspace
         </Button>
         <Button size="small" variant="contained" endIcon={<MuiIcons.ArrowForward />}
-          disabled={tradeItems.length === 0 && saleItems.length === 0}
+          disabled={tradeItems.length === 0 || saleItems.length === 0}
           onClick={handleCheckoutNow}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: TRADE_TEAL, '&:hover': { bgcolor: TRADE_DARK } }}>
           Checkout Now
