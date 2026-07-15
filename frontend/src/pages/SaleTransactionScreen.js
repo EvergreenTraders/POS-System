@@ -7,7 +7,7 @@ import {
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions,
   Tooltip, Snackbar, Alert, Stack, Menu, MenuItem,
-  Grid, List, ListItem, ListItemAvatar, ListItemText,
+  TableContainer, Table, TableHead, TableBody, TableRow, TableCell,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
@@ -70,9 +70,8 @@ async function syncSaleTicketCounter() {
 // as a standalone sale ticket.
 export { generateSaleTicketId, commitSaleTicketId };
 
-function getCustomerImageUrl(customer) {
-  if (!customer?.image) return null;
-  const img = customer.image;
+function resolveImageValue(img) {
+  if (!img) return null;
   if (typeof img === 'object' && img.type === 'Buffer' && img.data) {
     const base64 = btoa(
       new Uint8Array(img.data).reduce((d, b) => d + String.fromCharCode(b), '')
@@ -80,7 +79,12 @@ function getCustomerImageUrl(customer) {
     return `data:image/jpeg;base64,${base64}`;
   }
   if (typeof img === 'string') return img;
+  if (img instanceof File || img instanceof Blob) return URL.createObjectURL(img);
   return null;
+}
+
+function getCustomerImageUrl(customer) {
+  return resolveImageValue(customer?.image);
 }
 
 function getItemImage(item) {
@@ -160,6 +164,8 @@ export default function SaleTransactionScreen({
   const [customerPickerForm,       setCustomerPickerForm]       = useState({ first_name: '', last_name: '', id_number: '', phone: '' });
   const [customerPickerResults,    setCustomerPickerResults]    = useState([]);
   const [customerPickerSearching,  setCustomerPickerSearching]  = useState(false);
+  const [customerResultsOpen,      setCustomerResultsOpen]      = useState(false);
+  const [selectedResultIdx,        setSelectedResultIdx]        = useState(null);
 
   // Discount
   const [discountDialog,    setDiscountDialog]    = useState(false);
@@ -410,8 +416,12 @@ export default function SaleTransactionScreen({
       if (!response.ok) throw new Error('Failed to search customers');
       const data = await response.json();
       setCustomerPickerResults(data);
-      if (data.length === 0) showSnackbar('No customers found matching your search criteria', 'info');
-      else if (data.length === 1) handleCustomerPickerSelect(data[0]);
+      setSelectedResultIdx(data.length > 0 ? 0 : null);
+      if (data.length === 1) {
+        handleCustomerPickerSelect(data[0]);
+      } else {
+        setCustomerResultsOpen(true);
+      }
     } catch (error) {
       console.error('Error searching customers:', error);
       showSnackbar(`Error: ${error.message}`, 'error');
@@ -423,8 +433,29 @@ export default function SaleTransactionScreen({
   const handleCustomerPickerSelect = (customerData) => {
     onSelectCustomer?.(customerData);
     setCustomerPickerOpen(false);
+    setCustomerResultsOpen(false);
     setCustomerPickerForm({ first_name: '', last_name: '', id_number: '', phone: '' });
     setCustomerPickerResults([]);
+    setSelectedResultIdx(null);
+  };
+
+  const handleRegisterNewCustomer = () => {
+    setCustomerResultsOpen(false);
+    sessionStorage.setItem('pendingSaleState', JSON.stringify({
+      customerId: customer?.id || null, customer, ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount,
+    }));
+    navigate('/customer-editor', {
+      state: {
+        mode: 'create',
+        returnTo: location.pathname,
+        prefillData: {
+          first_name: customerPickerForm.first_name || '',
+          last_name:  customerPickerForm.last_name  || '',
+          phone:      customerPickerForm.phone      || '',
+          id_number:  customerPickerForm.id_number  || '',
+        },
+      },
+    });
   };
 
   const handleSaveAsQuote = async () => {
@@ -863,12 +894,172 @@ export default function SaleTransactionScreen({
               </Box>
               <IconButton
                 size="small"
-                onClick={() => customer ? handleEditCustomer() : setCustomerPickerOpen(true)}
-                title={customer ? 'Edit customer' : 'Select customer'}
+                onClick={() => customer ? handleEditCustomer() : setCustomerPickerOpen(o => !o)}
+                title={customer ? 'Edit customer' : (customerPickerOpen ? 'Close search' : 'Select customer')}
               >
                 <MuiIcons.Edit sx={{ fontSize: 15, color: GREEN }} />
               </IconButton>
             </Box>
+
+            {/* Inline customer search (no customer set yet, e.g. quick sale) */}
+            {customerPickerOpen && (
+              <Box sx={{ mb: 1.5, p: 1.5, bgcolor: '#f8f9fa', borderRadius: 1, border: '1px solid #e0e0e0' }}>
+                <Stack spacing={1}>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <TextField
+                      fullWidth size="small" label="First Name"
+                      value={customerPickerForm.first_name}
+                      onChange={e => setCustomerPickerForm(f => ({ ...f, first_name: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+                    />
+                    <TextField
+                      fullWidth size="small" label="Last Name"
+                      value={customerPickerForm.last_name}
+                      onChange={e => setCustomerPickerForm(f => ({ ...f, last_name: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+                    />
+                  </Box>
+                  <TextField
+                    fullWidth size="small" label="ID Number"
+                    value={customerPickerForm.id_number}
+                    onChange={e => setCustomerPickerForm(f => ({ ...f, id_number: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+                  />
+                  <TextField
+                    fullWidth size="small" label="Phone"
+                    value={customerPickerForm.phone}
+                    onChange={e => setCustomerPickerForm(f => ({ ...f, phone: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+                  />
+                  <Button
+                    fullWidth size="small" variant="outlined"
+                    onClick={handleCustomerPickerSearch}
+                    disabled={customerPickerSearching}
+                    sx={{ borderColor: GREEN, color: GREEN, '&:hover': { borderColor: GREEN_DARK, bgcolor: '#e8f5e9' } }}
+                  >
+                    {customerPickerSearching ? <CircularProgress size={16} /> : 'Search'}
+                  </Button>
+                </Stack>
+              </Box>
+            )}
+
+            {/* Customer search results popup */}
+            <Dialog
+              open={customerResultsOpen}
+              onClose={() => setCustomerResultsOpen(false)}
+              fullWidth
+              maxWidth={customerPickerResults.length > 0 ? 'md' : 'sm'}
+            >
+              <DialogTitle sx={{ fontWeight: 700 }}>
+                {customerPickerResults.length > 0 ? 'Search Results' : 'No Customers Found'}
+              </DialogTitle>
+              <DialogContent>
+                {customerPickerResults.length > 0 ? (
+                  <>
+                    <Box sx={{ display: 'flex', flexDirection: 'row', gap: 2, mb: 2 }}>
+                      {/* Left side — customer photo + ID image for the highlighted row */}
+                      <Box sx={{ width: 160, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+                        {selectedResultIdx !== null && customerPickerResults[selectedResultIdx] && (
+                          <>
+                            {resolveImageValue(customerPickerResults[selectedResultIdx].image) && (
+                              <Box
+                                component="img"
+                                src={resolveImageValue(customerPickerResults[selectedResultIdx].image)}
+                                alt="Customer"
+                                sx={{
+                                  width: 120, height: 120, objectFit: 'cover', borderRadius: 2,
+                                  border: `2px solid ${GREEN}`, boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                                }}
+                              />
+                            )}
+                            {resolveImageValue(customerPickerResults[selectedResultIdx].id_image_front) && (
+                              <Box
+                                component="img"
+                                src={resolveImageValue(customerPickerResults[selectedResultIdx].id_image_front)}
+                                alt="ID Front"
+                                sx={{
+                                  width: 120, height: 100, objectFit: 'cover', borderRadius: 2,
+                                  border: '2px solid #ff9800', boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                                }}
+                              />
+                            )}
+                            {!resolveImageValue(customerPickerResults[selectedResultIdx].image) &&
+                             !resolveImageValue(customerPickerResults[selectedResultIdx].id_image_front) && (
+                              <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', mt: 2 }}>
+                                No photo on file
+                              </Typography>
+                            )}
+                          </>
+                        )}
+                      </Box>
+
+                      {/* Right side — results table */}
+                      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300, flex: 1 }}>
+                        <Table size="small" stickyHeader>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Name</TableCell>
+                              <TableCell>DOB</TableCell>
+                              <TableCell>Phone</TableCell>
+                              <TableCell>ID</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {customerPickerResults.map((c, index) => (
+                              <TableRow
+                                key={c.id || index}
+                                hover
+                                selected={selectedResultIdx === index}
+                                sx={{ cursor: 'pointer' }}
+                                onClick={() => setSelectedResultIdx(index)}
+                                onDoubleClick={() => handleCustomerPickerSelect(c)}
+                              >
+                                <TableCell sx={{ whiteSpace: 'nowrap' }}>{c.first_name} {c.last_name}</TableCell>
+                                <TableCell>{c.date_of_birth ? c.date_of_birth.substring(0, 10) : ''}</TableCell>
+                                <TableCell>{c.phone || ''}</TableCell>
+                                <TableCell>{c.id_number || ''}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Box>
+
+                    <Box sx={{ position: 'relative', mt: 1 }}>
+                      {/* Centered Select button */}
+                      <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
+                        <Button
+                          variant="contained" size="small"
+                          disabled={selectedResultIdx === null}
+                          onClick={() => handleCustomerPickerSelect(customerPickerResults[selectedResultIdx])}
+                          sx={{ minWidth: 90, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_DARK } }}
+                        >
+                          Select
+                        </Button>
+                      </Box>
+                      {/* Right-aligned Register New Customer button */}
+                      <Box sx={{ position: 'absolute', right: 0, top: 0 }}>
+                        <Button variant="outlined" size="small" onClick={handleRegisterNewCustomer}>
+                          Register New Customer
+                        </Button>
+                      </Box>
+                    </Box>
+                  </>
+                ) : (
+                  <Box sx={{ p: 2, textAlign: 'center' }}>
+                    <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+                      No customers found matching your search criteria.
+                    </Typography>
+                    <Button variant="contained" onClick={handleRegisterNewCustomer} sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_DARK } }}>
+                      Register New Customer
+                    </Button>
+                  </Box>
+                )}
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setCustomerResultsOpen(false)}>Close</Button>
+              </DialogActions>
+            </Dialog>
 
             {/* Missing customer fields banner — same pattern as PawnTransactionScreen */}
             {customerValidationErrors.length > 0 && (
@@ -1024,83 +1215,6 @@ export default function SaleTransactionScreen({
             sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_DARK } }}>
             Apply
           </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* ── Customer picker (search + select) ── */}
-      <Dialog open={customerPickerOpen} onClose={() => setCustomerPickerOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Select Customer</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={1} sx={{ mt: 0.5, mb: 1 }}>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth size="small" label="First Name"
-                value={customerPickerForm.first_name}
-                onChange={e => setCustomerPickerForm(f => ({ ...f, first_name: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth size="small" label="Last Name"
-                value={customerPickerForm.last_name}
-                onChange={e => setCustomerPickerForm(f => ({ ...f, last_name: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth size="small" label="ID Number"
-                value={customerPickerForm.id_number}
-                onChange={e => setCustomerPickerForm(f => ({ ...f, id_number: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth size="small" label="Phone"
-                value={customerPickerForm.phone}
-                onChange={e => setCustomerPickerForm(f => ({ ...f, phone: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
-              />
-            </Grid>
-          </Grid>
-          <Button
-            fullWidth variant="outlined"
-            onClick={handleCustomerPickerSearch}
-            disabled={customerPickerSearching}
-            sx={{ mb: 1.5, borderColor: GREEN, color: GREEN, '&:hover': { borderColor: GREEN_DARK, bgcolor: '#e8f5e9' } }}
-          >
-            {customerPickerSearching ? <CircularProgress size={18} /> : 'Search'}
-          </Button>
-          <Box sx={{ maxHeight: 280, overflow: 'auto', border: '1px solid #e0e0e0', borderRadius: 1 }}>
-            <List dense disablePadding>
-              {customerPickerResults.length > 0 ? (
-                customerPickerResults.map(c => (
-                  <ListItem key={c.id} button divider onClick={() => handleCustomerPickerSelect(c)}>
-                    <ListItemAvatar>
-                      <Avatar sx={{ width: 32, height: 32, fontSize: 13, bgcolor: '#e8f5e9', color: GREEN }}>
-                        {`${c.first_name?.[0] || ''}${c.last_name?.[0] || ''}`}
-                      </Avatar>
-                    </ListItemAvatar>
-                    <ListItemText
-                      primary={`${c.first_name || ''} ${c.last_name || ''}`}
-                      secondary={[c.phone, c.email].filter(Boolean).join(' | ')}
-                    />
-                  </ListItem>
-                ))
-              ) : (
-                <Box sx={{ p: 2, textAlign: 'center' }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Search by name, ID number, or phone to find a customer.
-                  </Typography>
-                </Box>
-              )}
-            </List>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCustomerPickerOpen(false)}>Cancel</Button>
         </DialogActions>
       </Dialog>
 

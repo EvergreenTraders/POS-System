@@ -916,7 +916,9 @@ export default function ModernTransactions() {
     })();
   }, [location.state]);
 
-  // Restore sale screen after returning from CustomerEditor
+  // Restore sale screen after returning from CustomerEditor (either an
+  // existing customer was edited, or — from the quick sale customer picker's
+  // "Register New Customer" — a brand new one was just created).
   useEffect(() => {
     if (!location.state?.customerUpdated) return;
     const raw = sessionStorage.getItem('pendingSaleState');
@@ -925,13 +927,16 @@ export default function ModernTransactions() {
     try { pending = JSON.parse(raw); } catch { return; }
     sessionStorage.removeItem('pendingSaleState');
     const { customerId, customer: savedCustomer, ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount } = pending;
-    if (!customerId) return;
-    // Open immediately with saved customer so there's no empty-screen flash
-    if (savedCustomer) setCustomer(savedCustomer);
+    const newCustomer = location.state?.newCustomer;
+    const idToRefresh = newCustomer?.id || customerId;
+    if (!idToRefresh) return;
+    // Open immediately with saved/new customer so there's no empty-screen flash
+    if (newCustomer) setCustomer(newCustomer);
+    else if (savedCustomer) setCustomer(savedCustomer);
     setExistingSaleData({ ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount });
     setSaleOpen(true);
-    // Refresh customer in background to pick up any edits just made
-    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+    // Refresh customer in background to pick up any edits/the full new record
+    axios.get(`${config.apiUrl}/customers/${idToRefresh}`, {
       headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
     })
       .then(res => setCustomer(res.data))
