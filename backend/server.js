@@ -13,6 +13,12 @@ function generateTempPassword() {
   return pw;
 }
 
+// Forgot-password temp passwords live only in server memory (never written to the
+// employees table), so the employee's real password keeps working unless they
+// actually complete the reset with the temp one — and it self-expires after 5 min.
+const TEMP_PASSWORD_TTL_MS = 5 * 60 * 1000;
+const tempPasswords = new Map(); // employee_id -> { password, expiresAt }
+
 const app = express();
 
 // Middleware
@@ -705,12 +711,23 @@ app.post('/api/auth/reset-password', async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found' });
     }
-    if (result.rows[0].password !== oldPassword) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
+    const employee = result.rows[0];
+
+    if (employee.password !== oldPassword) {
+      const pendingEntry = tempPasswords.get(employee.employee_id);
+      if (!pendingEntry || pendingEntry.password !== oldPassword) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+      if (Date.now() > pendingEntry.expiresAt) {
+        tempPasswords.delete(employee.employee_id);
+        return res.status(401).json({ error: 'Temporary password expired. Please request a new one.', expired: true });
+      }
+      tempPasswords.delete(employee.employee_id);
     }
+
     await pool.query(
       'UPDATE employees SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE employee_id = $2',
-      [newPassword, result.rows[0].employee_id]
+      [newPassword, employee.employee_id]
     );
     res.json({ message: 'Password reset successfully' });
   } catch (err) {
@@ -729,11 +746,13 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'No account found with that username or email' });
     }
+    // Held only in memory — never written to the employees table — so the real
+    // password keeps working unless the employee actually completes the reset.
     const tempPassword = generateTempPassword();
-    await pool.query(
-      'UPDATE employees SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE employee_id = $2',
-      [tempPassword, result.rows[0].employee_id]
-    );
+    tempPasswords.set(result.rows[0].employee_id, {
+      password: tempPassword,
+      expiresAt: Date.now() + TEMP_PASSWORD_TTL_MS,
+    });
     res.json({ tempPassword });
   } catch (err) {
     console.error('Forgot password error:', err);
