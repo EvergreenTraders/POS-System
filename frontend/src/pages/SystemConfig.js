@@ -97,6 +97,15 @@ function SystemConfig() {
   // The developer account also needs to see submitted feedback, even though he/ she isn't a manager/owner.
   const canViewFeedback = isManagerOrOwner || user?.role === 'Software Developer';
   const [activeTab, setActiveTab] = useState(location.state?.initialTab ?? 0);
+
+  // location.state only seeds activeTab on first mount; if SystemConfig is already
+  // mounted (e.g. navigating here again from the feedback alert's "View" button),
+  // react to it explicitly so the tab still switches.
+  useEffect(() => {
+    if (location.state?.initialTab != null) {
+      setActiveTab(location.state.initialTab);
+    }
+  }, [location.state?.initialTab]);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
