@@ -436,6 +436,7 @@ function SystemConfig() {
     'YT': { gst: 5, pst: 0, hst: 0 }   // Yukon
   });
   const [selectedProvince, setSelectedProvince] = useState('ON');
+  const [tradeTaxable, setTradeTaxable] = useState(true);
 
   // Linked Account Authorization Template state (one for each link type)
   const [authorizationTemplates, setAuthorizationTemplates] = useState({
@@ -749,6 +750,13 @@ function SystemConfig() {
         }
       } catch (error) {
         console.error('Error fetching tax configuration:', error);
+      }
+
+      try {
+        const tradeTaxResponse = await axios.get(`${API_BASE_URL}/trade-tax-config`);
+        setTradeTaxable(tradeTaxResponse.data?.taxable !== false);
+      } catch (error) {
+        console.error('Error fetching trade tax configuration:', error);
       }
     };
 
@@ -2295,6 +2303,22 @@ const handleTabChange = (event, newValue) => {
       setSnackbar({
         open: true,
         message: 'Failed to save tax configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleToggleTradeTaxable = async () => {
+    const nextValue = !tradeTaxable;
+    setTradeTaxable(nextValue);
+    try {
+      await axios.put(`${API_BASE_URL}/trade-tax-config`, { taxable: nextValue });
+    } catch (error) {
+      console.error('Error updating trade tax configuration:', error);
+      setTradeTaxable(!nextValue);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update trade tax configuration',
         severity: 'error'
       });
     }
@@ -4741,6 +4765,25 @@ const handleTabChange = (event, newValue) => {
                   </FormControl>
                 </Grid>
               </Grid>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+              <Typography variant="body2" fontWeight="bold" gutterBottom>
+                Taxable Transaction Types
+              </Typography>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={tradeTaxable}
+                    onChange={handleToggleTradeTaxable}
+                    color="primary"
+                  />
+                }
+                label={<Typography variant="body2">Apply tax to Trade transactions</Typography>}
+              />
+              <Typography variant="caption" color="textSecondary" display="block">
+                When off, Trade tickets are not taxed regardless of the provincial rates below.
+              </Typography>
             </Paper>
 
             <TableContainer component={Paper} sx={{ mt: 1 }}>

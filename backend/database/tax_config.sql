@@ -67,3 +67,14 @@ BEGIN
     END IF;
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
+
+-- Whether Trade transactions have tax applied at all (tax-on-difference), independent
+-- of the provincial rate used above. Single row per store, same pattern as
+-- storage_fee_config / quick_sale_config.
+CREATE TABLE IF NOT EXISTS trade_tax_config (
+    id SERIAL PRIMARY KEY,
+    store_id INTEGER REFERENCES stores(store_id),
+    taxable BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

@@ -249,6 +249,7 @@ const storeClosedMiddleware = async (req, res, next) => {
     '/api/pawn-config',
     '/api/receipt-config',
     '/api/tax-config',
+    '/api/trade-tax-config',
     '/api/quote-expiration/config',
     '/api/inventory-hold-period/config',
     '/api/parked-workspace-config',
@@ -12605,6 +12606,45 @@ app.put('/api/tax-config/batch', async (req, res) => {
     res.status(500).json({ error: 'Failed to update tax configuration' });
   } finally {
     client.release();
+  }
+});
+
+// Whether Trade transactions have tax applied at all (independent of the provincial rate)
+app.get('/api/trade-tax-config', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM trade_tax_config
+      WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+      ORDER BY created_at DESC LIMIT 1
+    `);
+    res.json(result.rows[0] || { taxable: true });
+  } catch (error) {
+    console.error('Error fetching trade tax config:', error);
+    res.status(500).json({ error: 'Failed to fetch trade tax config' });
+  }
+});
+
+app.put('/api/trade-tax-config', async (req, res) => {
+  try {
+    const { taxable } = req.body;
+    const storeRes = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const store_id = storeRes.rows[0]?.store_id || null;
+
+    const existing = await pool.query('SELECT id FROM trade_tax_config WHERE store_id = $1', [store_id]);
+    const result = existing.rows.length > 0
+      ? await pool.query(
+          'UPDATE trade_tax_config SET taxable = $1, updated_at = CURRENT_TIMESTAMP WHERE store_id = $2 RETURNING *',
+          [taxable !== false, store_id]
+        )
+      : await pool.query(
+          'INSERT INTO trade_tax_config (store_id, taxable) VALUES ($1, $2) RETURNING *',
+          [store_id, taxable !== false]
+        );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating trade tax config:', error);
+    res.status(500).json({ error: 'Failed to update trade tax config' });
   }
 });
 
