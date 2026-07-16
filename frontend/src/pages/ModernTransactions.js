@@ -16,6 +16,7 @@ import TradeTransactionScreen from './TradeTransactionScreen';
 import PaymentTransactionScreen from './PaymentTransactionScreen';
 import RedeemTransactionScreen from './RedeemTransactionScreen';
 import { useWorkspaceGuard } from '../context/WorkspaceGuardContext';
+import { useAuth } from '../context/AuthContext';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
@@ -653,9 +654,11 @@ export default function ModernTransactions() {
   const location = useLocation();
   const navigate = useNavigate();
   const { registerGuard } = useWorkspaceGuard();
+  const { user: currentUser } = useAuth();
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [quickSaleMaxAmount, setQuickSaleMaxAmount] = useState(100);
+  const [employees, setEmployees] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
   const [buyOpen, setBuyOpen] = useState(() => {
     if (location.state?.customerUpdated) {
@@ -822,10 +825,22 @@ export default function ModernTransactions() {
     axios.get(`${config.apiUrl}/quick-sale-config`)
       .then(res => setQuickSaleMaxAmount(parseFloat(res.data?.max_amount) || 0))
       .catch(err => console.error('Failed to load quick sale config:', err));
+    axios.get(`${config.apiUrl}/employees`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setEmployees(res.data))
+      .catch(err => console.error('Failed to load employees:', err));
   }, []);
 
   // Clean up expired workspace entries on mount
   useEffect(() => { cleanupExpiredWorkspaces(); }, []);
+
+  // Which of the empty-workspace dashboard cards this employee sees —
+  // configured per employee from SystemConfig's Employee Configuration tab.
+  const currentEmployee = employees.find(e => e.employee_id === currentUser?.id);
+  const showMessagesCard = currentEmployee?.show_messages_card !== false;
+  const showTasksCard = currentEmployee?.show_tasks_card !== false;
+  const showLoansLayawaysCard = currentEmployee?.show_loans_layaways_card !== false;
 
 
 
@@ -2257,64 +2272,79 @@ export default function ModernTransactions() {
           <Box sx={{ flex: 1, overflowY: 'auto' }}>
             {workspaceTransactions.length === 0 ? (
               <Box sx={{ py: 1 }}>
-                <Grid container spacing={{ md: 1.5, xl: 1 }}>
-                  <Grid item xs={12} md={4}>
-                    <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
-                      <Typography variant="h6" fontSize={15} gutterBottom>Messages</Typography>
-                      <List dense sx={{ p: 0 }}>
-                        {DASHBOARD_MESSAGES.map((msg, idx) => (
-                          <ListItem key={idx} divider={idx < DASHBOARD_MESSAGES.length - 1} sx={{ px: 0 }}>
-                            <ListItemText
-                              primaryTypographyProps={{ fontSize: 12.5 }}
-                              secondaryTypographyProps={{ fontSize: 11 }}
-                              primary={`[${msg.type}] ${msg.text}`}
-                              secondary={msg.type === 'announcement' ? 'Pinned' : ''}
-                            />
-                          </ListItem>
-                        ))}
-                      </List>
-                    </Paper>
-                  </Grid>
-                  <Grid item xs={12} md={4}>
-                    <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
-                      <Typography variant="h6" fontSize={15} gutterBottom>Tasks</Typography>
-                      <List dense sx={{ p: 0 }}>
-                        {DASHBOARD_TASKS.map((task, idx) => (
-                          <ListItem key={idx} divider={idx < DASHBOARD_TASKS.length - 1} sx={{ px: 0 }}>
-                            <ListItemText primaryTypographyProps={{ fontSize: 12.5 }} primary={task} />
-                          </ListItem>
-                        ))}
-                      </List>
-                    </Paper>
-                  </Grid>
-                  <Grid item xs={12} md={4}>
-                    <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
-                      <Typography variant="h6" fontSize={15} gutterBottom>Loans/Layaways Due Today</Typography>
-                      <TableContainer>
-                        <Table size="small">
-                          <TableHead>
-                            <TableRow>
-                              <TableCell sx={{ fontSize: 11 }}>ID</TableCell>
-                              <TableCell sx={{ fontSize: 11 }}>Name</TableCell>
-                              <TableCell sx={{ fontSize: 11 }}>Type</TableCell>
-                              <TableCell sx={{ fontSize: 11 }}>Details</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {DASHBOARD_LOANS_LAYAWAYS_DUE_TODAY.map((item, idx) => (
-                              <TableRow key={idx}>
-                                <TableCell sx={{ fontSize: 12 }}>{item.id}</TableCell>
-                                <TableCell sx={{ fontSize: 12 }}>{item.name}</TableCell>
-                                <TableCell sx={{ fontSize: 12 }}>{item.type}</TableCell>
-                                <TableCell sx={{ fontSize: 12 }}>{item.details}</TableCell>
-                              </TableRow>
+
+                {!showMessagesCard && !showTasksCard && !showLoansLayawaysCard ? (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 6, gap: 1.5, color: 'text.secondary' }}>
+                    <MuiIcons.Receipt sx={{ fontSize: 48, opacity: 0.15 }} />
+                    <Typography variant="body2" color="text.secondary">No transactions in workspace yet.</Typography>
+                    <Typography variant="caption" color="text.secondary">Use the buttons below to start a pawn, sale, or other transaction.</Typography>
+                  </Box>
+                ) : (
+                  <Grid container spacing={{ md: 1.5, xl: 1 }}>
+                    {showMessagesCard && (
+                      <Grid item xs={12} md={4}>
+                        <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
+                          <Typography variant="h6" fontSize={15} gutterBottom>Messages</Typography>
+                          <List dense sx={{ p: 0 }}>
+                            {DASHBOARD_MESSAGES.map((msg, idx) => (
+                              <ListItem key={idx} divider={idx < DASHBOARD_MESSAGES.length - 1} sx={{ px: 0 }}>
+                                <ListItemText
+                                  primaryTypographyProps={{ fontSize: 12.5 }}
+                                  secondaryTypographyProps={{ fontSize: 11 }}
+                                  primary={`[${msg.type}] ${msg.text}`}
+                                  secondary={msg.type === 'announcement' ? 'Pinned' : ''}
+                                />
+                              </ListItem>
                             ))}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    </Paper>
+                          </List>
+                        </Paper>
+                      </Grid>
+                    )}
+                    {showTasksCard && (
+                      <Grid item xs={12} md={4}>
+                        <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
+                          <Typography variant="h6" fontSize={15} gutterBottom>Tasks</Typography>
+                          <List dense sx={{ p: 0 }}>
+                            {DASHBOARD_TASKS.map((task, idx) => (
+                              <ListItem key={idx} divider={idx < DASHBOARD_TASKS.length - 1} sx={{ px: 0 }}>
+                                <ListItemText primaryTypographyProps={{ fontSize: 12.5 }} primary={task} />
+                              </ListItem>
+                            ))}
+                          </List>
+                        </Paper>
+                      </Grid>
+                    )}
+                    {showLoansLayawaysCard && (
+                      <Grid item xs={12} md={4}>
+                        <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
+                          <Typography variant="h6" fontSize={15} gutterBottom>Loans/Layaways Due Today</Typography>
+                          <TableContainer>
+                            <Table size="small">
+                              <TableHead>
+                                <TableRow>
+                                  <TableCell sx={{ fontSize: 11 }}>ID</TableCell>
+                                  <TableCell sx={{ fontSize: 11 }}>Name</TableCell>
+                                  <TableCell sx={{ fontSize: 11 }}>Type</TableCell>
+                                  <TableCell sx={{ fontSize: 11 }}>Details</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {DASHBOARD_LOANS_LAYAWAYS_DUE_TODAY.map((item, idx) => (
+                                  <TableRow key={idx}>
+                                    <TableCell sx={{ fontSize: 12 }}>{item.id}</TableCell>
+                                    <TableCell sx={{ fontSize: 12 }}>{item.name}</TableCell>
+                                    <TableCell sx={{ fontSize: 12 }}>{item.type}</TableCell>
+                                    <TableCell sx={{ fontSize: 12 }}>{item.details}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </TableContainer>
+                        </Paper>
+                      </Grid>
+                    )}
                   </Grid>
-                </Grid>
+                )}
               </Box>
             ) : (
               <Grid container spacing={{ md: 1.5, xl: 1 }}>

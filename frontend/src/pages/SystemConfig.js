@@ -1066,6 +1066,9 @@ function SystemConfig() {
       discrepancyThreshold: overrideField === 'discrepancy_threshold' ? overrideValue : (employee.discrepancy_threshold != null ? employee.discrepancy_threshold : null),
       employmentType: overrideField === 'employment_type' ? overrideValue : (employee.employment_type || 'hourly'),
       canResumeParkedWorkspaces: get('can_resume_parked_workspaces', true),
+      showMessagesCard: get('show_messages_card', true),
+      showTasksCard: get('show_tasks_card', true),
+      showLoansLayawaysCard: get('show_loans_layaways_card', true),
     };
   };
 
@@ -5392,6 +5395,7 @@ const handleTabChange = (event, newValue) => {
                       <TableCell align="center">Petty Cash</TableCell>
                       <TableCell align="center">Petty Cash Limit</TableCell>
                       <TableCell align="center">Resume Parked Workspaces</TableCell>
+                      <TableCell align="center">Workspace Cards</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -5552,6 +5556,25 @@ const handleTabChange = (event, newValue) => {
                             color="primary"
                             size="small"
                           />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr' }}>
+                            <FormControlLabel
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.show_messages_card !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'show_messages_card', emp.show_messages_card !== false)} />}
+                              label={<Typography variant="caption">Messages</Typography>}
+                              sx={{ m: 0 }}
+                            />
+                            <FormControlLabel
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.show_tasks_card !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'show_tasks_card', emp.show_tasks_card !== false)} />}
+                              label={<Typography variant="caption">Tasks</Typography>}
+                              sx={{ m: 0 }}
+                            />
+                            <FormControlLabel
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.show_loans_layaways_card !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'show_loans_layaways_card', emp.show_loans_layaways_card !== false)} />}
+                              label={<Typography variant="caption">Loans/Layaways</Typography>}
+                              sx={{ m: 0 }}
+                            />
+                          </Box>
                         </TableCell>
                       </TableRow>
                     ))}

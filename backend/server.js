@@ -334,6 +334,20 @@ pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_resume_parked_workspaces BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('can_resume_parked_workspaces migration:', err.message));
 
+// Per-employee workspace dashboard card visibility (which of the Messages /
+// Tasks / Loans-Layaways-Due-Today cards show on the empty Modern
+// Transactions workspace for that employee) — configured per employee from
+// SystemConfig's Employee Configuration tab.
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS show_messages_card BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('show_messages_card migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS show_tasks_card BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('show_tasks_card migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS show_loans_layaways_card BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('show_loans_layaways_card migration:', err.message));
+
 // Transfer and cash handling permissions
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_drawer BOOLEAN NOT NULL DEFAULT TRUE
@@ -747,7 +761,8 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
     const { trackHours, canOpenStore, canOpenDrawer, canViewDrawer, canViewSafe,
             transferAllowedDrawer, transferAllowedSafe, transferAllowedBank, transferAllowedStore,
             transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold, employmentType,
-            canResumeParkedWorkspaces } = req.body;
+            canResumeParkedWorkspaces,
+            showMessagesCard, showTasksCard, showLoansLayawaysCard } = req.body;
 
     const empType = employmentType === 'salary' ? 'salary' : 'hourly';
     // Salary employees are always exempt from clocking in
@@ -762,13 +777,14 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
           transfer_limit = $10, can_petty_cash = $11, petty_cash_limit = $12,
           discrepancy_threshold = $13, employment_type = $14,
           can_resume_parked_workspaces = $15,
+          show_messages_card = $16, show_tasks_card = $17, show_loans_layaways_card = $18,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $16
+      WHERE employee_id = $19
       RETURNING employee_id, username, first_name, last_name, role,
         track_hours, can_open_store, can_open_drawer, can_view_drawer, can_view_safe,
         transfer_allowed_drawer, transfer_allowed_safe, transfer_allowed_bank, transfer_allowed_store,
         transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold, employment_type,
-        can_resume_parked_workspaces
+        can_resume_parked_workspaces, show_messages_card, show_tasks_card, show_loans_layaways_card
     `;
     const result = await pool.query(query, [
       effectiveTrackHours,
@@ -786,6 +802,9 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
       discrepancyThreshold != null && discrepancyThreshold !== '' ? parseFloat(discrepancyThreshold) : null,
       empType,
       canResumeParkedWorkspaces !== false,
+      showMessagesCard !== false,
+      showTasksCard !== false,
+      showLoansLayawaysCard !== false,
       id
     ]);
 
