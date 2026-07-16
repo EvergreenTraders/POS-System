@@ -104,6 +104,8 @@ const AuthenticatedLayout = ({ children }) => {
   const [closeStoreIssuesOpen, setCloseStoreIssuesOpen] = React.useState(false);
   const [closeStoreIssues, setCloseStoreIssues] = React.useState([]);
   const [closeStoreIssuesMessage, setCloseStoreIssuesMessage] = React.useState('');
+  const [parkedWorkspaces, setParkedWorkspaces] = React.useState([]);
+  const [deletingParkedId, setDeletingParkedId] = React.useState(null);
 
   const { isStoreClosed, isPastBusinessHours, todayHours, refreshStatus } = useStoreStatus();
 
@@ -154,12 +156,16 @@ const AuthenticatedLayout = ({ children }) => {
     setCloseStoreError('');
     setCloseStoreLoading(true);
     try {
-      const [drawersResult, clockedInResult] = await Promise.allSettled([
+      const token = localStorage.getItem('token');
+      const [drawersResult, clockedInResult, parkedResult] = await Promise.allSettled([
         axios.get(`${config.apiUrl}/store-sessions/check-open-drawers`),
         axios.get(`${config.apiUrl}/employee-sessions/clocked-in`),
+        axios.get(`${config.apiUrl}/parked-workspaces`, { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       const clockedInList = clockedInResult.status === 'fulfilled' ? (clockedInResult.value.data || []) : [];
       setClockedInEmployees(clockedInList);
+      const freshParked = parkedResult.status === 'fulfilled' ? (parkedResult.value.data || []) : [];
+      setParkedWorkspaces(freshParked);
 
       if (drawersResult.status === 'rejected') {
         const err = drawersResult.reason;
@@ -172,6 +178,14 @@ const AuthenticatedLayout = ({ children }) => {
       if (clockedInList.length > 0) {
         await axios.post(`${config.apiUrl}/employee-sessions/notify-closing`);
       }
+
+      if (freshParked.length > 0) {
+        setCloseStoreIssuesMessage('');
+        setCloseStoreIssues([]);
+        setCloseStoreIssuesOpen(true);
+        return;
+      }
+
       setIsBackupComputer(false);
       setCloseStoreDialogOpen(true);
     } finally {
@@ -188,6 +202,34 @@ const AuthenticatedLayout = ({ children }) => {
       setCloseStoreError(err.response?.data?.error || 'Failed to clock out employee');
     } finally {
       setClockingOutId(null);
+    }
+  };
+
+  const handleDeleteParkedWorkspace = async (pw) => {
+    setDeletingParkedId(pw.id);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`${config.apiUrl}/parked-workspaces/${pw.id}`, { headers: { Authorization: `Bearer ${token}` } });
+      setParkedWorkspaces(prev => prev.filter(p => p.id !== pw.id));
+      window.dispatchEvent(new CustomEvent('parkedWorkspacesChanged'));
+    } catch {
+      // non-critical
+    } finally {
+      setDeletingParkedId(null);
+    }
+  };
+
+  const handleKeepParkedWorkspacesOnClose = () => {
+    setCloseStoreIssuesOpen(false);
+    setIsBackupComputer(false);
+    setCloseStoreDialogOpen(true);
+  };
+
+  const handleCloseStoreIssuesDismiss = () => {
+    if (closeStoreIssues.length === 0) {
+      handleKeepParkedWorkspacesOnClose();
+    } else {
+      setCloseStoreIssuesOpen(false);
     }
   };
 
@@ -350,12 +392,16 @@ const AuthenticatedLayout = ({ children }) => {
 
       <CloseStoreIssuesDialog
         open={closeStoreIssuesOpen}
-        onClose={() => setCloseStoreIssuesOpen(false)}
+        onClose={handleCloseStoreIssuesDismiss}
         message={closeStoreIssuesMessage}
         issues={closeStoreIssues}
         clockedInEmployees={clockedInEmployees}
         onClockOut={handleClockOutEmployee}
         clockingOutId={clockingOutId}
+        parkedWorkspaces={parkedWorkspaces}
+        onDeleteParkedWorkspace={handleDeleteParkedWorkspace}
+        deletingParkedId={deletingParkedId}
+        onKeepParkedWorkspaces={handleKeepParkedWorkspacesOnClose}
       />
     </Box>
   );

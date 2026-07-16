@@ -109,6 +109,8 @@ function CashDrawer() {
   const [closeStoreIssuesOpen, setCloseStoreIssuesOpen] = useState(false);
   const [closeStoreIssues, setCloseStoreIssues] = useState([]);
   const [closeStoreIssuesMessage, setCloseStoreIssuesMessage] = useState('');
+  const [parkedWorkspaces, setParkedWorkspaces] = useState([]);
+  const [deletingParkedId, setDeletingParkedId] = useState(null);
 
   // Dialog states
   const [openDrawerDialog, setOpenDrawerDialog] = useState(false);
@@ -1025,12 +1027,16 @@ function CashDrawer() {
 
     setStoreStatusLoading(true);
     try {
-      const [drawersResult, clockedInResult] = await Promise.allSettled([
+      const token = localStorage.getItem('token');
+      const [drawersResult, clockedInResult, parkedResult] = await Promise.allSettled([
         axios.get(`${API_BASE_URL}/store-sessions/check-open-drawers`),
         axios.get(`${API_BASE_URL}/employee-sessions/clocked-in`),
+        axios.get(`${API_BASE_URL}/parked-workspaces`, { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       const clockedInList = clockedInResult.status === 'fulfilled' ? (clockedInResult.value.data || []) : [];
       setClockedInEmployees(clockedInList);
+      const freshParked = parkedResult.status === 'fulfilled' ? (parkedResult.value.data || []) : [];
+      setParkedWorkspaces(freshParked);
 
       if (drawersResult.status === 'rejected') {
         const error = drawersResult.reason;
@@ -1045,6 +1051,13 @@ function CashDrawer() {
       if (clockedInList.length > 0) {
         console.log('Broadcasting store closing notification to', clockedInList.length, 'clocked-in employees');
         await axios.post(`${API_BASE_URL}/employee-sessions/notify-closing`);
+      }
+
+      if (freshParked.length > 0) {
+        setCloseStoreIssuesMessage('');
+        setCloseStoreIssues([]);
+        setCloseStoreIssuesOpen(true);
+        return;
       }
 
       setCloseStoreDialogOpen(true);
@@ -1062,6 +1075,33 @@ function CashDrawer() {
       showSnackbar(err.response?.data?.error || 'Failed to clock out employee', 'error');
     } finally {
       setClockingOutId(null);
+    }
+  };
+
+  const handleDeleteParkedWorkspace = async (pw) => {
+    setDeletingParkedId(pw.id);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`${API_BASE_URL}/parked-workspaces/${pw.id}`, { headers: { Authorization: `Bearer ${token}` } });
+      setParkedWorkspaces(prev => prev.filter(p => p.id !== pw.id));
+      window.dispatchEvent(new CustomEvent('parkedWorkspacesChanged'));
+    } catch {
+      // non-critical
+    } finally {
+      setDeletingParkedId(null);
+    }
+  };
+
+  const handleKeepParkedWorkspacesOnClose = () => {
+    setCloseStoreIssuesOpen(false);
+    setCloseStoreDialogOpen(true);
+  };
+
+  const handleCloseStoreIssuesDismiss = () => {
+    if (closeStoreIssues.length === 0) {
+      handleKeepParkedWorkspacesOnClose();
+    } else {
+      setCloseStoreIssuesOpen(false);
     }
   };
 
@@ -7786,12 +7826,16 @@ function CashDrawer() {
 
       <CloseStoreIssuesDialog
         open={closeStoreIssuesOpen}
-        onClose={() => setCloseStoreIssuesOpen(false)}
+        onClose={handleCloseStoreIssuesDismiss}
         message={closeStoreIssuesMessage}
         issues={closeStoreIssues}
         clockedInEmployees={clockedInEmployees}
         onClockOut={handleClockOutEmployee}
         clockingOutId={clockingOutId}
+        parkedWorkspaces={parkedWorkspaces}
+        onDeleteParkedWorkspace={handleDeleteParkedWorkspace}
+        deletingParkedId={deletingParkedId}
+        onKeepParkedWorkspaces={handleKeepParkedWorkspacesOnClose}
       />
 
       {/* Clock-In Warning Dialog */}

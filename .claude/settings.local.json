@@ -3,7 +3,8 @@
     "allow": [
       "Bash(dir:*)",
       "Bash(aws elasticbeanstalk *)",
-      "Bash(xargs curl -s)"
+      "Bash(xargs curl -s)",
+      "Bash(node -e \"console.log\\(require.resolve\\('@babel/parser'\\)\\)\")"
     ]
   }
 }

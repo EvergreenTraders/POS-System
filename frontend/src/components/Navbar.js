@@ -84,7 +84,7 @@ function Navbar() {
   const [closeStoreClockedIn, setCloseStoreClockedIn] = useState([]);
   const [clockingOutId, setClockingOutId] = useState(null);
   const [isBackupComputer, setIsBackupComputer] = useState(false);
-  const [parkedWorkspacesWarningOpen, setParkedWorkspacesWarningOpen] = useState(false);
+  const [deletingParkedId, setDeletingParkedId] = useState(null);
   const [closeStoreIssuesOpen, setCloseStoreIssuesOpen] = useState(false);
   const [closeStoreIssues, setCloseStoreIssues] = useState([]);
   const [closeStoreIssuesMessage, setCloseStoreIssuesMessage] = useState('');
@@ -452,12 +452,14 @@ function Navbar() {
     if (storeStatus === 'open') {
       setStoreActionLoading(true);
       try {
-        const [drawersResult, clockedInResult] = await Promise.allSettled([
+        const [drawersResult, clockedInResult, parkedList] = await Promise.allSettled([
           axios.get(`${config.apiUrl}/store-sessions/check-open-drawers`),
           axios.get(`${config.apiUrl}/employee-sessions/clocked-in`),
+          fetchParkedWorkspaces(),
         ]);
         const clockedInList = clockedInResult.status === 'fulfilled' ? (clockedInResult.value.data || []) : [];
         setCloseStoreClockedIn(clockedInList);
+        const freshParked = parkedList.status === 'fulfilled' ? parkedList.value : [];
 
         if (drawersResult.status === 'rejected') {
           const err = drawersResult.reason;
@@ -470,6 +472,14 @@ function Navbar() {
         if (clockedInList.length > 0) {
           await axios.post(`${config.apiUrl}/employee-sessions/notify-closing`);
         }
+
+        if (freshParked.length > 0) {
+          setCloseStoreIssuesMessage('');
+          setCloseStoreIssues([]);
+          setCloseStoreIssuesOpen(true);
+          return;
+        }
+
         setIsBackupComputer(false);
         setCloseStoreDialogOpen(true);
       } finally {
@@ -517,10 +527,8 @@ function Navbar() {
       await refreshStatus();
       window.dispatchEvent(new Event('storeStatusChanged'));
       setCloseStoreDialogOpen(false);
-      setParkedWorkspacesWarningOpen(false);
     } catch (err) {
       setStoreActionError(err.response?.data?.error || 'Failed to close store');
-      setParkedWorkspacesWarningOpen(false);
       setCloseStoreDialogOpen(true);
     } finally {
       setStoreActionLoading(false);
@@ -528,33 +536,37 @@ function Navbar() {
   };
 
   const handleCloseStoreConfirm = async () => {
-    setStoreActionLoading(true);
-    const freshParked = await fetchParkedWorkspaces();
-    setStoreActionLoading(false);
-    if (freshParked.length > 0) {
-      setCloseStoreDialogOpen(false);
-      setParkedWorkspacesWarningOpen(true);
-      return;
-    }
     await performCloseStore();
   };
 
-  const handleDeleteParkedWorkspacesOnClose = async () => {
+  const handleDeleteParkedWorkspace = async (pw) => {
+    setDeletingParkedId(pw.id);
     try {
       const token = localStorage.getItem('token');
-      await fetch(`${config.apiUrl}/parked-workspaces`, {
+      await fetch(`${config.apiUrl}/parked-workspaces/${pw.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
-      setParkedWorkspaces([]);
+      setParkedWorkspaces(prev => prev.filter(p => p.id !== pw.id));
     } catch {
-      // non-critical — proceed with closing anyway
+      // non-critical
+    } finally {
+      setDeletingParkedId(null);
     }
-    await performCloseStore();
   };
 
-  const handleKeepParkedWorkspacesOnClose = async () => {
-    await performCloseStore();
+  const handleKeepParkedWorkspacesOnClose = () => {
+    setCloseStoreIssuesOpen(false);
+    setIsBackupComputer(false);
+    setCloseStoreDialogOpen(true);
+  };
+
+  const handleCloseStoreIssuesDismiss = () => {
+    if (closeStoreIssues.length === 0) {
+      handleKeepParkedWorkspacesOnClose();
+    } else {
+      setCloseStoreIssuesOpen(false);
+    }
   };
 
   return (
@@ -1031,23 +1043,6 @@ function Navbar() {
         </DialogActions>
       </Dialog>
 
-      {/* Parked Workspaces on Store Close Warning */}
-      <Dialog open={parkedWorkspacesWarningOpen} onClose={handleKeepParkedWorkspacesOnClose} maxWidth="xs" fullWidth>
-        <DialogTitle>Parked Tickets Found</DialogTitle>
-        <DialogContent>
-          <Alert severity="warning" sx={{ mb: 1 }}>
-            There {parkedWorkspaces.length === 1 ? 'is' : 'are'} {parkedWorkspaces.length} parked ticket{parkedWorkspaces.length !== 1 ? 's' : ''} still open.
-          </Alert>
-          <Typography variant="body2">
-            Do you want to delete them or save them for later?
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button color="error" onClick={handleDeleteParkedWorkspacesOnClose}>Delete</Button>
-          <Button variant="contained" onClick={handleKeepParkedWorkspacesOnClose}>Save</Button>
-        </DialogActions>
-      </Dialog>
-
       {/* Resume Parked Workspace Dialog */}
       <Dialog open={resumeDialogOpen} onClose={() => setResumeDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1157,12 +1152,16 @@ function Navbar() {
 
       <CloseStoreIssuesDialog
         open={closeStoreIssuesOpen}
-        onClose={() => setCloseStoreIssuesOpen(false)}
+        onClose={handleCloseStoreIssuesDismiss}
         message={closeStoreIssuesMessage}
         issues={closeStoreIssues}
         clockedInEmployees={closeStoreClockedIn}
         onClockOut={handleClockOutEmployee}
         clockingOutId={clockingOutId}
+        parkedWorkspaces={parkedWorkspaces}
+        onDeleteParkedWorkspace={handleDeleteParkedWorkspace}
+        deletingParkedId={deletingParkedId}
+        onKeepParkedWorkspaces={handleKeepParkedWorkspacesOnClose}
       />
     </>
   );

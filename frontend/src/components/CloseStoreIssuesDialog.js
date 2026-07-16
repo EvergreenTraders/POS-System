@@ -15,22 +15,28 @@ import {
   Typography,
   CircularProgress,
 } from '@mui/material';
-import { WarningAmber as WarningIcon } from '@mui/icons-material';
+import { WarningAmber as WarningIcon, LocalParking as ParkingIcon } from '@mui/icons-material';
 
-// Shared popup for surfacing everything blocking/relevant to a store close (open
-// drawers/safes from /api/store-sessions/check-open-drawers, plus who's still
-// clocked in from /api/employee-sessions/clocked-in), instead of a single inline
-// warning that's easy to miss or silently never render.
+// Shared popup for surfacing everything relevant to a store close: open drawers/safes
+// from /api/store-sessions/check-open-drawers (hard block), who's still clocked in from
+// /api/employee-sessions/clocked-in, and parked workspaces from /api/parked-workspaces
+// (requires a delete-or-keep decision) — instead of separate warnings that are easy to
+// miss or appear at different points in the close-store flow.
 export default function CloseStoreIssuesDialog({
-  open, onClose, message, issues = [], clockedInEmployees = [], onClockOut, clockingOutId,
+  open, onClose, message,
+  issues = [], clockedInEmployees = [], onClockOut, clockingOutId,
+  parkedWorkspaces = [], onDeleteParkedWorkspace, deletingParkedId, onKeepParkedWorkspaces,
 }) {
   const hasIssues = issues.length > 0;
   const hasClockedIn = clockedInEmployees.length > 0;
+  const hasParked = parkedWorkspaces.length > 0;
+  const nothingToShow = !hasIssues && !hasClockedIn && !hasParked;
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Cannot Close Store</DialogTitle>
+      <DialogTitle>{hasIssues ? 'Cannot Close Store' : hasParked ? 'Parked Tickets Found' : 'Review Before Closing'}</DialogTitle>
       <DialogContent>
-        {!hasIssues && !hasClockedIn ? (
+        {nothingToShow ? (
           <Alert severity="error">{message || 'Failed to check store closure prerequisites'}</Alert>
         ) : (
           <>
@@ -39,7 +45,7 @@ export default function CloseStoreIssuesDialog({
                 <Alert severity="error" sx={{ mb: 1 }}>
                   The following drawers/safes are still open. Close them before closing the store.
                 </Alert>
-                <List dense sx={{ pt: 0, mb: hasClockedIn ? 2 : 0 }}>
+                <List dense sx={{ pt: 0, mb: 2 }}>
                   {issues.map((issue) => (
                     <ListItem key={issue.session_id} disableGutters>
                       <ListItemIcon sx={{ minWidth: 32 }}>
@@ -61,7 +67,7 @@ export default function CloseStoreIssuesDialog({
                     Currently Clocked-In Employees ({clockedInEmployees.length}):
                   </Typography>
                 </Alert>
-                <List dense sx={{ pt: 0 }}>
+                <List dense sx={{ pt: 0, mb: hasParked ? 2 : 0 }}>
                   {clockedInEmployees.map((emp) => (
                     <ListItem
                       key={emp.session_id}
@@ -99,11 +105,54 @@ export default function CloseStoreIssuesDialog({
                 </List>
               </>
             )}
+            {hasParked && (
+              <Alert severity="info" sx={{ mb: 1 }}>
+                There {parkedWorkspaces.length === 1 ? 'is' : 'are'} {parkedWorkspaces.length} parked ticket{parkedWorkspaces.length !== 1 ? 's' : ''} still open.
+                Delete individual tickets below, or keep them for later.
+              </Alert>
+            )}
+            {hasParked && (
+              <List dense sx={{ pt: 0 }}>
+                {parkedWorkspaces.map((pw) => (
+                  <ListItem
+                    key={pw.id}
+                    disableGutters
+                    secondaryAction={
+                      onDeleteParkedWorkspace && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="error"
+                          disabled={deletingParkedId === pw.id}
+                          startIcon={deletingParkedId === pw.id ? <CircularProgress size={14} /> : null}
+                          onClick={() => onDeleteParkedWorkspace(pw)}
+                        >
+                          Delete
+                        </Button>
+                      )
+                    }
+                  >
+                    <ListItemIcon sx={{ minWidth: 32 }}>
+                      <ParkingIcon color="action" fontSize="small" />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={pw.customer_name || 'Unknown Customer'}
+                      secondary={`Parked by ${pw.parked_by_employee_name || 'unknown'} - ${new Date(pw.parked_at).toLocaleTimeString()}`}
+                      sx={{ pr: 10 }}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            )}
           </>
         )}
       </DialogContent>
       <DialogActions>
-        <Button variant="contained" onClick={onClose}>OK</Button>
+        {hasParked && !hasIssues ? (
+          <Button variant="contained" onClick={onKeepParkedWorkspaces}>Keep & Continue</Button>
+        ) : (
+          <Button variant="contained" onClick={onClose}>OK</Button>
+        )}
       </DialogActions>
     </Dialog>
   );
