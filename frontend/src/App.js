@@ -18,7 +18,6 @@ import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import CloseStoreIssuesDialog from './components/CloseStoreIssuesDialog';
 import Login from './components/Login';
-import Dashboard from './pages/Dashboard';
 import Home from './pages/Home';
 import Scrap from './pages/Scrap';
 import TransactionJournals from './pages/TransactionJournals';
@@ -425,16 +424,6 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <Home />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/dashboard"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Dashboard />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

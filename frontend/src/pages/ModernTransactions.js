@@ -55,6 +55,37 @@ const DASHBOARD_LOANS_LAYAWAYS_DUE_TODAY = [
   { id: 'PT-00001198', name: 'Robert Chen', type: 'Loan', details: '$210.00 due' },
 ];
 
+// Copied from the now-removed Dashboard.js screen (same dummy data, not wired to
+// any live source).
+const DASHBOARD_STATS = [
+  { title: 'Daily Revenue', value: '$2,854', iconName: 'CurrencyExchange', change: '12.5%', timeFrame: 'last month' },
+  { title: 'Protection Plans sold', value: '124', iconName: 'Inventory', change: '8.2%', timeFrame: 'last month' },
+  { title: 'New Customers', value: '48', iconName: 'Person', change: '-3.1%', timeFrame: 'last month' },
+  { title: 'Sales Growth', value: '15.2%', iconName: 'TrendingUp', change: '2.3%', timeFrame: 'last month' },
+];
+
+function StatCard({ title, value, iconName, change, timeFrame }) {
+  const isPositive = !change.includes('-');
+  const IconComponent = MuiIcons[iconName];
+  return (
+    <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+        <Box>
+          <Typography color="text.secondary" variant="body2" gutterBottom>{title}</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{value}</Typography>
+        </Box>
+        <Box sx={{ bgcolor: '#e7f7ed', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <IconComponent sx={{ color: GREEN, fontSize: 18 }} />
+        </Box>
+      </Box>
+      <Typography variant="caption" sx={{ color: isPositive ? '#00a862' : '#d32f2f', display: 'flex', alignItems: 'center' }}>
+        <MuiIcons.TrendingUpOutlined sx={{ fontSize: 14, mr: 0.5, transform: !isPositive ? 'rotate(180deg)' : 'none' }} />
+        {change} vs {timeFrame}
+      </Typography>
+    </Paper>
+  );
+}
+
 // Maps workspace transaction type to the localStorage keys each ticket screen uses
 // to track voided ticket numbers (so they're never reused) and the in-flight
 // "pending" ticket id (so a voided-but-uncommitted id isn't handed out again).
@@ -2065,6 +2096,12 @@ export default function ModernTransactions() {
         <TextField
           value={search}
           onChange={e => setSearch(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && search.trim().toLowerCase().includes('scrap')) {
+              setSearch('');
+              navigate('/scrap');
+            }
+          }}
           placeholder="Scan barcode or search (item, customer, ticket, receipt, SKU, phone...)"
           size="small"
           fullWidth
@@ -2301,6 +2338,15 @@ export default function ModernTransactions() {
                     <MuiIcons.Settings fontSize="small" />
                   </IconButton>
                 </Tooltip>
+
+                <Grid container spacing={{ md: 1.5, xl: 1 }} sx={{ mb: 2, pr: 5 }}>
+                  {DASHBOARD_STATS.map((stat) => (
+                    <Grid item xs={12} sm={6} md={3} key={stat.title}>
+                      <StatCard {...stat} />
+                    </Grid>
+                  ))}
+                </Grid>
+
                 <Menu anchorEl={cardPrefsAnchor} open={Boolean(cardPrefsAnchor)} onClose={() => setCardPrefsAnchor(null)}>
                   <Box sx={{ px: 2, py: 1 }}>
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>

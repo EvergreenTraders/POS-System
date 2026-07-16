@@ -14,7 +14,6 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 import { useWorkspaceGuard } from '../context/WorkspaceGuardContext';
 
 import {
-  Dashboard as DashboardIcon,
   Recycling as ScrapIcon,
   Receipt,
   Inventory as InventoryIcon,
@@ -30,7 +29,7 @@ import {
   Assessment as AssessmentIcon,
   BookmarkAdded as LayawayIcon,
   PointOfSale as TransactionsIcon,
-  AutoAwesome as ModernTransactionsIcon,
+  Dashboard as ModernTransactionsIcon,
   AccountBalance as CashDrawerIcon,
   AccessTime as TimeClockIcon,
 } from '@mui/icons-material';
@@ -144,15 +143,6 @@ function Sidebar() {
             <StorefrontIcon />
             </ListItemIcon>
             {isOpen && <ListItemText primary="Home" />}
-          </StyledListItem>
-        </StyledLink>
-
-        <StyledLink to="/dashboard">
-          <StyledListItem active={isActive('/dashboard')}>
-            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
-              <DashboardIcon />
-            </ListItemIcon>
-            {isOpen && <ListItemText primary="Dashboard" />}
           </StyledListItem>
         </StyledLink>
 
