@@ -23,6 +23,10 @@ import {
   CircularProgress,
   Stack,
   Divider,
+  List,
+  ListItem,
+  ListItemAvatar,
+  ListItemText,
 } from '@mui/material';
 import axios from 'axios';
 import {
@@ -78,6 +82,7 @@ function Navbar() {
   const [storeActionLoading, setStoreActionLoading] = useState(false);
   const [storeActionError, setStoreActionError] = useState('');
   const [closeStoreClockedIn, setCloseStoreClockedIn] = useState([]);
+  const [clockingOutId, setClockingOutId] = useState(null);
   const [isBackupComputer, setIsBackupComputer] = useState(false);
   const [parkedWorkspacesWarningOpen, setParkedWorkspacesWarningOpen] = useState(false);
   const [closeStoreIssuesOpen, setCloseStoreIssuesOpen] = useState(false);
@@ -447,23 +452,43 @@ function Navbar() {
     if (storeStatus === 'open') {
       setStoreActionLoading(true);
       try {
-        await axios.get(`${config.apiUrl}/store-sessions/check-open-drawers`);
-        const res = await axios.get(`${config.apiUrl}/employee-sessions/clocked-in`);
-        setCloseStoreClockedIn(res.data || []);
-        if (res.data && res.data.length > 0) {
+        const [drawersResult, clockedInResult] = await Promise.allSettled([
+          axios.get(`${config.apiUrl}/store-sessions/check-open-drawers`),
+          axios.get(`${config.apiUrl}/employee-sessions/clocked-in`),
+        ]);
+        const clockedInList = clockedInResult.status === 'fulfilled' ? (clockedInResult.value.data || []) : [];
+        setCloseStoreClockedIn(clockedInList);
+
+        if (drawersResult.status === 'rejected') {
+          const err = drawersResult.reason;
+          setCloseStoreIssuesMessage(err.response?.data?.error || 'Failed to check store closure prerequisites');
+          setCloseStoreIssues(err.response?.data?.openDrawers || []);
+          setCloseStoreIssuesOpen(true);
+          return;
+        }
+
+        if (clockedInList.length > 0) {
           await axios.post(`${config.apiUrl}/employee-sessions/notify-closing`);
         }
         setIsBackupComputer(false);
         setCloseStoreDialogOpen(true);
-      } catch (err) {
-        setCloseStoreIssuesMessage(err.response?.data?.error || 'Failed to check store closure prerequisites');
-        setCloseStoreIssues(err.response?.data?.openDrawers || []);
-        setCloseStoreIssuesOpen(true);
       } finally {
         setStoreActionLoading(false);
       }
     } else {
       setOpenStoreDialogOpen(true);
+    }
+  };
+
+  const handleClockOutEmployee = async (emp) => {
+    setClockingOutId(emp.session_id);
+    try {
+      await axios.post(`${config.apiUrl}/employee-sessions/clock-out`, { employee_id: emp.employee_id });
+      setCloseStoreClockedIn(prev => prev.filter(e => e.session_id !== emp.session_id));
+    } catch (err) {
+      setStoreActionError(err.response?.data?.error || 'Failed to clock out employee');
+    } finally {
+      setClockingOutId(null);
     }
   };
 
@@ -938,16 +963,47 @@ function Navbar() {
             <Typography component="li" variant="body2">All pending transactions are complete</Typography>
           </Box>
           {closeStoreClockedIn.length > 0 && (
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
-                Currently Clocked-In Employees ({closeStoreClockedIn.length}):
-              </Typography>
-              {closeStoreClockedIn.map((emp) => (
-                <Typography key={emp.session_id} variant="body2">
-                  {emp.employee_name} - {emp.role} (since {new Date(emp.clock_in_time).toLocaleTimeString()})
+            <Box sx={{ mb: 2 }}>
+              <Alert severity="warning" sx={{ mb: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  Currently Clocked-In Employees ({closeStoreClockedIn.length}):
                 </Typography>
-              ))}
-            </Alert>
+              </Alert>
+              <List dense sx={{ pt: 0 }}>
+                {closeStoreClockedIn.map((emp) => (
+                  <ListItem
+                    key={emp.session_id}
+                    disableGutters
+                    secondaryAction={
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="warning"
+                        disabled={clockingOutId === emp.session_id}
+                        startIcon={clockingOutId === emp.session_id ? <CircularProgress size={14} /> : null}
+                        onClick={() => handleClockOutEmployee(emp)}
+                      >
+                        Clock Out
+                      </Button>
+                    }
+                  >
+                    <ListItemAvatar>
+                      <Avatar
+                        src={emp.image ? `data:image/jpeg;base64,${emp.image}` : undefined}
+                        sx={{ width: 32, height: 32 }}
+                      >
+                        {!emp.image && (emp.first_name ? emp.first_name[0].toUpperCase() : '?')}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={emp.employee_name}
+                      secondary={`${emp.role} - since ${new Date(emp.clock_in_time).toLocaleTimeString()}`}
+                      sx={{ pr: 10 }}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
           )}
           {storeActionError && <Alert severity="error" sx={{ mb: 2 }}>{storeActionError}</Alert>}
           <FormControlLabel
@@ -1104,6 +1160,9 @@ function Navbar() {
         onClose={() => setCloseStoreIssuesOpen(false)}
         message={closeStoreIssuesMessage}
         issues={closeStoreIssues}
+        clockedInEmployees={closeStoreClockedIn}
+        onClockOut={handleClockOutEmployee}
+        clockingOutId={clockingOutId}
       />
     </>
   );

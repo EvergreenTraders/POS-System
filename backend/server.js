@@ -932,6 +932,7 @@ app.get('/api/employee-sessions/clocked-in', async (req, res) => {
         e.first_name,
         e.last_name,
         e.role,
+        e.image,
         CONCAT(e.first_name, ' ', e.last_name) AS employee_name
       FROM employee_sessions es
       JOIN employees e ON es.employee_id = e.employee_id
@@ -939,7 +940,12 @@ app.get('/api/employee-sessions/clocked-in', async (req, res) => {
       ORDER BY es.clock_in_time DESC
     `);
 
-    res.json(result.rows);
+    const rows = result.rows.map(row => ({
+      ...row,
+      image: row.image ? row.image.toString('base64') : null,
+    }));
+
+    res.json(rows);
   } catch (error) {
     console.error('Error fetching clocked-in employees:', error);
     res.status(500).json({ error: 'Failed to fetch clocked-in employees' });

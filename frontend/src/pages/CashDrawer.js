@@ -42,6 +42,10 @@ import {
   ListItemText,
   TextField as MuiTextField,
   Tooltip,
+  List,
+  ListItem,
+  ListItemAvatar,
+  Avatar,
 } from '@mui/material';
 import {
   AttachMoney as MoneyIcon,
@@ -101,6 +105,7 @@ function CashDrawer() {
   const [closeStoreDialogOpen, setCloseStoreDialogOpen] = useState(false);
   const [isBackupComputer, setIsBackupComputer] = useState(false);
   const [clockedInEmployees, setClockedInEmployees] = useState([]);
+  const [clockingOutId, setClockingOutId] = useState(null);
   const [closeStoreIssuesOpen, setCloseStoreIssuesOpen] = useState(false);
   const [closeStoreIssues, setCloseStoreIssues] = useState([]);
   const [closeStoreIssuesMessage, setCloseStoreIssuesMessage] = useState('');
@@ -1020,27 +1025,43 @@ function CashDrawer() {
 
     setStoreStatusLoading(true);
     try {
-      // First check for open drawers/safes
-      await axios.get(`${API_BASE_URL}/store-sessions/check-open-drawers`);
+      const [drawersResult, clockedInResult] = await Promise.allSettled([
+        axios.get(`${API_BASE_URL}/store-sessions/check-open-drawers`),
+        axios.get(`${API_BASE_URL}/employee-sessions/clocked-in`),
+      ]);
+      const clockedInList = clockedInResult.status === 'fulfilled' ? (clockedInResult.value.data || []) : [];
+      setClockedInEmployees(clockedInList);
 
-      // Check for clocked-in employees
-      const clockedInResponse = await axios.get(`${API_BASE_URL}/employee-sessions/clocked-in`);
-      setClockedInEmployees(clockedInResponse.data || []);
+      if (drawersResult.status === 'rejected') {
+        const error = drawersResult.reason;
+        console.error('Error checking store closure prerequisites:', error);
+        setCloseStoreIssuesMessage(error.response?.data?.error || 'Failed to check store closure prerequisites');
+        setCloseStoreIssues(error.response?.data?.openDrawers || []);
+        setCloseStoreIssuesOpen(true);
+        return;
+      }
 
       // Broadcast notification to clocked-in employees
-      if (clockedInResponse.data && clockedInResponse.data.length > 0) {
-        console.log('Broadcasting store closing notification to', clockedInResponse.data.length, 'clocked-in employees');
+      if (clockedInList.length > 0) {
+        console.log('Broadcasting store closing notification to', clockedInList.length, 'clocked-in employees');
         await axios.post(`${API_BASE_URL}/employee-sessions/notify-closing`);
       }
 
       setCloseStoreDialogOpen(true);
-    } catch (error) {
-      console.error('Error checking store closure prerequisites:', error);
-      setCloseStoreIssuesMessage(error.response?.data?.error || 'Failed to check store closure prerequisites');
-      setCloseStoreIssues(error.response?.data?.openDrawers || []);
-      setCloseStoreIssuesOpen(true);
     } finally {
       setStoreStatusLoading(false);
+    }
+  };
+
+  const handleClockOutEmployee = async (emp) => {
+    setClockingOutId(emp.session_id);
+    try {
+      await axios.post(`${API_BASE_URL}/employee-sessions/clock-out`, { employee_id: emp.employee_id });
+      setClockedInEmployees(prev => prev.filter(e => e.session_id !== emp.session_id));
+    } catch (err) {
+      showSnackbar(err.response?.data?.error || 'Failed to clock out employee', 'error');
+    } finally {
+      setClockingOutId(null);
     }
   };
 
@@ -7689,30 +7710,47 @@ function CashDrawer() {
           </Box>
 
           {clockedInEmployees.length > 0 && (
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
-                Currently Clocked-In Employees ({clockedInEmployees.length}):
-              </Typography>
-              <Box sx={{ mb: 1 }}>
+            <Box sx={{ mb: 2 }}>
+              <Alert severity="warning" sx={{ mb: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  Currently Clocked-In Employees ({clockedInEmployees.length}):
+                </Typography>
+              </Alert>
+              <List dense sx={{ pt: 0 }}>
                 {clockedInEmployees.map((emp) => (
-                  <Box
+                  <ListItem
                     key={emp.session_id}
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      py: 0.5,
-                      borderBottom: clockedInEmployees.length > 1 ? '1px solid rgba(0,0,0,0.1)' : 'none',
-                      '&:last-child': { borderBottom: 'none' }
-                    }}
+                    disableGutters
+                    secondaryAction={
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="warning"
+                        disabled={clockingOutId === emp.session_id}
+                        startIcon={clockingOutId === emp.session_id ? <CircularProgress size={14} /> : null}
+                        onClick={() => handleClockOutEmployee(emp)}
+                      >
+                        Clock Out
+                      </Button>
+                    }
                   >
-                    <Typography variant="body2">
-                      {emp.employee_name} - {emp.role} (since {new Date(emp.clock_in_time).toLocaleTimeString()})
-                    </Typography>
-                  </Box>
+                    <ListItemAvatar>
+                      <Avatar
+                        src={emp.image ? `data:image/jpeg;base64,${emp.image}` : undefined}
+                        sx={{ width: 32, height: 32 }}
+                      >
+                        {!emp.image && (emp.first_name ? emp.first_name[0].toUpperCase() : '?')}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={emp.employee_name}
+                      secondary={`${emp.role} - since ${new Date(emp.clock_in_time).toLocaleTimeString()}`}
+                      sx={{ pr: 10 }}
+                    />
+                  </ListItem>
                 ))}
-              </Box>
-            </Alert>
+              </List>
+            </Box>
           )}
 
           <FormControlLabel
@@ -7751,6 +7789,9 @@ function CashDrawer() {
         onClose={() => setCloseStoreIssuesOpen(false)}
         message={closeStoreIssuesMessage}
         issues={closeStoreIssues}
+        clockedInEmployees={clockedInEmployees}
+        onClockOut={handleClockOutEmployee}
+        clockingOutId={clockingOutId}
       />
 
       {/* Clock-In Warning Dialog */}
