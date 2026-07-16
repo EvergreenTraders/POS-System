@@ -246,7 +246,7 @@ const Login = () => {
                     sessionStorage.removeItem('redirectAfterLogin');
                     navigate(redirectPath);
                 } else {
-                    navigate('/');
+                    navigate('/modern-transactions');
                 }
             }
         } catch (err) {
@@ -332,7 +332,7 @@ const Login = () => {
                 sessionStorage.removeItem('redirectAfterLogin');
                 navigate(redirectPath);
             } else {
-                navigate('/');
+                navigate('/modern-transactions');
             }
         } catch (err) {
             setOverrideError(err.response?.data?.error || 'Override failed. Check credentials and try again.');
@@ -564,7 +564,7 @@ const Login = () => {
                     handleTimeClockClose();
 
                     // Navigate to home
-                    navigate('/');
+                    navigate('/modern-transactions');
                 }
             } else if (action === 'OUT') {
                 const response = await axios.post(`${API_BASE_URL}/employee-sessions/clock-out`, {

@@ -8,6 +8,7 @@ import {
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   CircularProgress, Menu, MenuItem, Dialog, DialogTitle, DialogContent, DialogActions,
   Select, InputLabel, FormControl, Grid, Alert, Snackbar, Tooltip,
+  List, ListItemButton, ListItemText,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
@@ -92,7 +93,19 @@ function commitPawnTicketId() {
   localStorage.removeItem(PENDING_KEY);
 }
 
-export default function PawnTransactionScreen({ customer, customerStats: initialStats, onClose, onConvertTo, onAddToWorkspace, existingPawnData }) {
+function voidPawnTicketId(id) {
+  const voided = JSON.parse(localStorage.getItem('voidedPawnTickets') || '[]');
+  if (!voided.includes(id)) {
+    voided.push(id);
+    localStorage.setItem('voidedPawnTickets', JSON.stringify(voided));
+  }
+  if (localStorage.getItem(PENDING_KEY) === id) localStorage.removeItem(PENDING_KEY);
+}
+
+export default function PawnTransactionScreen({
+  customer, customerStats: initialStats, onClose, onConvertTo, onAddToWorkspace,
+  onRemoveFromWorkspace, existingPawnData, workspaceBuyTickets = [],
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user: currentUser } = useAuth();
@@ -102,6 +115,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [showOnReceipt, setShowOnReceipt] = useState(existingPawnData?.showOnReceipt || false);
   const [pawnConfig, setPawnConfig]       = useState(null);
   const [itemSizes, setItemSizes]         = useState([]);
+  const [storageFeeConfig, setStorageFeeConfig] = useState({ method: 'size', rate_per_cubic_foot: 0 });
   const [pawnItems, setPawnItems]         = useState(existingPawnData?.pawnItems || []);
   const [activePawns, setActivePawns]     = useState([]);
   const [stats, setStats]                 = useState(initialStats);
@@ -113,6 +127,10 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [photoTargetId,    setPhotoTargetId]    = useState(null);
   const [convertAnchor,    setConvertAnchor]    = useState(null);
   const [convertRow,       setConvertRow]       = useState(null);
+  const [buyPickerOpen,    setBuyPickerOpen]    = useState(false);
+  const [selectedBuyId,    setSelectedBuyId]    = useState(null);
+  const [pendingConvert,   setPendingConvert]   = useState(null); // { type, item, targetTicketId }
+  const [emptyTicketDialogOpen, setEmptyTicketDialogOpen] = useState(false);
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
   const [cameraStream,     setCameraStream]     = useState(null);
@@ -136,6 +154,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const quickDescRef    = useRef(null);
   const quickSerialRef  = useRef(null);
   const quickAmtRef     = useRef(null);
+  const prevItemCountRef = useRef(pawnItems.length);
   const [quickAddRow, setQuickAddRow] = useState(null);
   const [rePawnSelectorOpen, setRePawnSelectorOpen] = useState(false);
   const [rePawnSelectedItem, setRePawnSelectedItem] = useState(null);
@@ -185,6 +204,12 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     axios.get(`${config.apiUrl}/item-sizes`, { headers })
       .then(res => setItemSizes(res.data))
       .catch(err => console.error('Failed to load item sizes:', err));
+    axios.get(`${config.apiUrl}/storage-fee-config`, { headers })
+      .then(res => setStorageFeeConfig({
+        method: res.data?.method === 'cubic_feet' ? 'cubic_feet' : 'size',
+        rate_per_cubic_foot: parseFloat(res.data?.rate_per_cubic_foot) || 0,
+      }))
+      .catch(err => console.error('Failed to load storage fee config:', err));
   }, []);
 
   useEffect(() => {
@@ -243,12 +268,44 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     setTotalPawnOverride(null);
   }, [pawnItems]);
 
+  // Editing the Total Pawn Amount proportionally rescales every item's own
+  // amount to match, so the item list itself reflects the adjustment instead
+  // of only the summary total.
+  const handleTotalPawnAmountBlur = () => {
+    if (totalPawnOverride === null || totalPawnOverride === undefined) return;
+    if (pawnItems.length === 0 || autoTotalPawnAmount <= 0) { setTotalPawnOverride(null); return; }
+    const newTotal = Math.round(totalPawnOverride * 100) / 100;
+    const scale = newTotal / autoTotalPawnAmount;
+    setPawnItems(prev => {
+      const scaledAmounts = prev.map(item => Math.round((item.amount || 0) * scale * 100) / 100);
+      // Nudge the last item so the items sum exactly to the typed total
+      // (per-item rounding can otherwise drift a cent or two off).
+      const lastIdx = scaledAmounts.length - 1;
+      const sumExceptLast = scaledAmounts.slice(0, -1).reduce((s, v) => s + v, 0);
+      scaledAmounts[lastIdx] = Math.round((newTotal - sumExceptLast) * 100) / 100;
+      return prev.map((item, i) => ({ ...item, amount: scaledAmounts[i] }));
+    });
+    setTotalPawnOverride(null);
+  };
+
   const totalPawnAmount = totalPawnOverride ?? autoTotalPawnAmount;
   const interestRate    = parseFloat(pawnConfig?.interest_rate)  || 0;
   const insuranceRate   = parseFloat(pawnConfig?.insurance_rate) || 0;
   const termDays        = parseInt(pawnConfig?.term_days)        || 0;
-  const itemStorageFeeTotal = pawnItems.reduce((sum, item) => sum + (parseFloat(item.storage_fee) || 0), 0);
-  const storageFee      = itemStorageFeeTotal > 0 ? itemStorageFeeTotal : (parseFloat(pawnConfig?.storage_fee) || 0);
+  // Once any item has a size picked, the fee must reflect the item_size table
+  // (summed per item, even if a size's fee happens to be 0) — falling back to
+  // the shop's flat default only when nothing has been sized yet. Comparing
+  // itemStorageFeeTotal > 0 instead of checking for a selected size masked
+  // real updates whenever the picked size's fee equaled the flat default.
+  // Include the in-progress quick-add row (not yet confirmed into pawnItems)
+  // so the total updates live as its size dropdown is changed, not just after
+  // the item is actually added.
+  const itemsForStorageFee = quickAddRow
+    ? [...pawnItems, { size: quickAddRow.size, cubic_feet: quickAddRow.cubic_feet, storage_fee: quickAddRow.storage_fee }]
+    : pawnItems;
+  const anySizeSelected     = itemsForStorageFee.some(item => item.size || item.cubic_feet);
+  const itemStorageFeeTotal = itemsForStorageFee.reduce((sum, item) => sum + (parseFloat(item.storage_fee) || 0), 0);
+  const storageFee      = anySizeSelected ? itemStorageFeeTotal : (parseFloat(pawnConfig?.storage_fee) || 0);
   const interestAmt     = totalPawnAmount * interestRate  / 100;
   const insuranceAmt    = totalPawnAmount * insuranceRate / 100;
   const totalToRedeem   = totalPawnAmount + interestAmt + insuranceAmt + storageFee;
@@ -264,11 +321,39 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
 
   const handleDeleteItem = (id) => setPawnItems(prev => prev.filter(i => i.id !== id));
 
+  useEffect(() => {
+    if (prevItemCountRef.current > 0 && pawnItems.length === 0) {
+      setEmptyTicketDialogOpen(true);
+    }
+    prevItemCountRef.current = pawnItems.length;
+  }, [pawnItems.length]);
+
+  const handleConvertItem = (type, item, targetTicketId) => {
+    const isLast = pawnItems.length === 1;
+    setPawnItems(prev => prev.filter(i => i.id !== item.id));
+    if (isLast) {
+      setPendingConvert({ type, item, targetTicketId });
+      // onConvertTo deferred — committed only if user confirms Void in the empty-ticket dialog
+    } else {
+      onConvertTo?.({ type, item, targetTicketId, sourceTicketId: ticketId });
+    }
+  };
+
   const handleItemSizeChange = (id, sizeName) => {
     const sizeObj = itemSizes.find(s => s.name === sizeName);
     setPawnItems(prev => prev.map(item =>
       item.id === id
         ? { ...item, size: sizeName, storage_fee: sizeObj ? parseFloat(sizeObj.storage_fee) : 0 }
+        : item
+    ));
+  };
+
+  const handleItemCubicFeetChange = (id, cubicFeetValue) => {
+    const cubicFeet = parseFloat(cubicFeetValue) || 0;
+    const fee = cubicFeet * (parseFloat(storageFeeConfig.rate_per_cubic_foot) || 0);
+    setPawnItems(prev => prev.map(item =>
+      item.id === id
+        ? { ...item, cubic_feet: cubicFeetValue, storage_fee: fee }
         : item
     ));
   };
@@ -450,17 +535,17 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
-    canvas.toBlob(blob => {
-      if (!blob) return;
-      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      const url = URL.createObjectURL(file);
-      setPawnItems(prev => prev.map(item =>
-        item.id === photoTargetId
-          ? { ...item, images: [...(item.images || []), { url, file, isPrimary: !(item.images?.length), type: 'capture' }] }
-          : item
-      ));
-      closeItemCamera();
-    }, 'image/jpeg', 0.9);
+    // Use a data URL (not a blob: object URL) so the captured photo survives
+    // being persisted to the workspace/localStorage and reopening the ticket
+    // later — blob URLs die on reload and a File object can't survive a JSON
+    // round-trip.
+    const url = canvas.toDataURL('image/jpeg', 0.9);
+    setPawnItems(prev => prev.map(item =>
+      item.id === photoTargetId
+        ? { ...item, images: [...(item.images || []), { url, isPrimary: !(item.images?.length), type: 'capture' }] }
+        : item
+    ));
+    closeItemCamera();
   };
 
   const closeItemCamera = () => {
@@ -543,7 +628,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   };
 
   const openQuickAdd = () => {
-    setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', storage_fee: 0 });
+    setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', cubic_feet: '', storage_fee: 0 });
     setTimeout(() => quickDescRef.current?.focus(), 50);
   };
 
@@ -565,6 +650,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
         serial_number: quickAddRow.serial || '',
         qty:          1,
         size:         quickAddRow.size || '',
+        cubic_feet:   quickAddRow.cubic_feet || '',
         storage_fee:  quickAddRow.storage_fee || 0,
         amount:       amt,
         price:        amt,
@@ -573,7 +659,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
         metal_weight: 0,
       }];
     });
-    setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', storage_fee: 0 });
+    setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', cubic_feet: '', storage_fee: 0 });
     setTimeout(() => quickDescRef.current?.focus(), 50);
   };
 
@@ -871,7 +957,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
               { label: 'Item',        align: 'left'   },
               { label: 'Serial #',    align: 'left'   },
               { label: 'Qty',         align: 'center' },
-              { label: 'Size',        align: 'center' },
+              { label: storageFeeConfig.method === 'cubic_feet' ? 'Cu. Ft' : 'Size', align: 'center' },
               { label: 'Pawn Amount', align: 'left'   },
               { label: 'Actions',     align: 'right'  },
             ].map(({ label, align }) => (
@@ -909,19 +995,32 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
                   <Typography variant="caption" fontWeight={500}>{row.item}</Typography>
                   <Typography variant="caption" color="text.secondary">{row.serial || '—'}</Typography>
                   <Typography variant="caption" align="center">{row.qty}</Typography>
-                  <FormControl size="small" fullWidth>
-                    <Select
-                      value={row.size || ''}
-                      displayEmpty
-                      onChange={e => handleItemSizeChange(row.id, e.target.value)}
-                      sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
-                    >
-                      <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
-                      {itemSizes.map(s => (
-                        <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
+                  {storageFeeConfig.method === 'cubic_feet' ? (
+                    <TextField
+                      size="small"
+                      type="number"
+                      fullWidth
+                      placeholder="cu. ft"
+                      value={row.cubic_feet ?? ''}
+                      onChange={e => handleItemCubicFeetChange(row.id, e.target.value)}
+                      inputProps={{ min: 0, step: 0.01, style: { fontSize: 11 } }}
+                      sx={{ '& .MuiOutlinedInput-root': { fontSize: 11 } }}
+                    />
+                  ) : (
+                    <FormControl size="small" fullWidth>
+                      <Select
+                        value={row.size || ''}
+                        displayEmpty
+                        onChange={e => handleItemSizeChange(row.id, e.target.value)}
+                        sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
+                      >
+                        <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
+                        {itemSizes.map(s => (
+                          <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
                   <Typography variant="caption" fontWeight={700} color="#2e7d32">{fmt(row.amount)}</Typography>
                   <Box sx={{ display: 'flex', gap: 0, alignItems: 'center', justifyContent: 'flex-end' }}>
                     <IconButton size="small" sx={{ color: PURPLE }} onClick={() => {
@@ -987,22 +1086,39 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
                     sx={{ '& .MuiOutlinedInput-root': { fontSize: 12, borderRadius: 1.5 } }}
                   />
                   <Typography variant="caption" align="center" color="text.secondary">1</Typography>
-                  <FormControl size="small" fullWidth>
-                    <Select
-                      value={quickAddRow.size || ''}
-                      displayEmpty
+                  {storageFeeConfig.method === 'cubic_feet' ? (
+                    <TextField
+                      size="small"
+                      type="number"
+                      fullWidth
+                      placeholder="cu. ft"
+                      value={quickAddRow.cubic_feet || ''}
                       onChange={e => {
-                        const sizeObj = itemSizes.find(s => s.name === e.target.value);
-                        setQuickAddRow(r => ({ ...r, size: e.target.value, storage_fee: sizeObj ? parseFloat(sizeObj.storage_fee) : 0 }));
+                        const cubicFeet = parseFloat(e.target.value) || 0;
+                        const fee = cubicFeet * (parseFloat(storageFeeConfig.rate_per_cubic_foot) || 0);
+                        setQuickAddRow(r => ({ ...r, cubic_feet: e.target.value, storage_fee: fee }));
                       }}
-                      sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
-                    >
-                      <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
-                      {itemSizes.map(s => (
-                        <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
+                      inputProps={{ min: 0, step: 0.01, style: { fontSize: 11 } }}
+                      sx={{ '& .MuiOutlinedInput-root': { fontSize: 11, borderRadius: 1.5 } }}
+                    />
+                  ) : (
+                    <FormControl size="small" fullWidth>
+                      <Select
+                        value={quickAddRow.size || ''}
+                        displayEmpty
+                        onChange={e => {
+                          const sizeObj = itemSizes.find(s => s.name === e.target.value);
+                          setQuickAddRow(r => ({ ...r, size: e.target.value, storage_fee: sizeObj ? parseFloat(sizeObj.storage_fee) : 0 }));
+                        }}
+                        sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
+                      >
+                        <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
+                        {itemSizes.map(s => (
+                          <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
                   <TextField
                     inputRef={quickAmtRef}
                     size="small"
@@ -1112,6 +1228,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
               fullWidth
               value={totalPawnOverride ?? autoTotalPawnAmount}
               onChange={e => setTotalPawnOverride(e.target.value === '' ? null : parseFloat(e.target.value) || 0)}
+              onBlur={handleTotalPawnAmountBlur}
               inputProps={{ min: 0, step: 0.01, style: { fontWeight: 800, fontSize: 24, color: (totalPawnOverride ?? autoTotalPawnAmount) > 0 ? '#c62828' : undefined } }}
               sx={{ mt: 0.5, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
               InputProps={{
@@ -1252,11 +1369,20 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           const TradeIcon = MuiIcons[trade.icon] ?? MuiIcons.CompareArrows;
           return (
             <>
-              <MenuItem onClick={() => { onConvertTo?.({ type: 'buy', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
+              <MenuItem onClick={() => {
+                setConvertAnchor(null);
+                if (workspaceBuyTickets.length > 0) {
+                  setSelectedBuyId(null);
+                  setBuyPickerOpen(true);
+                } else {
+                  handleConvertItem('buy', convertRow, null);
+                  setConvertRow(null);
+                }
+              }}>
                 <BuyIcon sx={{ fontSize: 16, mr: 1.5, color: buy.color ?? PURPLE }} />
                 <Typography variant="body2">Buy Ticket</Typography>
               </MenuItem>
-              <MenuItem onClick={() => { onConvertTo?.({ type: 'trade', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
+              <MenuItem onClick={() => { handleConvertItem('trade', convertRow, null); setConvertAnchor(null); setConvertRow(null); }}>
                 <TradeIcon sx={{ fontSize: 16, mr: 1.5, color: trade.color ?? '#388e3c' }} />
                 <Typography variant="body2">Trade Ticket</Typography>
               </MenuItem>
@@ -1264,6 +1390,84 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           );
         })()}
       </Menu>
+
+      {/* Buy ticket picker */}
+      <Dialog open={buyPickerOpen} onClose={() => { setBuyPickerOpen(false); setConvertRow(null); }} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ pb: 1 }}>Move to Buy Ticket</DialogTitle>
+        <DialogContent sx={{ pt: 0 }}>
+          <Typography variant="body2" color="text.secondary" mb={1}>
+            Choose a buy ticket to move this item into, or create a new one.
+          </Typography>
+          <List dense disablePadding>
+            {workspaceBuyTickets.map(t => {
+              const total = t.totalPaid || (t.buyItems || []).reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
+              return (
+                <ListItemButton key={t.ticketId} selected={selectedBuyId === t.ticketId}
+                  onClick={() => setSelectedBuyId(t.ticketId)}
+                  sx={{ borderRadius: 1, mb: 0.5, border: '1px solid', borderColor: selectedBuyId === t.ticketId ? PURPLE : 'transparent' }}>
+                  <ListItemText
+                    primary={<Typography fontWeight={700} fontSize={13}>{t.ticketId}</Typography>}
+                    secondary={`${(t.buyItems || []).length} item${(t.buyItems || []).length !== 1 ? 's' : ''} · $${Number(total).toFixed(2)}`}
+                  />
+                </ListItemButton>
+              );
+            })}
+            <ListItemButton selected={selectedBuyId === '__new__'} onClick={() => setSelectedBuyId('__new__')}
+              sx={{ borderRadius: 1, border: '1px solid', borderColor: selectedBuyId === '__new__' ? PURPLE : 'transparent' }}>
+              <MuiIcons.AddCircleOutline sx={{ mr: 1.5, fontSize: 18, color: PURPLE }} />
+              <ListItemText primary={<Typography fontSize={13}>Create new Buy Ticket</Typography>} />
+            </ListItemButton>
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setBuyPickerOpen(false); setConvertRow(null); }}>Cancel</Button>
+          <Button variant="contained" disabled={!selectedBuyId}
+            sx={{ bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}
+            onClick={() => {
+              handleConvertItem('buy', convertRow, selectedBuyId === '__new__' ? null : selectedBuyId);
+              setBuyPickerOpen(false);
+              setConvertRow(null);
+              setSelectedBuyId(null);
+            }}>
+            Move Item
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Empty ticket dialog */}
+      <Dialog open={emptyTicketDialogOpen} onClose={() => setEmptyTicketDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Pawn Ticket is Empty</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            {pendingConvert
+              ? `This item was about to be moved to a ${pendingConvert.type} ticket. Void to confirm the move, or Cancel to keep the item here.`
+              : 'All items have been removed. Void to remove this ticket from the workspace, or Cancel to keep it open.'}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            if (pendingConvert) {
+              setPawnItems([pendingConvert.item]);
+              setPendingConvert(null);
+            }
+            setEmptyTicketDialogOpen(false);
+          }}>
+            Cancel
+          </Button>
+          <Button variant="contained" color="error"
+            onClick={() => {
+              if (pendingConvert) {
+                onConvertTo?.({ type: pendingConvert.type, item: pendingConvert.item, targetTicketId: pendingConvert.targetTicketId, sourceTicketId: ticketId });
+                setPendingConvert(null);
+              }
+              voidPawnTicketId(ticketId);
+              onRemoveFromWorkspace?.(ticketId);
+              setEmptyTicketDialogOpen(false);
+            }}>
+            Void Ticket
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {receiptLoading && (
         <Box sx={{ position: 'fixed', inset: 0, bgcolor: 'rgba(0,0,0,0.35)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

@@ -228,6 +228,29 @@ export default function BuyTransactionScreen({
   const totalPaid = buyItems.reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
   const effectiveTotalPaid = totalPaidOverride ?? totalPaid;
 
+  // Editing Total Paid proportionally rescales every item's own paid amount
+  // to match, so the item list itself reflects the adjustment instead of
+  // only being distributed at checkout time.
+  const handleTotalPaidBlur = () => {
+    if (totalPaidOverride === null || totalPaidOverride === undefined) return;
+    if (buyItems.length === 0 || totalPaid <= 0) { setTotalPaidOverride(null); return; }
+    const newTotal = Math.round(totalPaidOverride * 100) / 100;
+    const scale = newTotal / totalPaid;
+    setBuyItems(prev => {
+      const scaledPaid = prev.map(item => Math.round((parseFloat(item.paid) || 0) * scale * 100) / 100);
+      // Nudge the last item's paid amount so the items' line totals
+      // (paid * qty) sum exactly to the typed total (per-item rounding can
+      // otherwise drift a cent or two off).
+      const lineTotals = prev.map((item, i) => scaledPaid[i] * (parseInt(item.qty) || 1));
+      const lastIdx = lineTotals.length - 1;
+      const sumExceptLast = lineTotals.slice(0, -1).reduce((s, v) => s + v, 0);
+      const lastQty = parseInt(prev[lastIdx].qty) || 1;
+      scaledPaid[lastIdx] = Math.round(((newTotal - sumExceptLast) / lastQty) * 100) / 100;
+      return prev.map((item, i) => ({ ...item, paid: scaledPaid[i] }));
+    });
+    setTotalPaidOverride(null);
+  };
+
   const addItem = (overrides = {}) => {
     setBuyItems(prev => {
       const count = prev.length + 1;
@@ -920,6 +943,7 @@ export default function BuyTransactionScreen({
                 fullWidth
                 value={totalPaidOverride ?? totalPaid}
                 onChange={e => setTotalPaidOverride(e.target.value === '' ? null : parseFloat(e.target.value) || 0)}
+                onBlur={handleTotalPaidBlur}
                 inputProps={{ min: 0, step: 0.01, style: { fontWeight: 800, fontSize: 22, color: BUY_BLUE } }}
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
                 InputProps={{
@@ -928,7 +952,7 @@ export default function BuyTransactionScreen({
               />
               {totalPaidOverride !== null && Math.abs(totalPaidOverride - totalPaid) > 0.001 && (
                 <Typography fontSize={10} color="text.secondary" mt={0.5}>
-                  Auto: {fmt(totalPaid)} — distributed proportionally at checkout
+                  Auto: {fmt(totalPaid)}
                 </Typography>
               )}
             </Paper>

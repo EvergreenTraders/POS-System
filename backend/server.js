@@ -249,9 +249,13 @@ const storeClosedMiddleware = async (req, res, next) => {
     '/api/pawn-config',
     '/api/receipt-config',
     '/api/tax-config',
+    '/api/trade-tax-config',
     '/api/quote-expiration/config',
     '/api/inventory-hold-period/config',
     '/api/parked-workspace-config',
+    '/api/storage-fee-config',
+    '/api/quick-sale-config',
+    '/api/item-sizes',
     '/api/customer-preferences/',
     '/api/diamond_estimates',
     '/api/user_preferences',
@@ -267,6 +271,7 @@ const storeClosedMiddleware = async (req, res, next) => {
     '/api/inventory-status',
     '/api/migrate',
     '/api/pawn/check-forfeitures',
+    '/api/feedback',
   ];
 
   const isAllowed = alwaysAllowedPaths.some(path => req.path.startsWith(path));
@@ -330,6 +335,20 @@ pool.query(`
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_resume_parked_workspaces BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('can_resume_parked_workspaces migration:', err.message));
+
+// Per-employee workspace dashboard card visibility (which of the Messages /
+// Tasks / Loans-Layaways-Due-Today cards show on the empty Modern
+// Transactions workspace for that employee) — configured per employee from
+// SystemConfig's Employee Configuration tab.
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS show_messages_card BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('show_messages_card migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS show_tasks_card BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('show_tasks_card migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS show_loans_layaways_card BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('show_loans_layaways_card migration:', err.message));
 
 // Transfer and cash handling permissions
 pool.query(`
@@ -744,7 +763,8 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
     const { trackHours, canOpenStore, canOpenDrawer, canViewDrawer, canViewSafe,
             transferAllowedDrawer, transferAllowedSafe, transferAllowedBank, transferAllowedStore,
             transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold, employmentType,
-            canResumeParkedWorkspaces } = req.body;
+            canResumeParkedWorkspaces,
+            showMessagesCard, showTasksCard, showLoansLayawaysCard } = req.body;
 
     const empType = employmentType === 'salary' ? 'salary' : 'hourly';
     // Salary employees are always exempt from clocking in
@@ -759,13 +779,14 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
           transfer_limit = $10, can_petty_cash = $11, petty_cash_limit = $12,
           discrepancy_threshold = $13, employment_type = $14,
           can_resume_parked_workspaces = $15,
+          show_messages_card = $16, show_tasks_card = $17, show_loans_layaways_card = $18,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $16
+      WHERE employee_id = $19
       RETURNING employee_id, username, first_name, last_name, role,
         track_hours, can_open_store, can_open_drawer, can_view_drawer, can_view_safe,
         transfer_allowed_drawer, transfer_allowed_safe, transfer_allowed_bank, transfer_allowed_store,
         transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold, employment_type,
-        can_resume_parked_workspaces
+        can_resume_parked_workspaces, show_messages_card, show_tasks_card, show_loans_layaways_card
     `;
     const result = await pool.query(query, [
       effectiveTrackHours,
@@ -783,6 +804,9 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
       discrepancyThreshold != null && discrepancyThreshold !== '' ? parseFloat(discrepancyThreshold) : null,
       empType,
       canResumeParkedWorkspaces !== false,
+      showMessagesCard !== false,
+      showTasksCard !== false,
+      showLoansLayawaysCard !== false,
       id
     ]);
 
@@ -794,6 +818,35 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
   } catch (err) {
     console.error('Error updating employee permissions:', err);
     res.status(500).json({ error: 'Failed to update employee permissions' });
+  }
+});
+
+// Self-service: an employee choosing which dashboard cards they personally see on
+// the empty Modern Transactions workspace. Scoped to just these 3 fields (unlike
+// PUT /api/employees/:id/permissions, which requires the full permissions payload
+// and is reserved for manager/owner configuration in SystemConfig.js) so an
+// employee can't accidentally clobber their own drawer/petty-cash/transfer limits.
+app.put('/api/employees/:id/workspace-card-preferences', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { showMessagesCard, showTasksCard, showLoansLayawaysCard } = req.body;
+
+    const result = await pool.query(`
+      UPDATE employees
+      SET show_messages_card = $1, show_tasks_card = $2, show_loans_layaways_card = $3,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE employee_id = $4
+      RETURNING employee_id, show_messages_card, show_tasks_card, show_loans_layaways_card
+    `, [showMessagesCard !== false, showTasksCard !== false, showLoansLayawaysCard !== false, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating workspace card preferences:', err);
+    res.status(500).json({ error: 'Failed to update workspace card preferences' });
   }
 });
 
@@ -910,6 +963,7 @@ app.get('/api/employee-sessions/clocked-in', async (req, res) => {
         e.first_name,
         e.last_name,
         e.role,
+        e.image,
         CONCAT(e.first_name, ' ', e.last_name) AS employee_name
       FROM employee_sessions es
       JOIN employees e ON es.employee_id = e.employee_id
@@ -917,7 +971,12 @@ app.get('/api/employee-sessions/clocked-in', async (req, res) => {
       ORDER BY es.clock_in_time DESC
     `);
 
-    res.json(result.rows);
+    const rows = result.rows.map(row => ({
+      ...row,
+      image: row.image ? row.image.toString('base64') : null,
+    }));
+
+    res.json(rows);
   } catch (error) {
     console.error('Error fetching clocked-in employees:', error);
     res.status(500).json({ error: 'Failed to fetch clocked-in employees' });
@@ -7202,16 +7261,26 @@ app.put('/api/jewelry/:id/status', async (req, res) => {
 
     const oldStatus = checkResult.rows[0].status;
 
-    // Update the status and item_price when sold
+    // Update the status and item_price when sold. A sold item must also drop
+    // out of sellable_status, otherwise it keeps showing up in sale item
+    // search (which filters on sellable_status=SELLABLE, not status).
     let updateQuery, queryParams;
     if (status === 'SOLD' && item_price !== undefined && item_price !== null) {
       updateQuery = `
         UPDATE jewelry
-        SET status = $1, item_price = $2, updated_at = CURRENT_TIMESTAMP
+        SET status = $1, item_price = $2, sellable_status = 'NOT_SELLABLE', updated_at = CURRENT_TIMESTAMP
         WHERE item_id = $3
         RETURNING *
       `;
       queryParams = [status, item_price, id];
+    } else if (status === 'SOLD') {
+      updateQuery = `
+        UPDATE jewelry
+        SET status = $1, sellable_status = 'NOT_SELLABLE', updated_at = CURRENT_TIMESTAMP
+        WHERE item_id = $2
+        RETURNING *
+      `;
+      queryParams = [status, id];
     } else {
       updateQuery = `
         UPDATE jewelry
@@ -9227,7 +9296,7 @@ app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
     if (actionType) {
       await client.query(`
         INSERT INTO pawn_history (pawn_ticket_id, action_type, performed_by, notes)
-        SELECT $1, $2, $3, $4
+        SELECT $1::varchar, $2::varchar, $3, $4
         WHERE NOT EXISTS (
           SELECT 1 FROM pawn_history
           WHERE pawn_ticket_id = $1 AND action_type = $2
@@ -9793,6 +9862,93 @@ app.get('/api/item-sizes', async (req, res) => {
   } catch (err) {
     console.error('Error fetching item sizes:', err);
     res.status(500).json({ error: 'Failed to fetch item sizes' });
+  }
+});
+
+// Storage Fee Configuration API Endpoints (by named size, or by a flat rate per cubic foot)
+app.get('/api/storage-fee-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM storage_fee_config ORDER BY created_at DESC LIMIT 1');
+    if (result.rows.length === 0) {
+      return res.json({ method: 'size', rate_per_cubic_foot: 0 });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching storage fee config:', err);
+    res.status(500).json({ error: 'Failed to fetch storage fee configuration' });
+  }
+});
+
+app.put('/api/storage-fee-config', async (req, res) => {
+  try {
+    const { method, rate_per_cubic_foot } = req.body;
+    if (!['size', 'cubic_feet'].includes(method)) {
+      return res.status(400).json({ error: "method must be 'size' or 'cubic_feet'" });
+    }
+    const rate = parseFloat(rate_per_cubic_foot);
+    if (isNaN(rate) || rate < 0) {
+      return res.status(400).json({ error: 'rate_per_cubic_foot must be a number >= 0' });
+    }
+
+    const checkResult = await pool.query('SELECT * FROM storage_fee_config');
+    let result;
+    if (checkResult.rows.length === 0) {
+      result = await pool.query(
+        'INSERT INTO storage_fee_config (method, rate_per_cubic_foot) VALUES ($1, $2) RETURNING *',
+        [method, rate]
+      );
+    } else {
+      result = await pool.query(
+        'UPDATE storage_fee_config SET method = $1, rate_per_cubic_foot = $2, updated_at = CURRENT_TIMESTAMP RETURNING *',
+        [method, rate]
+      );
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating storage fee config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Quick Sale Configuration API Endpoints (max total allowed for a no-customer checkout)
+app.get('/api/quick-sale-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM quick_sale_config ORDER BY created_at DESC LIMIT 1');
+    if (result.rows.length === 0) {
+      return res.json({ max_amount: 100.00 });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching quick sale config:', err);
+    res.status(500).json({ error: 'Failed to fetch quick sale configuration' });
+  }
+});
+
+app.put('/api/quick-sale-config', async (req, res) => {
+  try {
+    const { max_amount } = req.body;
+    const maxAmount = parseFloat(max_amount);
+    if (isNaN(maxAmount) || maxAmount < 0) {
+      return res.status(400).json({ error: 'max_amount must be a number >= 0' });
+    }
+
+    const checkResult = await pool.query('SELECT * FROM quick_sale_config');
+    let result;
+    if (checkResult.rows.length === 0) {
+      result = await pool.query(
+        'INSERT INTO quick_sale_config (max_amount) VALUES ($1) RETURNING *',
+        [maxAmount]
+      );
+    } else {
+      result = await pool.query(
+        'UPDATE quick_sale_config SET max_amount = $1, updated_at = CURRENT_TIMESTAMP RETURNING *',
+        [maxAmount]
+      );
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating quick sale config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -10494,6 +10650,97 @@ app.get('/api/customers/:id/pmt/stats', async (req, res) => {
   } catch (err) {
     console.error('Error fetching customer pmt stats:', err);
     res.status(500).json({ error: 'Failed to fetch payment stats' });
+  }
+});
+
+// GET /api/customers/:id/redeem/stats
+// Returns active/overdue pawn tickets for the customer with everything the
+// Redeem Ticket screen needs: full payoff amount (principal + interest +
+// insurance + storage fee) and the per-item id/location used for the
+// post-checkout "storage location" prompt.
+app.get('/api/customers/:id/redeem/stats', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const today = new Date();
+
+    const result = await pool.query(`
+      SELECT
+        pt.pawn_ticket_id,
+        pt.status,
+        pt.due_date,
+        pt.term_days,
+        pt.frequency_days,
+        pt.interest_rate,
+        pt.insurance_rate,
+        pt.storage_fee,
+        STRING_AGG(COALESCE(j.short_desc, hg.short_desc), ', ' ORDER BY pt.id) AS item_description,
+        SUM(COALESCE(j.item_price, hg.cost_price, 0))                          AS pawn_amount,
+        MIN(t.transaction_date)                                                AS transaction_date,
+        json_agg(json_build_object(
+          'item_id',     pt.item_id,
+          'description', COALESCE(j.short_desc, hg.short_desc),
+          'location',    COALESCE(j.location, hg.location)
+        ) ORDER BY pt.id)                                                      AS items
+      FROM pawn_ticket pt
+      JOIN transactions t ON t.transaction_id = pt.transaction_id
+      LEFT JOIN jewelry   j  ON j.item_id  = pt.item_id
+      LEFT JOIN hardgoods hg ON hg.item_id = pt.item_id
+      WHERE t.customer_id = $1
+        AND pt.status IN ('ACTIVE', 'OVERDUE')
+      GROUP BY pt.pawn_ticket_id, pt.status, pt.due_date,
+               pt.term_days, pt.frequency_days, pt.interest_rate,
+               pt.insurance_rate, pt.storage_fee
+      ORDER BY
+        CASE WHEN pt.status = 'OVERDUE' THEN 0 ELSE 1 END,
+        pt.due_date ASC
+    `, [id]);
+
+    const pawns = result.rows.map(row => {
+      const principal     = parseFloat(row.pawn_amount)    || 0;
+      const interestRate  = parseFloat(row.interest_rate)  || 0;
+      const insuranceRate = parseFloat(row.insurance_rate) || 0;
+      const storageFee    = parseFloat(row.storage_fee)    || 0;
+
+      const interestAmount  = Math.round(principal * interestRate  / 100 * 100) / 100;
+      const insuranceAmount = Math.round(principal * insuranceRate / 100 * 100) / 100;
+      const redeemAmount    = Math.round((principal + interestAmount + insuranceAmount + storageFee) * 100) / 100;
+
+      const dueDate = row.due_date ? new Date(row.due_date) : null;
+      const diffDays = dueDate
+        ? Math.round((dueDate - today) / (1000 * 60 * 60 * 24))
+        : null;
+
+      const isOverdue = row.status === 'OVERDUE' || (diffDays !== null && diffDays < 0);
+
+      return {
+        type:             'redeem',
+        ref:              row.pawn_ticket_id,
+        description:      row.item_description || '—',
+        transaction_date: row.transaction_date,
+        status:           isOverdue ? 'OVERDUE' : 'ACTIVE',
+        due_date:         dueDate
+          ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          : '—',
+        due_date_raw:     row.due_date,
+        days_info:        diffDays !== null
+          ? (diffDays < 0
+              ? `${Math.abs(diffDays)} day${Math.abs(diffDays) !== 1 ? 's' : ''} overdue`
+              : `${diffDays} day${diffDays !== 1 ? 's' : ''} left`)
+          : null,
+        days_diff:        diffDays,
+        principal,
+        interest_amount:  interestAmount,
+        insurance_amount: insuranceAmount,
+        storage_fee:      storageFee,
+        redeem_amount:    redeemAmount,
+        items:            row.items || [],
+      };
+    });
+
+    res.json({ pawns });
+  } catch (err) {
+    console.error('Error fetching customer redeem stats:', err);
+    res.status(500).json({ error: 'Failed to fetch redeem statistics' });
   }
 });
 
@@ -12360,6 +12607,111 @@ app.put('/api/tax-config/batch', async (req, res) => {
     res.status(500).json({ error: 'Failed to update tax configuration' });
   } finally {
     client.release();
+  }
+});
+
+// Whether Trade transactions have tax applied at all (independent of the provincial rate)
+app.get('/api/trade-tax-config', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM trade_tax_config
+      WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+      ORDER BY created_at DESC LIMIT 1
+    `);
+    res.json(result.rows[0] || { taxable: true });
+  } catch (error) {
+    console.error('Error fetching trade tax config:', error);
+    res.status(500).json({ error: 'Failed to fetch trade tax config' });
+  }
+});
+
+app.put('/api/trade-tax-config', async (req, res) => {
+  try {
+    const { taxable } = req.body;
+    const storeRes = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const store_id = storeRes.rows[0]?.store_id || null;
+
+    const existing = await pool.query('SELECT id FROM trade_tax_config WHERE store_id = $1', [store_id]);
+    const result = existing.rows.length > 0
+      ? await pool.query(
+          'UPDATE trade_tax_config SET taxable = $1, updated_at = CURRENT_TIMESTAMP WHERE store_id = $2 RETURNING *',
+          [taxable !== false, store_id]
+        )
+      : await pool.query(
+          'INSERT INTO trade_tax_config (store_id, taxable) VALUES ($1, $2) RETURNING *',
+          [store_id, taxable !== false]
+        );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating trade tax config:', error);
+    res.status(500).json({ error: 'Failed to update trade tax config' });
+  }
+});
+
+// ============================================================================
+// Feedback (from staff testing the software) API Routes
+// ============================================================================
+
+app.post('/api/feedback', async (req, res) => {
+  try {
+    const { employee_id, message } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Feedback message is required' });
+    }
+    const storeRes = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const store_id = storeRes.rows[0]?.store_id || null;
+
+    const result = await pool.query(`
+      INSERT INTO feedback (employee_id, store_id, message)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `, [employee_id || null, store_id, message.trim()]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error submitting feedback:', error);
+    res.status(500).json({ error: 'Failed to submit feedback' });
+  }
+});
+
+app.get('/api/feedback', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT f.*, CONCAT(e.first_name, ' ', e.last_name) AS employee_name
+      FROM feedback f
+      LEFT JOIN employees e ON f.employee_id = e.employee_id
+      WHERE f.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+         OR f.store_id IS NULL
+      ORDER BY f.created_at DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching feedback:', error);
+    res.status(500).json({ error: 'Failed to fetch feedback' });
+  }
+});
+
+app.put('/api/feedback/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!['new', 'reviewed', 'implemented'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    const result = await pool.query(`
+      UPDATE feedback SET status = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      RETURNING *
+    `, [status, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Feedback not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating feedback status:', error);
+    res.status(500).json({ error: 'Failed to update feedback status' });
   }
 });
 

@@ -222,6 +222,43 @@ BEGIN
     SELECT 24
     WHERE NOT EXISTS (SELECT 1 FROM parked_workspace_config LIMIT 1);
 
+    -- Create storage_fee_config table for choosing how pawn item storage fees
+    -- are priced: a named size (item_size table) or a flat rate per cubic foot
+    CREATE TABLE IF NOT EXISTS storage_fee_config (
+        id SERIAL PRIMARY KEY,
+        method VARCHAR(20) NOT NULL DEFAULT 'size',
+        rate_per_cubic_foot NUMERIC(10,2) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP,
+        CONSTRAINT valid_storage_fee_method CHECK (method IN ('size', 'cubic_feet')),
+        CONSTRAINT valid_rate_per_cubic_foot CHECK (rate_per_cubic_foot >= 0)
+    );
+
+    COMMENT ON TABLE storage_fee_config IS 'Stores whether pawn item storage fees are priced by named size or by a flat rate per cubic foot';
+    COMMENT ON COLUMN storage_fee_config.method IS 'size = use item_size table; cubic_feet = rate_per_cubic_foot * cubic feet entered per item';
+
+    -- Insert default configuration if table is empty
+    INSERT INTO storage_fee_config (method, rate_per_cubic_foot)
+    SELECT 'size', 0
+    WHERE NOT EXISTS (SELECT 1 FROM storage_fee_config LIMIT 1);
+
+    -- Create quick_sale_config table for the max amount a no-customer "quick
+    -- sale" checkout is allowed to total before a real customer is required
+    CREATE TABLE IF NOT EXISTS quick_sale_config (
+        id SERIAL PRIMARY KEY,
+        max_amount NUMERIC(10,2) NOT NULL DEFAULT 100.00,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP,
+        CONSTRAINT valid_quick_sale_max_amount CHECK (max_amount >= 0)
+    );
+
+    COMMENT ON TABLE quick_sale_config IS 'Stores the max total a no-customer quick sale checkout is allowed before a real customer must be selected';
+
+    -- Insert default configuration if table is empty
+    INSERT INTO quick_sale_config (max_amount)
+    SELECT 100.00
+    WHERE NOT EXISTS (SELECT 1 FROM quick_sale_config LIMIT 1);
+
 END $$;
 
 -- Store-scope all system config tables
@@ -234,3 +271,5 @@ ALTER TABLE carat_to_gram_conversion ADD COLUMN IF NOT EXISTS store_id INTEGER R
 ALTER TABLE inventory_hold_period ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
 ALTER TABLE receipt_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
 ALTER TABLE parked_workspace_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+ALTER TABLE storage_fee_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+ALTER TABLE quick_sale_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);

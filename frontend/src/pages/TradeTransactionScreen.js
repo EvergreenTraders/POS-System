@@ -114,6 +114,7 @@ export default function TradeTransactionScreen({
 
   const [categories, setCategories] = useState([]);
   const [taxRate, setTaxRate]       = useState(0.07);
+  const [tradeTaxable, setTradeTaxable] = useState(true);
   const [tradeStats, setTradeStats] = useState(null);
 
   // Buy ticket picker (Add Existing Buy Ticket)
@@ -194,6 +195,14 @@ export default function TradeTransactionScreen({
   }, []);
 
   useEffect(() => {
+    axios.get(`${config.apiUrl}/trade-tax-config`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setTradeTaxable(res.data?.taxable !== false))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     if (tradeQuickAddMode) tradeQuickInputRef.current?.focus();
   }, [tradeQuickAddMode]);
 
@@ -256,7 +265,7 @@ export default function TradeTransactionScreen({
 
   // Tax on Difference: only tax the positive difference between sale and trade
   const taxableDifference = Math.max(0, saleAfterDiscount - totalTradeAllowance);
-  const taxAmount          = taxableDifference * taxRate;
+  const taxAmount          = tradeTaxable ? taxableDifference * taxRate : 0;
   const totalSaleAfterTax  = saleAfterDiscount + taxAmount;
 
   const netDueToCustomer = totalTradeAllowance - totalSaleAfterTax;
@@ -1471,13 +1480,13 @@ export default function TradeTransactionScreen({
           Cancel
         </Button>
         <Button size="small" variant="outlined"
-          disabled={tradeItems.length === 0 && saleItems.length === 0}
+          disabled={tradeItems.length === 0 || saleItems.length === 0}
           onClick={handleAddToWorkspace}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
           Add to Workspace
         </Button>
         <Button size="small" variant="contained" endIcon={<MuiIcons.ArrowForward />}
-          disabled={tradeItems.length === 0 && saleItems.length === 0}
+          disabled={tradeItems.length === 0 || saleItems.length === 0}
           onClick={handleCheckoutNow}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: TRADE_TEAL, '&:hover': { bgcolor: TRADE_DARK } }}>
           Checkout Now

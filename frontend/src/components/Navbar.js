@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   AppBar,
   Toolbar,
@@ -23,6 +23,12 @@ import {
   CircularProgress,
   Stack,
   Divider,
+  List,
+  ListItem,
+  ListItemAvatar,
+  ListItemText,
+  Snackbar,
+  TextField,
 } from '@mui/material';
 import axios from 'axios';
 import {
@@ -38,6 +44,7 @@ import {
   PlayArrow as PlayArrowIcon,
   Delete as DeleteIcon,
   LocalParking as ParkingIcon,
+  Feedback as FeedbackIcon,
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -45,6 +52,7 @@ import { useWorkingDate } from '../context/WorkingDateContext';
 import { useStoreStatus } from '../context/StoreStatusContext';
 import { useNavigate } from 'react-router-dom';
 import Cart from './Cart';
+import CloseStoreIssuesDialog from './CloseStoreIssuesDialog';
 import config from '../config';
 
 const StyledAppBar = styled(AppBar)({
@@ -77,7 +85,18 @@ function Navbar() {
   const [storeActionLoading, setStoreActionLoading] = useState(false);
   const [storeActionError, setStoreActionError] = useState('');
   const [closeStoreClockedIn, setCloseStoreClockedIn] = useState([]);
+  const [clockingOutId, setClockingOutId] = useState(null);
   const [isBackupComputer, setIsBackupComputer] = useState(false);
+  const [deletingParkedId, setDeletingParkedId] = useState(null);
+  const [closeStoreIssuesOpen, setCloseStoreIssuesOpen] = useState(false);
+  const [closeStoreIssues, setCloseStoreIssues] = useState([]);
+  const [closeStoreIssuesMessage, setCloseStoreIssuesMessage] = useState('');
+  const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [feedbackNewAlert, setFeedbackNewAlert] = useState(null);
+  const feedbackLastSeenIdRef = useRef(null);
   const navigate = useNavigate();
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
@@ -160,7 +179,7 @@ function Navbar() {
   }, [user]);
 
   const fetchParkedWorkspaces = async () => {
-    if (!user) return;
+    if (!user) return [];
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(`${config.apiUrl}/parked-workspaces`, {
@@ -168,11 +187,14 @@ function Navbar() {
       });
       if (res.ok) {
         const data = await res.json();
-        setParkedWorkspaces(Array.isArray(data) ? data : []);
+        const list = Array.isArray(data) ? data : [];
+        setParkedWorkspaces(list);
+        return list;
       }
     } catch {
       // non-critical
     }
+    return [];
   };
 
   useEffect(() => {
@@ -184,6 +206,41 @@ function Navbar() {
       window.removeEventListener('parkedWorkspacesChanged', fetchParkedWorkspaces);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // Alert the developer account as soon as any new feedback comes in, instead of
+  // requiring her to go check SystemConfig's Feedback tab.
+  useEffect(() => {
+    if (user?.username !== 'pguntupalli') return;
+    const storageKey = `feedbackLastSeenId_${user.username}`;
+    feedbackLastSeenIdRef.current = parseInt(localStorage.getItem(storageKey) || '0', 10);
+
+    const checkFeedback = async () => {
+      try {
+        const res = await axios.get(`${config.apiUrl}/feedback`);
+        const list = Array.isArray(res.data) ? res.data : [];
+        if (list.length === 0) return;
+        const newestId = Math.max(...list.map(f => f.id));
+        if (newestId > feedbackLastSeenIdRef.current) {
+          const unseen = list
+            .filter(f => f.id > feedbackLastSeenIdRef.current)
+            .sort((a, b) => b.id - a.id);
+          const latest = unseen[0];
+          setFeedbackNewAlert(
+            `New feedback from ${latest.employee_name || 'someone'}: "${latest.message.length > 100 ? latest.message.slice(0, 100) + '…' : latest.message}"` +
+            (unseen.length > 1 ? ` (+${unseen.length - 1} more)` : '')
+          );
+          feedbackLastSeenIdRef.current = newestId;
+          localStorage.setItem(storageKey, String(newestId));
+        }
+      } catch {
+        // non-critical
+      }
+    };
+
+    checkFeedback();
+    const interval = setInterval(checkFeedback, 30000);
+    return () => clearInterval(interval);
   }, [user]);
 
   const handleOpenResumeDialog = () => {
@@ -439,22 +496,71 @@ function Navbar() {
     if (storeStatus === 'open') {
       setStoreActionLoading(true);
       try {
-        await axios.get(`${config.apiUrl}/store-sessions/check-open-drawers`);
-        const res = await axios.get(`${config.apiUrl}/employee-sessions/clocked-in`);
-        setCloseStoreClockedIn(res.data || []);
-        if (res.data && res.data.length > 0) {
+        const [drawersResult, clockedInResult, parkedList] = await Promise.allSettled([
+          axios.get(`${config.apiUrl}/store-sessions/check-open-drawers`),
+          axios.get(`${config.apiUrl}/employee-sessions/clocked-in`),
+          fetchParkedWorkspaces(),
+        ]);
+        const clockedInList = clockedInResult.status === 'fulfilled' ? (clockedInResult.value.data || []) : [];
+        setCloseStoreClockedIn(clockedInList);
+        const freshParked = parkedList.status === 'fulfilled' ? parkedList.value : [];
+
+        if (drawersResult.status === 'rejected') {
+          const err = drawersResult.reason;
+          setCloseStoreIssuesMessage(err.response?.data?.error || 'Failed to check store closure prerequisites');
+          setCloseStoreIssues(err.response?.data?.openDrawers || []);
+          setCloseStoreIssuesOpen(true);
+          return;
+        }
+
+        if (clockedInList.length > 0) {
           await axios.post(`${config.apiUrl}/employee-sessions/notify-closing`);
         }
+
+        if (freshParked.length > 0) {
+          setCloseStoreIssuesMessage('');
+          setCloseStoreIssues([]);
+          setCloseStoreIssuesOpen(true);
+          return;
+        }
+
         setIsBackupComputer(false);
-        setCloseStoreDialogOpen(true);
-      } catch (err) {
-        setStoreActionError(err.response?.data?.error || 'Failed to check store closure prerequisites');
         setCloseStoreDialogOpen(true);
       } finally {
         setStoreActionLoading(false);
       }
     } else {
       setOpenStoreDialogOpen(true);
+    }
+  };
+
+  const handleSubmitFeedback = async () => {
+    if (!feedbackMessage.trim()) return;
+    setFeedbackSubmitting(true);
+    try {
+      await axios.post(`${config.apiUrl}/feedback`, {
+        employee_id: user?.id || user?.employee_id,
+        message: feedbackMessage.trim(),
+      });
+      setFeedbackMessage('');
+      setFeedbackDialogOpen(false);
+      setFeedbackSubmitted(true);
+    } catch (err) {
+      console.error('Failed to submit feedback:', err);
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
+
+  const handleClockOutEmployee = async (emp) => {
+    setClockingOutId(emp.session_id);
+    try {
+      await axios.post(`${config.apiUrl}/employee-sessions/clock-out`, { employee_id: emp.employee_id });
+      setCloseStoreClockedIn(prev => prev.filter(e => e.session_id !== emp.session_id));
+    } catch (err) {
+      setStoreActionError(err.response?.data?.error || 'Failed to clock out employee');
+    } finally {
+      setClockingOutId(null);
     }
   };
 
@@ -474,30 +580,54 @@ function Navbar() {
     }
   };
 
-  const handleCloseStoreConfirm = async () => {
+  const performCloseStore = async () => {
     setStoreActionLoading(true);
     try {
       await axios.post(`${config.apiUrl}/store-sessions/close`, {
         employee_id: user?.id || user?.employee_id,
       });
-      // Clear all parked workspaces at end of day
-      try {
-        const token = localStorage.getItem('token');
-        await fetch(`${config.apiUrl}/parked-workspaces`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setParkedWorkspaces([]);
-      } catch {
-        // non-critical — store still closes successfully
-      }
       await refreshStatus();
       window.dispatchEvent(new Event('storeStatusChanged'));
       setCloseStoreDialogOpen(false);
     } catch (err) {
       setStoreActionError(err.response?.data?.error || 'Failed to close store');
+      setCloseStoreDialogOpen(true);
     } finally {
       setStoreActionLoading(false);
+    }
+  };
+
+  const handleCloseStoreConfirm = async () => {
+    await performCloseStore();
+  };
+
+  const handleDeleteParkedWorkspace = async (pw) => {
+    setDeletingParkedId(pw.id);
+    try {
+      const token = localStorage.getItem('token');
+      await fetch(`${config.apiUrl}/parked-workspaces/${pw.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setParkedWorkspaces(prev => prev.filter(p => p.id !== pw.id));
+    } catch {
+      // non-critical
+    } finally {
+      setDeletingParkedId(null);
+    }
+  };
+
+  const handleKeepParkedWorkspacesOnClose = () => {
+    setCloseStoreIssuesOpen(false);
+    setIsBackupComputer(false);
+    setCloseStoreDialogOpen(true);
+  };
+
+  const handleCloseStoreIssuesDismiss = () => {
+    if (closeStoreIssues.length === 0) {
+      handleKeepParkedWorkspacesOnClose();
+    } else {
+      setCloseStoreIssuesOpen(false);
     }
   };
 
@@ -759,6 +889,16 @@ function Navbar() {
                 </span>
               </Tooltip>
 
+              <Tooltip title="Send Feedback">
+                <IconButton
+                  color="inherit"
+                  onClick={() => setFeedbackDialogOpen(true)}
+                  sx={{ mr: 1 }}
+                >
+                  <FeedbackIcon />
+                </IconButton>
+              </Tooltip>
+
               <IconButton
                 color="inherit"
                 onClick={() => setCartOpen(true)}
@@ -907,16 +1047,47 @@ function Navbar() {
             <Typography component="li" variant="body2">All pending transactions are complete</Typography>
           </Box>
           {closeStoreClockedIn.length > 0 && (
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
-                Currently Clocked-In Employees ({closeStoreClockedIn.length}):
-              </Typography>
-              {closeStoreClockedIn.map((emp) => (
-                <Typography key={emp.session_id} variant="body2">
-                  {emp.employee_name} - {emp.role} (since {new Date(emp.clock_in_time).toLocaleTimeString()})
+            <Box sx={{ mb: 2 }}>
+              <Alert severity="warning" sx={{ mb: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  Currently Clocked-In Employees ({closeStoreClockedIn.length}):
                 </Typography>
-              ))}
-            </Alert>
+              </Alert>
+              <List dense sx={{ pt: 0 }}>
+                {closeStoreClockedIn.map((emp) => (
+                  <ListItem
+                    key={emp.session_id}
+                    disableGutters
+                    secondaryAction={
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="warning"
+                        disabled={clockingOutId === emp.session_id}
+                        startIcon={clockingOutId === emp.session_id ? <CircularProgress size={14} /> : null}
+                        onClick={() => handleClockOutEmployee(emp)}
+                      >
+                        Clock Out
+                      </Button>
+                    }
+                  >
+                    <ListItemAvatar>
+                      <Avatar
+                        src={emp.image ? `data:image/jpeg;base64,${emp.image}` : undefined}
+                        sx={{ width: 32, height: 32 }}
+                      >
+                        {!emp.image && (emp.first_name ? emp.first_name[0].toUpperCase() : '?')}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={emp.employee_name}
+                      secondary={`${emp.role} - since ${new Date(emp.clock_in_time).toLocaleTimeString()}`}
+                      sx={{ pr: 10 }}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
           )}
           {storeActionError && <Alert severity="error" sx={{ mb: 2 }}>{storeActionError}</Alert>}
           <FormControlLabel
@@ -1050,6 +1221,84 @@ function Navbar() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <CloseStoreIssuesDialog
+        open={closeStoreIssuesOpen}
+        onClose={handleCloseStoreIssuesDismiss}
+        message={closeStoreIssuesMessage}
+        issues={closeStoreIssues}
+        clockedInEmployees={closeStoreClockedIn}
+        onClockOut={handleClockOutEmployee}
+        clockingOutId={clockingOutId}
+        parkedWorkspaces={parkedWorkspaces}
+        onDeleteParkedWorkspace={handleDeleteParkedWorkspace}
+        deletingParkedId={deletingParkedId}
+        onKeepParkedWorkspaces={handleKeepParkedWorkspacesOnClose}
+      />
+
+      <Dialog open={feedbackDialogOpen} onClose={() => setFeedbackDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Send Feedback</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Found a bug or have an idea? Let us know and we'll take a look.
+          </Typography>
+          <TextField
+            autoFocus
+            multiline
+            minRows={4}
+            fullWidth
+            placeholder="What's on your mind?"
+            value={feedbackMessage}
+            onChange={(e) => setFeedbackMessage(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFeedbackDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleSubmitFeedback}
+            disabled={!feedbackMessage.trim() || feedbackSubmitting}
+            startIcon={feedbackSubmitting ? <CircularProgress size={16} /> : null}
+          >
+            Submit
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        open={feedbackSubmitted}
+        autoHideDuration={4000}
+        onClose={() => setFeedbackSubmitted(false)}
+      >
+        <Alert severity="success" onClose={() => setFeedbackSubmitted(false)}>
+          Thanks for your feedback!
+        </Alert>
+      </Snackbar>
+
+      <Snackbar
+        open={!!feedbackNewAlert}
+        autoHideDuration={10000}
+        onClose={() => setFeedbackNewAlert(null)}
+      >
+        <Alert
+          severity="info"
+          onClose={() => setFeedbackNewAlert(null)}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => {
+                setFeedbackNewAlert(null);
+                navigate('/system-config/settings', { state: { initialTab: 8 } });
+              }}
+            >
+              View
+            </Button>
+          }
+        >
+          {feedbackNewAlert}
+        </Alert>
+      </Snackbar>
     </>
   );
 }

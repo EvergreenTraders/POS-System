@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
 import {
   Box, Typography, Paper, Grid, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Badge, Tooltip, Stack, Snackbar, Alert,
-  Dialog, DialogTitle, DialogContent, DialogActions
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  List, ListItem, ListItemText, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Menu, FormControlLabel, Checkbox,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
@@ -13,19 +15,55 @@ import SaleTransactionScreen from './SaleTransactionScreen';
 import BuyTransactionScreen from './BuyTransactionScreen';
 import TradeTransactionScreen from './TradeTransactionScreen';
 import PaymentTransactionScreen from './PaymentTransactionScreen';
+import RedeemTransactionScreen from './RedeemTransactionScreen';
+import { useWorkspaceGuard } from '../context/WorkspaceGuardContext';
+import { useAuth } from '../context/AuthContext';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 const BUY_BLUE = '#0284c7';
 
+// ── Dashboard-style placeholder cards shown when the workspace is empty ──────
+// Copied from Home.js's Messages/Tasks/Loans-Layaways widgets (same dummy data,
+// not wired to any live source) so this screen doubles as a landing page.
+const DASHBOARD_MESSAGES = [
+  { type: 'announcement', text: 'Easter Promotion starts today – click for details' },
+  { type: 'incoming text', text: "+1 (506)455-1234: I'll be in tomorrow to pay" },
+  { type: 'email', text: 'From: joe@gmail.com Subject: E-transfer Sent' },
+  { type: 'facebook', text: 'From: facebook_user – Can you give me a quote on the following items that I would...' },
+  { type: 'web', text: 'From: I want to sell gold | "I have 3 rings I want to sell."' },
+  { type: 'website', text: 'New online sale WEB-S876511 in for in-store pickup' },
+];
+
+const DASHBOARD_TASKS = [
+  '5 Items to be located',
+  '2 Online orders to fill (1 is in-store pickup)',
+  '23 Loans to be pulled',
+  '12 Buys to expire',
+  '87 Items to be priced',
+  '31 Items to be marked down',
+  '18 Loans to call',
+  '7 Layaways overdue',
+  '3 Returns to process',
+  '"Remerchandise the laptop cabinet"',
+  '"Ask 5 customers for reviews"',
+];
+
+const DASHBOARD_LOANS_LAYAWAYS_DUE_TODAY = [
+  { id: 'PT-00001234', name: 'John Smith', type: 'Loan', details: '$450.00 due' },
+  { id: 'LWY-00456', name: 'Maria Garcia', type: 'Layaway', details: '$120.00 payment due' },
+  { id: 'PT-00001198', name: 'Robert Chen', type: 'Loan', details: '$210.00 due' },
+];
+
 // Maps workspace transaction type to the localStorage keys each ticket screen uses
 // to track voided ticket numbers (so they're never reused) and the in-flight
 // "pending" ticket id (so a voided-but-uncommitted id isn't handed out again).
 const VOID_STORAGE_KEYS = {
-  PAWN:  { voided: 'voidedPawnTickets',  pending: 'pendingPTTicketId' },
-  BUY:   { voided: 'voidedBuyTickets',   pending: 'pendingBTTicketId' },
-  TRADE: { voided: 'voidedTradeTickets', pending: 'pendingTTTicketId' },
-  SALE:  { voided: 'voidedSaleTickets',  pending: 'pendingSTTicketId' },
+  PAWN:   { voided: 'voidedPawnTickets',  pending: 'pendingPTTicketId' },
+  BUY:    { voided: 'voidedBuyTickets',   pending: 'pendingBTTicketId' },
+  TRADE:  { voided: 'voidedTradeTickets', pending: 'pendingTTTicketId' },
+  SALE:   { voided: 'voidedSaleTickets',  pending: 'pendingSTTicketId' },
+  REDEEM: { voided: 'voidedRDMTickets',   pending: 'pendingRDMTicketId' },
 };
 
 function voidTicketId(type, ticketId) {
@@ -342,6 +380,57 @@ function PaymentTransactionCard({ tx, onOpen, onVoid }) {
   );
 }
 
+const REDEEM_ACCENT = '#0d9488'; // fallback only — actual color comes from the transaction_type DB row
+
+function RedeemTransactionCard({ tx, redeemIcon, redeemColor, onOpen, onVoid }) {
+  const fmt = (n) => `$${Number(n).toFixed(2)}`;
+  const itemCount = (tx.selectedRedemptions || []).length;
+  const accent = redeemColor || REDEEM_ACCENT;
+  const RedeemIconComponent = redeemIcon ? (MuiIcons[redeemIcon] ?? MuiIcons.Redeem) : MuiIcons.Redeem;
+
+  return (
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <RedeemIconComponent sx={{ fontSize: 20, color: accent }} />
+          <Typography fontWeight={700} fontSize={13} color={accent}>REDEEM</Typography>
+        </Box>
+        <Chip label={tx.ticketId} size="small"
+          sx={{ fontWeight: 700, fontSize: 11, height: 20, bgcolor: '#f5f5f5', border: '1px solid #e0e0e0' }} />
+      </Box>
+
+      <Box sx={{ px: 1.5, pb: 1.25 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75, mt: 0.75 }}>
+          <Chip
+            icon={<MuiIcons.Savings sx={{ fontSize: 14 }} />}
+            label={`${itemCount} pawn${itemCount === 1 ? '' : 's'}`}
+            size="small"
+            sx={{ fontSize: 11, height: 22, bgcolor: '#ccfbf1', color: accent, '& .MuiChip-icon': { color: accent } }} />
+        </Box>
+
+        <Divider sx={{ my: 1 }} />
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+          <Typography variant="caption" fontWeight={600} color={accent}>Total Due</Typography>
+          <Typography variant="caption" fontWeight={700} color={accent}>{fmt(tx.totalRedeem || 0)}</Typography>
+        </Box>
+
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
+            onClick={onOpen}
+            sx={{ flex: 1, fontSize: 11, borderColor: accent, color: accent }}>
+            Open
+          </Button>
+          <IconButton size="small" color="error" onClick={onVoid}
+            sx={{ border: '1px solid', borderColor: 'error.main', borderRadius: 1 }}>
+            <MuiIcons.Block fontSize="small" />
+          </IconButton>
+        </Box>
+      </Box>
+    </Paper>
+  );
+}
+
 function TransactionTypeButton({ label, icon, color, onClick, count }) {
   return (
     <Badge badgeContent={count || 0} color="primary" overlap="rectangular"
@@ -364,38 +453,13 @@ function TransactionTypeButton({ label, icon, color, onClick, count }) {
   );
 }
 
-// ── Workspace localStorage helpers (mirrors CustomerTicket.js pattern) ────────
+// ── Workspace localStorage cleanup (legacy) ───────────────────────────────────
+// The workspace no longer auto-persists to localStorage or auto-restores on
+// customer switch/reload — an unfinished workspace only survives via explicit
+// "Park" (backed by the parked_workspaces table). This just clears out any
+// stale workspace_* entries left over from before that change.
 
 const WORKSPACE_EXPIRY_MS = 24 * 60 * 60 * 1000;
-
-function saveWorkspaceForId(customerId, transactions) {
-  try {
-    const key = customerId ? `workspace_${customerId}` : 'workspace_global';
-    localStorage.setItem(key, JSON.stringify({ transactions, timestamp: Date.now() }));
-  } catch (e) {
-    console.error('Error saving workspace:', e);
-  }
-}
-
-function loadWorkspaceForId(customerId) {
-  try {
-    const key = customerId ? `workspace_${customerId}` : 'workspace_global';
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed?.timestamp) {
-      if (Date.now() - parsed.timestamp > WORKSPACE_EXPIRY_MS) {
-        localStorage.removeItem(key);
-        return null;
-      }
-      return parsed.transactions;
-    }
-    return null;
-  } catch (e) {
-    console.error('Error loading workspace:', e);
-    return null;
-  }
-}
 
 function cleanupExpiredWorkspaces() {
   try {
@@ -590,8 +654,12 @@ function TradeTransactionCard({ tx, tradeIcon, tradeColor, onOpen, onVoid }) {
 export default function ModernTransactions() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { registerGuard } = useWorkspaceGuard();
+  const { user: currentUser } = useAuth();
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
+  const [quickSaleMaxAmount, setQuickSaleMaxAmount] = useState(100);
+  const [employees, setEmployees] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
   const [buyOpen, setBuyOpen] = useState(() => {
     if (location.state?.customerUpdated) {
@@ -703,16 +771,44 @@ export default function ModernTransactions() {
     }
     return null;
   });
+
+  const [redeemOpen, setRedeemOpen] = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingRedeemState');
+      return !!raw;
+    }
+    if (location.state?.returnToRedeem) {
+      const raw = sessionStorage.getItem('pendingRedeemReturn');
+      return !!raw;
+    }
+    return false;
+  });
+  const [existingRedeemData, setExistingRedeemData] = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingRedeemState');
+      if (!raw) return null;
+      try {
+        const { ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt } = JSON.parse(raw);
+        return { ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt };
+      } catch { return null; }
+    }
+    if (location.state?.returnToRedeem) {
+      const raw = sessionStorage.getItem('pendingRedeemReturn');
+      if (!raw) return null;
+      try {
+        const { ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt } = JSON.parse(raw);
+        return { ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt };
+      } catch { return null; }
+    }
+    return null;
+  });
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
   const [noCustomerWarning, setNoCustomerWarning] = useState('');
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
   const [parkSnackbar, setParkSnackbar]   = useState(null); // { severity, message }
 
-  // Refs for localStorage persistence (mirrors CustomerTicket.js pattern)
   const customerIdRef = useRef(undefined);
-  const workspaceTransactionsRef = useRef(workspaceTransactions);
-  const initialLoadCompleteRef = useRef(false);
-  const pendingResumeWorkspaceRef = useRef(null); // workspace to load on next customer change
+  const pendingResumeWorkspaceRef = useRef(null); // workspace to load on next customer change (from Park resume)
 
   // Customer state
   const [customer, setCustomer] = useState(null);
@@ -727,42 +823,64 @@ export default function ModernTransactions() {
     axios.get(`${config.apiUrl}/transaction-types`)
       .then(res => setTransactionTypes(res.data))
       .catch(err => console.error('Failed to load transaction types:', err));
+    axios.get(`${config.apiUrl}/quick-sale-config`)
+      .then(res => setQuickSaleMaxAmount(parseFloat(res.data?.max_amount) || 0))
+      .catch(err => console.error('Failed to load quick sale config:', err));
+    axios.get(`${config.apiUrl}/employees`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setEmployees(res.data))
+      .catch(err => console.error('Failed to load employees:', err));
   }, []);
 
   // Clean up expired workspace entries on mount
   useEffect(() => { cleanupExpiredWorkspaces(); }, []);
 
+  // Which of the empty-workspace dashboard cards this employee sees. A manager can
+  // set this for anyone from SystemConfig's Employee Configuration tab, but each
+  // employee can also override it for themselves via the gear icon below.
+  const currentEmployee = employees.find(e => e.employee_id === currentUser?.id);
+  const showMessagesCard = currentEmployee?.show_messages_card !== false;
+  const showTasksCard = currentEmployee?.show_tasks_card !== false;
+  const showLoansLayawaysCard = currentEmployee?.show_loans_layaways_card !== false;
+
+  const [cardPrefsAnchor, setCardPrefsAnchor] = useState(null);
+  const handleToggleCardPref = async (field, currentValue) => {
+    const nextValue = !currentValue;
+    setEmployees(prev => prev.map(e => e.employee_id === currentUser?.id ? { ...e, [field]: nextValue } : e));
+    try {
+      await axios.put(`${config.apiUrl}/employees/${currentUser.id}/workspace-card-preferences`, {
+        showMessagesCard: field === 'show_messages_card' ? nextValue : showMessagesCard,
+        showTasksCard: field === 'show_tasks_card' ? nextValue : showTasksCard,
+        showLoansLayawaysCard: field === 'show_loans_layaways_card' ? nextValue : showLoansLayawaysCard,
+      });
+    } catch (err) {
+      console.error('Failed to update workspace card preferences:', err);
+      setEmployees(prev => prev.map(e => e.employee_id === currentUser?.id ? { ...e, [field]: currentValue } : e));
+    }
+  };
 
 
-  // On customer change: save old customer's workspace, load new customer's workspace
+
+  // On customer change: the workspace is never auto-restored — it starts
+  // empty for whichever customer is now selected. The one exception is
+  // resuming an explicitly Parked workspace (pendingResumeWorkspaceRef, set
+  // by the "Resume" flow below), which supplies its own transactions.
+  // Actually switching customers while there's unparked work is gated
+  // upstream by confirmLeaveWorkspace (see handleSelectCustomer/handleClearCustomer),
+  // so by the time this effect runs, workspaceTransactions is already safe to reset.
   useEffect(() => {
     const prevId = customerIdRef.current;
     const newId = customer?.id;
-    const customerChanged = prevId !== newId;
-
-    if (!initialLoadCompleteRef.current || customerChanged) {
-      if (customerChanged && prevId !== undefined) {
-        saveWorkspaceForId(prevId, workspaceTransactionsRef.current);
-      }
-      if (pendingResumeWorkspaceRef.current !== null) {
-        setWorkspaceTransactions(pendingResumeWorkspaceRef.current);
-        pendingResumeWorkspaceRef.current = null;
-      } else {
-        const saved = loadWorkspaceForId(newId);
-        setWorkspaceTransactions(saved || []);
-      }
-      customerIdRef.current = newId;
-      initialLoadCompleteRef.current = true;
+    if (prevId === newId) return;
+    if (pendingResumeWorkspaceRef.current !== null) {
+      setWorkspaceTransactions(pendingResumeWorkspaceRef.current);
+      pendingResumeWorkspaceRef.current = null;
+    } else {
+      setWorkspaceTransactions([]);
     }
+    customerIdRef.current = newId;
   }, [customer?.id]);
-
-  // Keep ref in sync and auto-save to localStorage whenever workspace changes
-  useEffect(() => {
-    workspaceTransactionsRef.current = workspaceTransactions;
-    if (initialLoadCompleteRef.current) {
-      saveWorkspaceForId(customer?.id, workspaceTransactions);
-    }
-  }, [workspaceTransactions, customer?.id]);
 
   // When customerStats loads, refresh overduePawnCount on all PAWN cards in the workspace
   // (handles stale localStorage cards and race conditions during card creation)
@@ -912,7 +1030,9 @@ export default function ModernTransactions() {
     })();
   }, [location.state]);
 
-  // Restore sale screen after returning from CustomerEditor
+  // Restore sale screen after returning from CustomerEditor (either an
+  // existing customer was edited, or — from the quick sale customer picker's
+  // "Register New Customer" — a brand new one was just created).
   useEffect(() => {
     if (!location.state?.customerUpdated) return;
     const raw = sessionStorage.getItem('pendingSaleState');
@@ -921,13 +1041,16 @@ export default function ModernTransactions() {
     try { pending = JSON.parse(raw); } catch { return; }
     sessionStorage.removeItem('pendingSaleState');
     const { customerId, customer: savedCustomer, ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount } = pending;
-    if (!customerId) return;
-    // Open immediately with saved customer so there's no empty-screen flash
-    if (savedCustomer) setCustomer(savedCustomer);
+    const newCustomer = location.state?.newCustomer;
+    const idToRefresh = newCustomer?.id || customerId;
+    if (!idToRefresh) return;
+    // Open immediately with saved/new customer so there's no empty-screen flash
+    if (newCustomer) setCustomer(newCustomer);
+    else if (savedCustomer) setCustomer(savedCustomer);
     setExistingSaleData({ ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount });
     setSaleOpen(true);
-    // Refresh customer in background to pick up any edits just made
-    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+    // Refresh customer in background to pick up any edits/the full new record
+    axios.get(`${config.apiUrl}/customers/${idToRefresh}`, {
       headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
     })
       .then(res => setCustomer(res.data))
@@ -1014,6 +1137,46 @@ export default function ModernTransactions() {
       .catch(err => console.error('Failed to refresh customer after checkout back:', err));
   }, [location.state]);
 
+  // Restore redeem screen after returning from CustomerEditor
+  useEffect(() => {
+    if (!location.state?.customerUpdated) return;
+    const raw = sessionStorage.getItem('pendingRedeemState');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingRedeemState');
+    const { customerId, customer: savedCustomer, ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt } = pending;
+    if (!customerId) return;
+    if (savedCustomer) setCustomer(savedCustomer);
+    setExistingRedeemData({ ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt });
+    setRedeemOpen(true);
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after redeem edit:', err));
+  }, [location.state]);
+
+  // Restore redeem screen after navigating back from Checkout
+  useEffect(() => {
+    if (!location.state?.returnToRedeem) return;
+    const raw = sessionStorage.getItem('pendingRedeemReturn');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingRedeemReturn');
+    const { customerId, customer: savedCustomer, ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt } = pending;
+    if (!customerId) return;
+    if (savedCustomer) setCustomer(savedCustomer);
+    setExistingRedeemData({ ticketId, selectedRedemptions, notes, ticketNote, showOnReceipt });
+    setRedeemOpen(true);
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after redeem checkout back:', err));
+  }, [location.state]);
+
   const handleCustomerSearch = async (query) => {
     setCustomerSearch(query);
     if (!query.trim()) { setCustomerResults([]); setShowResults(false); return; }
@@ -1033,6 +1196,9 @@ export default function ModernTransactions() {
   };
 
   const handleSelectCustomer = async (c) => {
+    const proceed = await confirmLeaveWorkspace();
+    if (!proceed) return;
+
     setCustomerStats(null);
     setCustomerSearch('');
     setCustomerResults([]);
@@ -1059,7 +1225,12 @@ export default function ModernTransactions() {
     }
   };
 
-  const handleClearCustomer = () => { setCustomer(null); setCustomerStats(null); };
+  const handleClearCustomer = async () => {
+    const proceed = await confirmLeaveWorkspace();
+    if (!proceed) return;
+    setCustomer(null);
+    setCustomerStats(null);
+  };
 
   const handleAddPawnToWorkspace = (pawnData) => {
     setWorkspaceTransactions(prev => {
@@ -1080,6 +1251,25 @@ export default function ModernTransactions() {
     setVoidConfirm(null);
   };
 
+  // Core park POST, shared by the "Park" button and the leave-workspace
+  // warning dialog's "Park" option. Does not touch customer/workspace state —
+  // callers decide what to reset after a successful park.
+  const parkWorkspace = async (targetCustomer, targetTransactions) => {
+    const u = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+    try {
+      await axios.post(`${config.apiUrl}/parked-workspaces`, {
+        customer_id: targetCustomer.id,
+        workspace_data: stripImages(targetTransactions),
+        parked_by_employee_id: u.id || null,
+      }, { headers });
+      window.dispatchEvent(new CustomEvent('parkedWorkspacesChanged'));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const handleParkTransaction = async () => {
     if (!customer) {
       setParkSnackbar({ severity: 'warning', message: 'Select a customer before parking.' });
@@ -1089,28 +1279,93 @@ export default function ModernTransactions() {
       setParkSnackbar({ severity: 'warning', message: 'Workspace is empty — nothing to park.' });
       return;
     }
-    const u = JSON.parse(localStorage.getItem('user') || '{}');
-    const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
-    try {
-      const res = await axios.post(`${config.apiUrl}/parked-workspaces`, {
-        customer_id: customer.id,
-        workspace_data: stripImages(workspaceTransactions),
-        parked_by_employee_id: u.id || null,
-      }, { headers });
+    const ok = await parkWorkspace(customer, workspaceTransactions);
+    if (ok) {
       setWorkspaceTransactions([]);
-      setCustomer(null);
-      window.dispatchEvent(new CustomEvent('parkedWorkspacesChanged'));
       setParkSnackbar({ severity: 'success', message: `Workspace parked for ${customer.first_name}. Any employee can resume it.` });
-    } catch {
+      setCustomer(null);
+    } else {
       setParkSnackbar({ severity: 'error', message: 'Failed to park workspace. Try again.' });
     }
   };
 
+  // ── Leave-workspace guard ──────────────────────────────────────────────────
+  // Anything sitting in the workspace that hasn't been explicitly Parked is
+  // considered "unsaved" — switching customers or navigating away (via the
+  // Sidebar) triggers this dialog instead of silently carrying it along or
+  // silently discarding it.
+  const [leaveWarningOpen, setLeaveWarningOpen] = useState(false);
+  const leaveResolveRef = useRef(null);
+
+  const confirmLeaveWorkspace = useCallback(() => {
+    if (workspaceTransactions.length === 0) return Promise.resolve(true);
+    return new Promise(resolve => {
+      leaveResolveRef.current = resolve;
+      setLeaveWarningOpen(true);
+    });
+  }, [workspaceTransactions.length]);
+
+  const resolveLeaveWarning = (proceed) => {
+    setLeaveWarningOpen(false);
+    const resolve = leaveResolveRef.current;
+    leaveResolveRef.current = null;
+    resolve?.(proceed);
+  };
+
+  const handleLeaveDelete = () => {
+    setWorkspaceTransactions([]);
+    setParkSnackbar({ severity: 'info', message: 'Workspace items discarded.' });
+    resolveLeaveWarning(true);
+  };
+
+  const handleLeaveReturn = () => resolveLeaveWarning(false);
+
+  const handleLeavePark = async () => {
+    if (!customer) {
+      setParkSnackbar({ severity: 'warning', message: 'Select a customer before parking.' });
+      resolveLeaveWarning(false);
+      return;
+    }
+    const ok = await parkWorkspace(customer, workspaceTransactions);
+    if (ok) {
+      setWorkspaceTransactions([]);
+      setParkSnackbar({ severity: 'success', message: `Workspace parked for ${customer.first_name}. Any employee can resume it.` });
+      resolveLeaveWarning(true);
+    } else {
+      setParkSnackbar({ severity: 'error', message: 'Failed to park workspace. Try again.' });
+      resolveLeaveWarning(false);
+    }
+  };
+
+  // Let the Sidebar (or anything else using WorkspaceGuardContext) ask
+  // permission before navigating away from this page.
+  useEffect(() => {
+    const unregister = registerGuard({
+      hasUnparkedWork: workspaceTransactions.length > 0,
+      confirmLeave: confirmLeaveWorkspace,
+    });
+    return unregister;
+  }, [registerGuard, workspaceTransactions.length, confirmLeaveWorkspace]);
+
 
   const handleCheckoutAll = () => {
     if (workspaceTransactions.length === 0) return;
-    const isQuickSale = !customer && workspaceTransactions.every(tx => tx.type === 'SALE');
-    if (!customer && !isQuickSale) return;
+    const isAllSale = workspaceTransactions.every(tx => tx.type === 'SALE');
+    const quickSaleTotal = isAllSale
+      ? workspaceTransactions.reduce((sum, tx) => sum + Number(tx.total || 0), 0)
+      : 0;
+    // A no-customer "quick sale" is only allowed under the configured limit —
+    // above it, require a real customer just like any other sale.
+    const isQuickSale = !customer && isAllSale && quickSaleTotal <= quickSaleMaxAmount;
+    if (!customer && !isQuickSale) {
+      if (isAllSale && quickSaleTotal > quickSaleMaxAmount) {
+        setParkSnackbar({
+          severity: 'warning',
+          message: `Quick sale total ($${quickSaleTotal.toFixed(2)}) exceeds the $${quickSaleMaxAmount.toFixed(2)} limit — select a customer to continue.`,
+        });
+      }
+      return;
+    }
     const u = JSON.parse(localStorage.getItem('user') || '{}');
 
     // For quick sale, cartCustomer is null — Checkout.js will create a walk-in customer in handleSubmit
@@ -1265,6 +1520,34 @@ export default function ModernTransactions() {
             };
           });
       }
+      if (tx.type === 'REDEEM') {
+        // One cart item per physical item in the pawn ticket — only the first
+        // item of each ticket carries the redemption price/principal (the
+        // rest price at 0), matching Checkout.js's redeem handling.
+        return (tx.selectedRedemptions || []).flatMap(p => {
+          const items = (p.items && p.items.length > 0) ? p.items : [{ item_id: null, description: p.description, location: null }];
+          return items.map((it, idx) => ({
+            id: `${tx.ticketId}_${p.ref}_${it.item_id || idx}_${Date.now()}`,
+            description: it.description || p.description,
+            long_desc: it.description || p.description,
+            short_desc: it.description || p.description,
+            price: idx === 0 ? (parseFloat(p.redeem_amount) || 0) : 0,
+            value: idx === 0 ? (parseFloat(p.redeem_amount) || 0) : 0,
+            transaction_type: 'redeem',
+            pawnTicketId: p.ref,
+            redeemTicketId: tx.ticketId,
+            item_id: it.item_id,
+            location: it.location,
+            principal: idx === 0 ? p.principal : 0,
+            interest: idx === 0 ? (parseFloat(p.interest_amount) || 0) + (parseFloat(p.insurance_amount) || 0) : 0,
+            totalRedemptionAmount: idx === 0 ? (parseFloat(p.redeem_amount) || 0) : 0,
+            ticket_note: tx.ticketNote || null,
+            show_on_receipt: tx.showOnReceipt,
+            customer: cartCustomer,
+            employee: employeeObj,
+          }));
+        });
+      }
       return [];
     });
 
@@ -1312,6 +1595,14 @@ export default function ModernTransactions() {
         color: PAYMENT_AMBER,
       };
     }
+    if (tx.type === 'REDEEM') {
+      const count = tx.selectedRedemptions?.length || 0;
+      return {
+        label: `Redeem (${count} pawn${count !== 1 ? 's' : ''})`,
+        value: `+$${Number(tx.totalRedeem || 0).toFixed(2)}`,
+        color: transactionTypes.find(t => t.type === 'redeem')?.color || REDEEM_ACCENT,
+      };
+    }
     return null;
   }).filter(Boolean);
 
@@ -1321,6 +1612,7 @@ export default function ModernTransactions() {
     if (tx.type === 'BUY')     return sum - Number(tx.totalPaid || 0);
     if (tx.type === 'TRADE')   return sum - Number(tx.netDueToCustomer || 0);
     if (tx.type === 'PAYMENT') return sum + Number(tx.totalPayment || 0);
+    if (tx.type === 'REDEEM')  return sum + Number(tx.totalRedeem || 0);
     return sum;
   }, 0);
 
@@ -1343,6 +1635,9 @@ export default function ModernTransactions() {
     } else if (type === 'payment') {
       if (!customer) { setNoCustomerWarning('payment ticket'); return; }
       setPaymentOpen(true);
+    } else if (type === 'redeem') {
+      if (!customer) { setNoCustomerWarning('redeem ticket'); return; }
+      setRedeemOpen(true);
     }
   };
 
@@ -1358,6 +1653,20 @@ export default function ModernTransactions() {
     });
     setPaymentOpen(false);
     setExistingPaymentData(null);
+  };
+
+  const handleAddRedeemToWorkspace = (redeemData) => {
+    setWorkspaceTransactions(prev => {
+      const existingIdx = prev.findIndex(t => t.type === 'REDEEM' && t.ticketId === redeemData.ticketId);
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx] = { ...updated[existingIdx], ...redeemData };
+        return updated;
+      }
+      return [...prev, { id: Date.now(), type: 'REDEEM', ...redeemData }];
+    });
+    setRedeemOpen(false);
+    setExistingRedeemData(null);
   };
 
   const handleAddBuyToWorkspace = (buyData) => {
@@ -1538,17 +1847,120 @@ export default function ModernTransactions() {
     }
   };
 
+  const handlePawnConvertTo = ({ type, item, targetTicketId, sourceTicketId }) => {
+    const removePawnItem = (t) => {
+      if (!(t.type === 'PAWN' && t.ticketId === sourceTicketId)) return t;
+      const newPawnItems = (t.pawnItems || []).filter(i => i.id !== item.id);
+      const newTotal = newPawnItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+      return { ...t, pawnItems: newPawnItems, totalPawnAmount: newTotal };
+    };
+
+    // Pawn items store jewelry fields flattened on the item itself (no nested
+    // jewelryData wrapper, unlike Buy/Trade items) — so a jewelry-sourced pawn
+    // item IS its own jewelryData once converted.
+    const jewelryData = item.jewelryData || (item.sourceEstimator === 'jewelry' ? item : undefined);
+
+    if (type === 'buy') {
+      const buyItem = {
+        _lineId: item.id,
+        part_no: item.part_number || '',
+        category_id: item.category_id || '',
+        category_name: item.category || '',
+        description: item.item || '',
+        serial_number: item.serial_number || item.serial || '',
+        qty: item.qty || 1,
+        paid: parseFloat(item.amount) || 0,
+        images: item.images || [],
+        sourceEstimator: item.sourceEstimator,
+        jewelryData,
+        ...(item.fromInventory && { fromInventory: true, item_id: item.item_id }),
+      };
+      setWorkspaceTransactions(prev => {
+        const withPawnUpdated = prev.map(removePawnItem);
+        if (targetTicketId) {
+          return withPawnUpdated.map(t => {
+            if (!(t.type === 'BUY' && t.ticketId === targetTicketId)) return t;
+            return { ...t, buyItems: [...(t.buyItems || []), buyItem] };
+          });
+        } else {
+          const last = parseInt(localStorage.getItem('lastBTTicketNumber') || '0') + 1;
+          localStorage.setItem('lastBTTicketNumber', last.toString());
+          const newTicketId = `BT-${last.toString().padStart(8, '0')}`;
+          return [
+            ...withPawnUpdated,
+            { id: Date.now(), type: 'BUY', ticketId: newTicketId, buyItems: [buyItem], customer },
+          ];
+        }
+      });
+    }
+
+    if (type === 'trade') {
+      const tradeAllowance = parseFloat(item.amount) || 0;
+      const qty = item.qty || 1;
+      const tradeItem = {
+        _lineId: item.id,
+        part_no: item.part_number || '',
+        category_id: item.category_id || '',
+        category_name: item.category || '',
+        description: item.item || '',
+        serial_number: item.serial_number || item.serial || '',
+        qty,
+        tradeAllowance,
+        images: item.images || [],
+        sourceEstimator: item.sourceEstimator,
+        jewelryData,
+        ...(item.fromInventory && { fromInventory: true, item_id: item.item_id }),
+      };
+      setWorkspaceTransactions(prev => {
+        const withPawnUpdated = prev.map(removePawnItem);
+        if (targetTicketId) {
+          return withPawnUpdated.map(t => {
+            if (!(t.type === 'TRADE' && t.ticketId === targetTicketId)) return t;
+            const newTradeItems = [...(t.tradeItems || []), tradeItem];
+            const newTotal = newTradeItems.reduce((s, i) => s + (parseFloat(i.tradeAllowance) || 0) * (parseInt(i.qty) || 1), 0);
+            return { ...t, tradeItems: newTradeItems, totalTradeAllowance: newTotal, netDueToCustomer: newTotal - (t.totalSaleAfterTax || 0) };
+          });
+        } else {
+          const last = parseInt(localStorage.getItem('lastTTTicketNumber') || '100000') + 1;
+          localStorage.setItem('lastTTTicketNumber', last.toString());
+          const newTicketId = `TT-${last}`;
+          return [
+            ...withPawnUpdated,
+            {
+              id: Date.now(), type: 'TRADE', ticketId: newTicketId,
+              tradeItems: [tradeItem], saleItems: [],
+              totalTradeAllowance: tradeAllowance * qty,
+              totalSaleAfterTax: 0,
+              netDueToCustomer: tradeAllowance * qty,
+              taxAmount: 0, taxRate: 0.07,
+              customer,
+            },
+          ];
+        }
+      });
+    }
+  };
+
   if (pawnOpen) {
     const existingPawnData = openingTxId
       ? workspaceTransactions.find(t => t.id === openingTxId)
       : restoredPawnData;
+    const workspaceBuyTickets = workspaceTransactions.filter(t => t.type === 'BUY');
     return (
       <PawnTransactionScreen
         customer={customer}
         customerStats={customerStats}
         onClose={() => { setPawnOpen(false); setOpeningTxId(null); setRestoredPawnData(null); }}
         onAddToWorkspace={(data) => { handleAddPawnToWorkspace(data); setRestoredPawnData(null); }}
+        onConvertTo={handlePawnConvertTo}
+        onRemoveFromWorkspace={(ticketId) => {
+          setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'PAWN' && t.ticketId === ticketId)));
+          setPawnOpen(false);
+          setOpeningTxId(null);
+          setRestoredPawnData(null);
+        }}
         existingPawnData={existingPawnData}
+        workspaceBuyTickets={workspaceBuyTickets}
       />
     );
   }
@@ -1565,6 +1977,7 @@ export default function ModernTransactions() {
           setSaleOpen(false);
           setExistingSaleData(null);
         }}
+        onSelectCustomer={handleSelectCustomer}
         existingSaleData={existingSaleData}
       />
     );
@@ -1628,6 +2041,18 @@ export default function ModernTransactions() {
         onClose={() => { setPaymentOpen(false); setExistingPaymentData(null); }}
         onAddToWorkspace={handleAddPaymentToWorkspace}
         existingPaymentData={existingPaymentData}
+      />
+    );
+  }
+
+  if (redeemOpen) {
+    return (
+      <RedeemTransactionScreen
+        customer={customer}
+        customerStats={customerStats}
+        onClose={() => { setRedeemOpen(false); setExistingRedeemData(null); }}
+        onAddToWorkspace={handleAddRedeemToWorkspace}
+        existingRedeemData={existingRedeemData}
       />
     );
   }
@@ -1851,23 +2276,123 @@ export default function ModernTransactions() {
         {/* ── MIDDLE: Transaction workspace ── */}
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, overflow: 'hidden', minWidth: 0 }}>
           {/* Workspace header */}
-          <Paper sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>TRANSACTION WORKSPACE</Typography>
-              <Badge badgeContent={workspaceTransactions.length} color="primary" sx={{ '& .MuiBadge-badge': { position: 'relative', transform: 'none', ml: 0.5 } }}>
-                <Box />
-              </Badge>
-              <Typography variant="caption" color="text.secondary">Add, edit or remove transactions before checkout.</Typography>
-            </Box>
-          </Paper>
+          {workspaceTransactions.length > 0 && (
+            <Paper sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>TRANSACTION WORKSPACE</Typography>
+                <Badge badgeContent={workspaceTransactions.length} color="primary" sx={{ '& .MuiBadge-badge': { position: 'relative', transform: 'none', ml: 0.5 } }}>
+                  <Box />
+                </Badge>
+                <Typography variant="caption" color="text.secondary">Add, edit or remove transactions before checkout.</Typography>
+              </Box>
+            </Paper>
+          )}
 
           {/* Transaction cards grid */}
           <Box sx={{ flex: 1, overflowY: 'auto' }}>
             {workspaceTransactions.length === 0 ? (
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 1.5, color: 'text.secondary' }}>
-                <MuiIcons.Receipt sx={{ fontSize: 48, opacity: 0.15 }} />
-                <Typography variant="body2" color="text.secondary">No transactions in workspace yet.</Typography>
-                <Typography variant="caption" color="text.secondary">Use the buttons below to start a pawn, sale, or other transaction.</Typography>
+              <Box sx={{ py: 1, position: 'relative' }}>
+                <Tooltip title="Choose which cards you see here">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => setCardPrefsAnchor(e.currentTarget)}
+                    sx={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}
+                  >
+                    <MuiIcons.Settings fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Menu anchorEl={cardPrefsAnchor} open={Boolean(cardPrefsAnchor)} onClose={() => setCardPrefsAnchor(null)}>
+                  <Box sx={{ px: 2, py: 1 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                      Show on this screen
+                    </Typography>
+                    <FormControlLabel
+                      control={<Checkbox size="small" checked={showMessagesCard} onChange={() => handleToggleCardPref('show_messages_card', showMessagesCard)} />}
+                      label={<Typography variant="body2">Messages</Typography>}
+                    />
+                    <FormControlLabel
+                      control={<Checkbox size="small" checked={showTasksCard} onChange={() => handleToggleCardPref('show_tasks_card', showTasksCard)} />}
+                      label={<Typography variant="body2">Tasks</Typography>}
+                    />
+                    <FormControlLabel
+                      control={<Checkbox size="small" checked={showLoansLayawaysCard} onChange={() => handleToggleCardPref('show_loans_layaways_card', showLoansLayawaysCard)} />}
+                      label={<Typography variant="body2">Loans/Layaways Due Today</Typography>}
+                    />
+                  </Box>
+                </Menu>
+
+                {!showMessagesCard && !showTasksCard && !showLoansLayawaysCard ? (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 6, gap: 1.5, color: 'text.secondary' }}>
+                    <MuiIcons.Receipt sx={{ fontSize: 48, opacity: 0.15 }} />
+                    <Typography variant="body2" color="text.secondary">No transactions in workspace yet.</Typography>
+                    <Typography variant="caption" color="text.secondary">Use the buttons below to start a pawn, sale, or other transaction.</Typography>
+                  </Box>
+                ) : (
+                  <Grid container spacing={{ md: 1.5, xl: 1 }}>
+                    {showMessagesCard && (
+                      <Grid item xs={12} md={4}>
+                        <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
+                          <Typography variant="h6" fontSize={15} gutterBottom>Messages</Typography>
+                          <List dense sx={{ p: 0 }}>
+                            {DASHBOARD_MESSAGES.map((msg, idx) => (
+                              <ListItem key={idx} divider={idx < DASHBOARD_MESSAGES.length - 1} sx={{ px: 0 }}>
+                                <ListItemText
+                                  primaryTypographyProps={{ fontSize: 12.5 }}
+                                  secondaryTypographyProps={{ fontSize: 11 }}
+                                  primary={`[${msg.type}] ${msg.text}`}
+                                  secondary={msg.type === 'announcement' ? 'Pinned' : ''}
+                                />
+                              </ListItem>
+                            ))}
+                          </List>
+                        </Paper>
+                      </Grid>
+                    )}
+                    {showTasksCard && (
+                      <Grid item xs={12} md={4}>
+                        <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
+                          <Typography variant="h6" fontSize={15} gutterBottom>Tasks</Typography>
+                          <List dense sx={{ p: 0 }}>
+                            {DASHBOARD_TASKS.map((task, idx) => (
+                              <ListItem key={idx} divider={idx < DASHBOARD_TASKS.length - 1} sx={{ px: 0 }}>
+                                <ListItemText primaryTypographyProps={{ fontSize: 12.5 }} primary={task} />
+                              </ListItem>
+                            ))}
+                          </List>
+                        </Paper>
+                      </Grid>
+                    )}
+                    {showLoansLayawaysCard && (
+                      <Grid item xs={12} md={4}>
+                        <Paper variant="outlined" sx={{ p: 2, minHeight: 220 }}>
+                          <Typography variant="h6" fontSize={15} gutterBottom>Loans/Layaways Due Today</Typography>
+                          <TableContainer>
+                            <Table size="small">
+                              <TableHead>
+                                <TableRow>
+                                  <TableCell sx={{ fontSize: 11 }}>ID</TableCell>
+                                  <TableCell sx={{ fontSize: 11 }}>Name</TableCell>
+                                  <TableCell sx={{ fontSize: 11 }}>Type</TableCell>
+                                  <TableCell sx={{ fontSize: 11 }}>Details</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {DASHBOARD_LOANS_LAYAWAYS_DUE_TODAY.map((item, idx) => (
+                                  <TableRow key={idx}>
+                                    <TableCell sx={{ fontSize: 12 }}>{item.id}</TableCell>
+                                    <TableCell sx={{ fontSize: 12 }}>{item.name}</TableCell>
+                                    <TableCell sx={{ fontSize: 12 }}>{item.type}</TableCell>
+                                    <TableCell sx={{ fontSize: 12 }}>{item.details}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </TableContainer>
+                        </Paper>
+                      </Grid>
+                    )}
+                  </Grid>
+                )}
               </Box>
             ) : (
               <Grid container spacing={{ md: 1.5, xl: 1 }}>
@@ -1909,6 +2434,14 @@ export default function ModernTransactions() {
                       <PaymentTransactionCard
                         tx={tx}
                         onOpen={() => { setExistingPaymentData(tx); setPaymentOpen(true); }}
+                        onVoid={() => setVoidConfirm(tx)}
+                      />
+                    ) : tx.type === 'REDEEM' ? (
+                      <RedeemTransactionCard
+                        tx={tx}
+                        redeemIcon={transactionTypes.find(t => t.type === 'redeem')?.icon}
+                        redeemColor={transactionTypes.find(t => t.type === 'redeem')?.color}
+                        onOpen={() => { setExistingRedeemData(tx); setRedeemOpen(true); }}
                         onVoid={() => setVoidConfirm(tx)}
                       />
                     ) : null}
@@ -2053,6 +2586,25 @@ export default function ModernTransactions() {
         <DialogActions>
           <Button onClick={() => setVoidConfirm(null)}>Cancel</Button>
           <Button variant="contained" color="error" onClick={handleConfirmVoid}>Void Ticket</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Leave-workspace warning: shown when switching customers or navigating
+          away while the workspace has unparked items ── */}
+      <Dialog open={leaveWarningOpen} onClose={handleLeaveReturn} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Open Ticket in Workspace</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            You have {workspaceTransactions.length} unsaved transaction{workspaceTransactions.length !== 1 ? 's' : ''} in the workspace.
+            Park it to save for later, delete it, or go back and finish it now.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 2.5, py: 1.5, gap: 1 }}>
+          <Button color="error" onClick={handleLeaveDelete}>Delete</Button>
+          <Button onClick={handleLeaveReturn}>Return to Workspace</Button>
+          <Button variant="contained" sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT } }} onClick={handleLeavePark}>
+            Park
+          </Button>
         </DialogActions>
       </Dialog>
 

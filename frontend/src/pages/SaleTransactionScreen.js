@@ -7,6 +7,7 @@ import {
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions,
   Tooltip, Snackbar, Alert, Stack, Menu, MenuItem,
+  TableContainer, Table, TableHead, TableBody, TableRow, TableCell,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
@@ -69,9 +70,8 @@ async function syncSaleTicketCounter() {
 // as a standalone sale ticket.
 export { generateSaleTicketId, commitSaleTicketId };
 
-function getCustomerImageUrl(customer) {
-  if (!customer?.image) return null;
-  const img = customer.image;
+function resolveImageValue(img) {
+  if (!img) return null;
   if (typeof img === 'object' && img.type === 'Buffer' && img.data) {
     const base64 = btoa(
       new Uint8Array(img.data).reduce((d, b) => d + String.fromCharCode(b), '')
@@ -79,7 +79,12 @@ function getCustomerImageUrl(customer) {
     return `data:image/jpeg;base64,${base64}`;
   }
   if (typeof img === 'string') return img;
+  if (img instanceof File || img instanceof Blob) return URL.createObjectURL(img);
   return null;
+}
+
+function getCustomerImageUrl(customer) {
+  return resolveImageValue(customer?.image);
 }
 
 function getItemImage(item) {
@@ -124,6 +129,7 @@ export default function SaleTransactionScreen({
   onClose,
   onAddToWorkspace,
   onRemoveFromWorkspace,
+  onSelectCustomer,
   existingSaleData,
 }) {
   const navigate = useNavigate();
@@ -153,6 +159,14 @@ export default function SaleTransactionScreen({
   const [custStats,      setCustStats]      = useState(customerStats || null);
   const [custSalesStats, setCustSalesStats] = useState(null);
 
+  // Customer picker (search + select — used when no customer is set yet, e.g. quick sale)
+  const [customerPickerOpen,       setCustomerPickerOpen]       = useState(false);
+  const [customerPickerForm,       setCustomerPickerForm]       = useState({ first_name: '', last_name: '', id_number: '', phone: '' });
+  const [customerPickerResults,    setCustomerPickerResults]    = useState([]);
+  const [customerPickerSearching,  setCustomerPickerSearching]  = useState(false);
+  const [customerResultsOpen,      setCustomerResultsOpen]      = useState(false);
+  const [selectedResultIdx,        setSelectedResultIdx]        = useState(null);
+
   // Discount
   const [discountDialog,    setDiscountDialog]    = useState(false);
   const [globalDiscount,    setGlobalDiscount]    = useState(existingSaleData?.globalDiscount || 0);
@@ -168,6 +182,7 @@ export default function SaleTransactionScreen({
   const [convertAnchor, setConvertAnchor] = useState(null);
   const [convertRow,    setConvertRow]    = useState(null);
   const [transactionTypes, setTransactionTypes] = useState([]);
+  const [quickSaleMaxAmount, setQuickSaleMaxAmount] = useState(100);
 
   // Sync counter with DB on first open (skip for restored workspace tickets
   // which already have a committed ID).
@@ -183,6 +198,12 @@ export default function SaleTransactionScreen({
   useEffect(() => {
     axios.get(`${config.apiUrl}/transaction-types`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
       .then(res => setTransactionTypes(res.data))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    axios.get(`${config.apiUrl}/quick-sale-config`)
+      .then(res => setQuickSaleMaxAmount(parseFloat(res.data?.max_amount) || 0))
       .catch(() => {});
   }, []);
 
@@ -375,6 +396,68 @@ export default function SaleTransactionScreen({
     });
   };
 
+  const handleCustomerPickerSearch = async () => {
+    const { first_name, last_name, id_number, phone } = customerPickerForm;
+    if (!first_name && !last_name && !id_number && !phone) {
+      showSnackbar('Please enter at least one search criteria', 'warning');
+      return;
+    }
+    setCustomerPickerSearching(true);
+    try {
+      const params = {};
+      if (first_name.trim()) params.first_name = first_name.trim();
+      if (last_name.trim())  params.last_name  = last_name.trim();
+      if (id_number.trim())  params.id_number  = id_number.trim();
+      if (phone.trim())      params.phone      = phone.trim();
+      const queryParams = new URLSearchParams(params).toString();
+      const response = await fetch(`${config.apiUrl}/customers/search?${queryParams}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      if (!response.ok) throw new Error('Failed to search customers');
+      const data = await response.json();
+      setCustomerPickerResults(data);
+      setSelectedResultIdx(data.length > 0 ? 0 : null);
+      if (data.length === 1) {
+        handleCustomerPickerSelect(data[0]);
+      } else {
+        setCustomerResultsOpen(true);
+      }
+    } catch (error) {
+      console.error('Error searching customers:', error);
+      showSnackbar(`Error: ${error.message}`, 'error');
+    } finally {
+      setCustomerPickerSearching(false);
+    }
+  };
+
+  const handleCustomerPickerSelect = (customerData) => {
+    onSelectCustomer?.(customerData);
+    setCustomerPickerOpen(false);
+    setCustomerResultsOpen(false);
+    setCustomerPickerForm({ first_name: '', last_name: '', id_number: '', phone: '' });
+    setCustomerPickerResults([]);
+    setSelectedResultIdx(null);
+  };
+
+  const handleRegisterNewCustomer = () => {
+    setCustomerResultsOpen(false);
+    sessionStorage.setItem('pendingSaleState', JSON.stringify({
+      customerId: customer?.id || null, customer, ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount,
+    }));
+    navigate('/customer-editor', {
+      state: {
+        mode: 'create',
+        returnTo: location.pathname,
+        prefillData: {
+          first_name: customerPickerForm.first_name || '',
+          last_name:  customerPickerForm.last_name  || '',
+          phone:      customerPickerForm.phone      || '',
+          id_number:  customerPickerForm.id_number  || '',
+        },
+      },
+    });
+  };
+
   const handleSaveAsQuote = async () => {
     if (!customer?.id) { showSnackbar('Please select a customer before saving as quote', 'error'); return; }
     if (saleItems.length === 0) { showSnackbar('Add at least one item to save as quote', 'warning'); return; }
@@ -424,6 +507,15 @@ export default function SaleTransactionScreen({
 
   const handleCheckoutNow = () => {
     if (saleItems.length === 0) { showSnackbar('Add at least one item to checkout', 'warning'); return; }
+    // A no-customer "quick sale" is only allowed under the configured limit —
+    // above it, a real customer must be selected, same as any other sale.
+    if (!customer && total > quickSaleMaxAmount) {
+      showSnackbar(
+        `Quick sale total ($${total.toFixed(2)}) exceeds the $${quickSaleMaxAmount.toFixed(2)} limit. Please select a customer to continue.`,
+        'warning'
+      );
+      return;
+    }
     const cartCustomer = customer
       ? { id: customer.id, first_name: customer.first_name, last_name: customer.last_name, name: `${customer.first_name} ${customer.last_name}`.trim(), phone: customer.phone || '', email: customer.email || '', tax_exempt: customer.tax_exempt || false }
       : { id: null, first_name: 'Walk-in', last_name: 'Customer', name: 'Walk-in Customer', phone: '', email: '' };
@@ -800,10 +892,174 @@ export default function SaleTransactionScreen({
                   <Typography fontSize={11} color="text.secondary" noWrap>{customer.phone}</Typography>
                 )}
               </Box>
-              <IconButton size="small" onClick={handleEditCustomer} disabled={!customer}>
+              <IconButton
+                size="small"
+                onClick={() => customer ? handleEditCustomer() : setCustomerPickerOpen(o => !o)}
+                title={customer ? 'Edit customer' : (customerPickerOpen ? 'Close search' : 'Select customer')}
+              >
                 <MuiIcons.Edit sx={{ fontSize: 15, color: GREEN }} />
               </IconButton>
             </Box>
+
+            {/* Inline customer search (no customer set yet, e.g. quick sale) */}
+            {customerPickerOpen && (
+              <Box sx={{ mb: 1.5, p: 1.5, bgcolor: '#f8f9fa', borderRadius: 1, border: '1px solid #e0e0e0' }}>
+                <Stack spacing={1}>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <TextField
+                      fullWidth size="small" label="First Name"
+                      value={customerPickerForm.first_name}
+                      onChange={e => setCustomerPickerForm(f => ({ ...f, first_name: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+                    />
+                    <TextField
+                      fullWidth size="small" label="Last Name"
+                      value={customerPickerForm.last_name}
+                      onChange={e => setCustomerPickerForm(f => ({ ...f, last_name: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+                    />
+                  </Box>
+                  <TextField
+                    fullWidth size="small" label="ID Number"
+                    value={customerPickerForm.id_number}
+                    onChange={e => setCustomerPickerForm(f => ({ ...f, id_number: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+                  />
+                  <TextField
+                    fullWidth size="small" label="Phone"
+                    value={customerPickerForm.phone}
+                    onChange={e => setCustomerPickerForm(f => ({ ...f, phone: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && handleCustomerPickerSearch()}
+                  />
+                  <Button
+                    fullWidth size="small" variant="outlined"
+                    onClick={handleCustomerPickerSearch}
+                    disabled={customerPickerSearching}
+                    sx={{ borderColor: GREEN, color: GREEN, '&:hover': { borderColor: GREEN_DARK, bgcolor: '#e8f5e9' } }}
+                  >
+                    {customerPickerSearching ? <CircularProgress size={16} /> : 'Search'}
+                  </Button>
+                </Stack>
+              </Box>
+            )}
+
+            {/* Customer search results popup */}
+            <Dialog
+              open={customerResultsOpen}
+              onClose={() => setCustomerResultsOpen(false)}
+              fullWidth
+              maxWidth={customerPickerResults.length > 0 ? 'md' : 'sm'}
+            >
+              <DialogTitle sx={{ fontWeight: 700 }}>
+                {customerPickerResults.length > 0 ? 'Search Results' : 'No Customers Found'}
+              </DialogTitle>
+              <DialogContent>
+                {customerPickerResults.length > 0 ? (
+                  <>
+                    <Box sx={{ display: 'flex', flexDirection: 'row', gap: 2, mb: 2 }}>
+                      {/* Left side — customer photo + ID image for the highlighted row */}
+                      <Box sx={{ width: 160, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+                        {selectedResultIdx !== null && customerPickerResults[selectedResultIdx] && (
+                          <>
+                            {resolveImageValue(customerPickerResults[selectedResultIdx].image) && (
+                              <Box
+                                component="img"
+                                src={resolveImageValue(customerPickerResults[selectedResultIdx].image)}
+                                alt="Customer"
+                                sx={{
+                                  width: 120, height: 120, objectFit: 'cover', borderRadius: 2,
+                                  border: `2px solid ${GREEN}`, boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                                }}
+                              />
+                            )}
+                            {resolveImageValue(customerPickerResults[selectedResultIdx].id_image_front) && (
+                              <Box
+                                component="img"
+                                src={resolveImageValue(customerPickerResults[selectedResultIdx].id_image_front)}
+                                alt="ID Front"
+                                sx={{
+                                  width: 120, height: 100, objectFit: 'cover', borderRadius: 2,
+                                  border: '2px solid #ff9800', boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                                }}
+                              />
+                            )}
+                            {!resolveImageValue(customerPickerResults[selectedResultIdx].image) &&
+                             !resolveImageValue(customerPickerResults[selectedResultIdx].id_image_front) && (
+                              <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', mt: 2 }}>
+                                No photo on file
+                              </Typography>
+                            )}
+                          </>
+                        )}
+                      </Box>
+
+                      {/* Right side — results table */}
+                      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300, flex: 1 }}>
+                        <Table size="small" stickyHeader>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Name</TableCell>
+                              <TableCell>DOB</TableCell>
+                              <TableCell>Phone</TableCell>
+                              <TableCell>ID</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {customerPickerResults.map((c, index) => (
+                              <TableRow
+                                key={c.id || index}
+                                hover
+                                selected={selectedResultIdx === index}
+                                sx={{ cursor: 'pointer' }}
+                                onClick={() => setSelectedResultIdx(index)}
+                                onDoubleClick={() => handleCustomerPickerSelect(c)}
+                              >
+                                <TableCell sx={{ whiteSpace: 'nowrap' }}>{c.first_name} {c.last_name}</TableCell>
+                                <TableCell>{c.date_of_birth ? c.date_of_birth.substring(0, 10) : ''}</TableCell>
+                                <TableCell>{c.phone || ''}</TableCell>
+                                <TableCell>{c.id_number || ''}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Box>
+
+                    <Box sx={{ position: 'relative', mt: 1 }}>
+                      {/* Centered Select button */}
+                      <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
+                        <Button
+                          variant="contained" size="small"
+                          disabled={selectedResultIdx === null}
+                          onClick={() => handleCustomerPickerSelect(customerPickerResults[selectedResultIdx])}
+                          sx={{ minWidth: 90, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_DARK } }}
+                        >
+                          Select
+                        </Button>
+                      </Box>
+                      {/* Right-aligned Register New Customer button */}
+                      <Box sx={{ position: 'absolute', right: 0, top: 0 }}>
+                        <Button variant="outlined" size="small" onClick={handleRegisterNewCustomer}>
+                          Register New Customer
+                        </Button>
+                      </Box>
+                    </Box>
+                  </>
+                ) : (
+                  <Box sx={{ p: 2, textAlign: 'center' }}>
+                    <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+                      No customers found matching your search criteria.
+                    </Typography>
+                    <Button variant="contained" onClick={handleRegisterNewCustomer} sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_DARK } }}>
+                      Register New Customer
+                    </Button>
+                  </Box>
+                )}
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setCustomerResultsOpen(false)}>Close</Button>
+              </DialogActions>
+            </Dialog>
 
             {/* Missing customer fields banner — same pattern as PawnTransactionScreen */}
             {customerValidationErrors.length > 0 && (

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Drawer,
   List,
@@ -11,6 +11,7 @@ import {
   IconButton,
 } from '@mui/material';
 import StorefrontIcon from '@mui/icons-material/Storefront';
+import { useWorkspaceGuard } from '../context/WorkspaceGuardContext';
 
 import {
   Dashboard as DashboardIcon,
@@ -75,6 +76,24 @@ function Sidebar() {
   const [layawayOpen, setLayawayOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(true);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { requestNavigation } = useWorkspaceGuard();
+
+  // Single capture handler for the whole menu instead of wrapping every
+  // <Link> individually — if the active page has registered an "unparked
+  // work" guard (see WorkspaceGuardContext), it gets a chance to confirm
+  // before the click's navigation actually happens.
+  const handleNavCapture = (e) => {
+    const anchor = e.target.closest('a');
+    if (!anchor) return;
+    const href = anchor.getAttribute('href');
+    if (!href) return;
+    e.preventDefault();
+    e.stopPropagation();
+    requestNavigation().then(proceed => {
+      if (proceed) navigate(href);
+    });
+  };
 
   const handleSystemConfigClick = () => {
     setSystemConfigOpen(!systemConfigOpen);
@@ -96,7 +115,7 @@ function Sidebar() {
 
   return (
     <StyledDrawer variant="permanent" open={isOpen}>
-      <List sx={{ mt: 8 }}>
+      <List sx={{ mt: 8 }} onClickCapture={handleNavCapture}>
         <ListItem>
           <IconButton
             onClick={handleDrawerToggle}
@@ -110,8 +129,17 @@ function Sidebar() {
           </IconButton>
         </ListItem>
 
+        <StyledLink to="/modern-transactions">
+          <StyledListItem active={isActive('/modern-transactions')}>
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+              <ModernTransactionsIcon />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Modern Transactions" />}
+          </StyledListItem>
+        </StyledLink>
+
         <StyledLink to="/">
-          <StyledListItem active={isActive('/')}> 
+          <StyledListItem active={isActive('/')}>
             <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
             <StorefrontIcon />
             </ListItemIcon>
@@ -143,15 +171,6 @@ function Sidebar() {
               <QuoteIcon />
             </ListItemIcon>
             {isOpen && <ListItemText primary="Quotes" />}
-          </StyledListItem>
-        </StyledLink>
-
-        <StyledLink to="/modern-transactions">
-          <StyledListItem active={isActive('/modern-transactions')}>
-            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
-              <ModernTransactionsIcon />
-            </ListItemIcon>
-            {isOpen && <ListItemText primary="Modern Transactions" />}
           </StyledListItem>
         </StyledLink>
 

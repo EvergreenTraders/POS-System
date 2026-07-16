@@ -94,7 +94,18 @@ function SystemConfig() {
   const { user } = useAuth();
   const location = useLocation();
   const isManagerOrOwner = user?.role === 'Store Manager' || user?.role === 'Store Owner';
+  // The developer account also needs to see submitted feedback, even though he/ she isn't a manager/owner.
+  const canViewFeedback = isManagerOrOwner || user?.role === 'Software Developer';
   const [activeTab, setActiveTab] = useState(location.state?.initialTab ?? 0);
+
+  // location.state only seeds activeTab on first mount; if SystemConfig is already
+  // mounted (e.g. navigating here again from the feedback alert's "View" button),
+  // react to it explicitly so the tab still switches.
+  useEffect(() => {
+    if (location.state?.initialTab != null) {
+      setActiveTab(location.state.initialTab);
+    }
+  }, [location.state?.initialTab]);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
@@ -232,6 +243,7 @@ function SystemConfig() {
     forfeiture_mode: 'manual',
     storage_fee: 10.00
   });
+  const [storageFeeConfig, setStorageFeeConfig] = useState({ method: 'size', rate_per_cubic_foot: 0 });
   const [caratConversion, setCaratConversion] = useState(null);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [isInventoryHoldPeriodEnabled, setIsInventoryHoldPeriodEnabled] = useState(false);
@@ -239,6 +251,7 @@ function SystemConfig() {
   const [diamondEstimates, setDiamondEstimates] = useState([]);
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
   const [parkedWorkspaceRetention, setParkedWorkspaceRetention] = useState({ hours: 24, id: null });
+  const [quickSaleConfig, setQuickSaleConfig] = useState({ max_amount: 100, id: null });
   const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
   const [drawers, setDrawers] = useState([]);
   const [numberOfSafeDrawers, setNumberOfSafeDrawers] = useState({ count: 0, id: null });
@@ -434,6 +447,11 @@ function SystemConfig() {
     'YT': { gst: 5, pst: 0, hst: 0 }   // Yukon
   });
   const [selectedProvince, setSelectedProvince] = useState('ON');
+  const [tradeTaxable, setTradeTaxable] = useState(true);
+
+  // Feedback (submitted by staff via the Navbar feedback icon)
+  const [feedbackList, setFeedbackList] = useState([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
 
   // Linked Account Authorization Template state (one for each link type)
   const [authorizationTemplates, setAuthorizationTemplates] = useState({
@@ -712,6 +730,21 @@ function SystemConfig() {
       }
     };
 
+    const fetchQuickSaleConfig = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/quick-sale-config`);
+        if (response.data) {
+          setQuickSaleConfig({
+            max_amount: parseFloat(response.data.max_amount) ?? 100,
+            id: response.data.id || null
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching quick sale config:', error);
+        setQuickSaleConfig({ max_amount: 100, id: null });
+      }
+    };
+
     const fetchTaxConfig = async () => {
       try {
         const response = await axios.get(`${API_BASE_URL}/tax-config`);
@@ -732,6 +765,13 @@ function SystemConfig() {
         }
       } catch (error) {
         console.error('Error fetching tax configuration:', error);
+      }
+
+      try {
+        const tradeTaxResponse = await axios.get(`${API_BASE_URL}/trade-tax-config`);
+        setTradeTaxable(tradeTaxResponse.data?.taxable !== false);
+      } catch (error) {
+        console.error('Error fetching trade tax configuration:', error);
       }
     };
 
@@ -789,6 +829,20 @@ function SystemConfig() {
       }
     };
 
+    const fetchStorageFeeConfig = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/storage-fee-config`);
+        if (response.data) {
+          setStorageFeeConfig({
+            method: response.data.method === 'cubic_feet' ? 'cubic_feet' : 'size',
+            rate_per_cubic_foot: parseFloat(response.data.rate_per_cubic_foot) || 0,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching storage fee config:', error);
+      }
+    };
+
     // Fetch data on component mount
     fetchCustomerHeaderPreferences();
     fetchTransactionTypes();
@@ -801,6 +855,7 @@ function SystemConfig() {
     fetchCaratConversion();
     fetchInventoryHoldPeriod();
     fetchParkedWorkspaceRetention();
+    fetchQuickSaleConfig();
     fetchDrawerConfig();
     fetchDrawers();
     fetchCasesConfig();
@@ -812,10 +867,34 @@ function SystemConfig() {
     fetchReceiptConfig();
     fetchPettyCashExpenses();
     fetchPawnConfig();
+    fetchStorageFeeConfig();
     fetchBankAccounts();
     fetchBusinessHours();
+    if (canViewFeedback) fetchFeedback();
     axios.get(`${API_BASE_URL}/stores/current`).then(res => setCurrentStoreId(res.data.store_id)).catch(() => {});
   }, []);
+
+  const fetchFeedback = async () => {
+    setFeedbackLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/feedback`);
+      setFeedbackList(response.data || []);
+    } catch (error) {
+      console.error('Error fetching feedback:', error);
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
+
+  const handleUpdateFeedbackStatus = async (id, status) => {
+    setFeedbackList(prev => prev.map(f => f.id === id ? { ...f, status } : f));
+    try {
+      await axios.put(`${API_BASE_URL}/feedback/${id}/status`, { status });
+    } catch (error) {
+      console.error('Error updating feedback status:', error);
+      fetchFeedback();
+    }
+  };
 
   const fetchBusinessHours = async () => {
     try {
@@ -1033,6 +1112,9 @@ function SystemConfig() {
       discrepancyThreshold: overrideField === 'discrepancy_threshold' ? overrideValue : (employee.discrepancy_threshold != null ? employee.discrepancy_threshold : null),
       employmentType: overrideField === 'employment_type' ? overrideValue : (employee.employment_type || 'hourly'),
       canResumeParkedWorkspaces: get('can_resume_parked_workspaces', true),
+      showMessagesCard: get('show_messages_card', true),
+      showTasksCard: get('show_tasks_card', true),
+      showLoansLayawaysCard: get('show_loans_layaways_card', true),
     };
   };
 
@@ -1702,6 +1784,42 @@ const handleTabChange = (event, newValue) => {
     }
   };
 
+  const handleQuickSaleConfigChange = async (event) => {
+    const newMax = parseFloat(event.target.value);
+    if (isNaN(newMax) || newMax < 0) {
+      setSnackbar({
+        open: true,
+        message: 'Quick sale max amount must be a number >= 0',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.put(`${API_BASE_URL}/quick-sale-config`, {
+        max_amount: newMax
+      });
+
+      setQuickSaleConfig({
+        max_amount: parseFloat(response.data.max_amount),
+        id: response.data.id
+      });
+
+      setSnackbar({
+        open: true,
+        message: `Quick sale limit set to $${newMax.toFixed(2)}.`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating quick sale config:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update quick sale configuration',
+        severity: 'error'
+      });
+    }
+  };
+
   const handlePawnConfigChange = async (field, value) => {
     // Update state
     const updatedConfig = {
@@ -1732,6 +1850,30 @@ const handleTabChange = (event, newValue) => {
       setSnackbar({
         open: true,
         message: 'Failed to save pawn configuration',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleStorageFeeConfigChange = async (field, value) => {
+    const updatedConfig = { ...storageFeeConfig, [field]: value };
+    setStorageFeeConfig(updatedConfig);
+
+    try {
+      await axios.put(`${API_BASE_URL}/storage-fee-config`, {
+        method: updatedConfig.method,
+        rate_per_cubic_foot: parseFloat(updatedConfig.rate_per_cubic_foot) || 0,
+      });
+      setSnackbar({
+        open: true,
+        message: 'Storage fee configuration saved',
+        severity: 'success',
+      });
+    } catch (error) {
+      console.error('Error saving storage fee config:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save storage fee configuration',
         severity: 'error',
       });
     }
@@ -2199,6 +2341,22 @@ const handleTabChange = (event, newValue) => {
       setSnackbar({
         open: true,
         message: 'Failed to save tax configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleToggleTradeTaxable = async () => {
+    const nextValue = !tradeTaxable;
+    setTradeTaxable(nextValue);
+    try {
+      await axios.put(`${API_BASE_URL}/trade-tax-config`, { taxable: nextValue });
+    } catch (error) {
+      console.error('Error updating trade tax configuration:', error);
+      setTradeTaxable(!nextValue);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update trade tax configuration',
         severity: 'error'
       });
     }
@@ -2750,14 +2908,15 @@ const handleTabChange = (event, newValue) => {
     <Container>
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
         <Tabs value={activeTab} onChange={handleTabChange} variant="scrollable" scrollButtons="auto">
-          <Tab label="General" />
-          <Tab label="Pawn Configuration" />
-          <Tab label="Tax Configuration" />
-          <Tab label="Pricing Calculator" />
-          <Tab label="Account Authorization" />
-          <Tab label="Item Attributes" />
-          <Tab label="Quotes" />
-          {isManagerOrOwner && <Tab label="Employee Configuration" />}
+          <Tab label="General" value={0} />
+          <Tab label="Pawn Configuration" value={1} />
+          <Tab label="Tax Configuration" value={2} />
+          <Tab label="Pricing Calculator" value={3} />
+          <Tab label="Account Authorization" value={4} />
+          <Tab label="Item Attributes" value={5} />
+          <Tab label="Quotes" value={6} />
+          {isManagerOrOwner && <Tab label="Employee Configuration" value={7} />}
+          {canViewFeedback && <Tab label="Feedback" value={8} />}
         </Tabs>
       </Box>
 
@@ -4022,6 +4181,29 @@ const handleTabChange = (event, newValue) => {
             </Grid>
           </ConfigSection>
 
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Quick Sale Limit
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={4}>
+                <TextField
+                  label="Max Quick Sale Amount"
+                  type="number"
+                  value={quickSaleConfig.max_amount}
+                  onChange={(e) => setQuickSaleConfig(prev => ({ ...prev, max_amount: e.target.value }))}
+                  onBlur={(e) => handleQuickSaleConfigChange(e)}
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                  }}
+                  inputProps={{ min: 0, step: 0.01 }}
+                  helperText="Above this total, a quick sale (no customer selected) requires selecting a real customer, like a normal sale"
+                  fullWidth
+                />
+              </Grid>
+            </Grid>
+          </ConfigSection>
+
           {/* Storage Cases Configuration */}
           <ConfigSection>
             <Box sx={{ mt: 1 }}>
@@ -4541,6 +4723,41 @@ const handleTabChange = (event, newValue) => {
               </Grid>
             </Grid>
           </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Storage Fee Method
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={storageFeeConfig.method === 'cubic_feet' ? 6 : 12}>
+                <TextField
+                  select
+                  label="Storage Fee Input"
+                  value={storageFeeConfig.method}
+                  onChange={(e) => handleStorageFeeConfigChange('method', e.target.value)}
+                  fullWidth
+                  helperText="How storage fee is entered when adding a pawn item"
+                >
+                  <MenuItem value="size">By Size (Small, Medium, Large, Oversize)</MenuItem>
+                  <MenuItem value="cubic_feet">By Cubic Feet</MenuItem>
+                </TextField>
+              </Grid>
+              {storageFeeConfig.method === 'cubic_feet' && (
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    label="Rate per Cubic Foot ($)"
+                    type="number"
+                    value={storageFeeConfig.rate_per_cubic_foot}
+                    onChange={(e) => setStorageFeeConfig(prev => ({ ...prev, rate_per_cubic_foot: e.target.value }))}
+                    onBlur={(e) => handleStorageFeeConfigChange('rate_per_cubic_foot', e.target.value)}
+                    fullWidth
+                    inputProps={{ min: 0, step: 0.01 }}
+                    helperText="Storage fee = cubic feet entered × this rate"
+                  />
+                </Grid>
+              )}
+            </Grid>
+          </ConfigSection>
         </StyledPaper>
       </TabPanel>
 
@@ -4587,6 +4804,25 @@ const handleTabChange = (event, newValue) => {
                   </FormControl>
                 </Grid>
               </Grid>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+              <Typography variant="body2" fontWeight="bold" gutterBottom>
+                Taxable Transaction Types
+              </Typography>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={tradeTaxable}
+                    onChange={handleToggleTradeTaxable}
+                    color="primary"
+                  />
+                }
+                label={<Typography variant="body2">Apply tax to Trade transactions</Typography>}
+              />
+              <Typography variant="caption" color="textSecondary" display="block">
+                When off, Trade tickets are not taxed regardless of the provincial rates below.
+              </Typography>
             </Paper>
 
             <TableContainer component={Paper} sx={{ mt: 1 }}>
@@ -5241,6 +5477,7 @@ const handleTabChange = (event, newValue) => {
                       <TableCell align="center">Petty Cash</TableCell>
                       <TableCell align="center">Petty Cash Limit</TableCell>
                       <TableCell align="center">Resume Parked Workspaces</TableCell>
+                      <TableCell align="center">Workspace Cards</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -5401,6 +5638,89 @@ const handleTabChange = (event, newValue) => {
                             color="primary"
                             size="small"
                           />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr' }}>
+                            <FormControlLabel
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.show_messages_card !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'show_messages_card', emp.show_messages_card !== false)} />}
+                              label={<Typography variant="caption">Messages</Typography>}
+                              sx={{ m: 0 }}
+                            />
+                            <FormControlLabel
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.show_tasks_card !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'show_tasks_card', emp.show_tasks_card !== false)} />}
+                              label={<Typography variant="caption">Tasks</Typography>}
+                              sx={{ m: 0 }}
+                            />
+                            <FormControlLabel
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.show_loans_layaways_card !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'show_loans_layaways_card', emp.show_loans_layaways_card !== false)} />}
+                              label={<Typography variant="caption">Loans/Layaways</Typography>}
+                              sx={{ m: 0 }}
+                            />
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </ConfigSection>
+        </StyledPaper>
+      </TabPanel>}
+
+      {canViewFeedback && <TabPanel value={activeTab} index={8}>
+        <StyledPaper elevation={2}>
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Feedback
+            </Typography>
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+              Submitted by staff testing the software via the feedback icon in the top navigation bar.
+            </Typography>
+            {feedbackLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress size={28} />
+              </Box>
+            ) : feedbackList.length === 0 ? (
+              <Typography variant="body2" color="textSecondary" sx={{ py: 4, textAlign: 'center' }}>
+                No feedback submitted yet.
+              </Typography>
+            ) : (
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell><strong>Date</strong></TableCell>
+                      <TableCell><strong>From</strong></TableCell>
+                      <TableCell><strong>Message</strong></TableCell>
+                      <TableCell align="center"><strong>Status</strong></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {feedbackList.map((fb) => (
+                      <TableRow key={fb.id}>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          {new Date(fb.created_at).toLocaleString()}
+                        </TableCell>
+                        <TableCell>{fb.employee_name || 'Unknown'}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'pre-wrap', maxWidth: 400 }}>{fb.message}</TableCell>
+                        <TableCell align="center">
+                          <FormControl size="small" sx={{ minWidth: 130 }}>
+                            <Select
+                              value={fb.status}
+                              onChange={(e) => handleUpdateFeedbackStatus(fb.id, e.target.value)}
+                            >
+                              <MenuItem value="new">
+                                <Chip label="New" size="small" color="warning" />
+                              </MenuItem>
+                              <MenuItem value="reviewed">
+                                <Chip label="Reviewed" size="small" color="info" />
+                              </MenuItem>
+                              <MenuItem value="implemented">
+                                <Chip label="Implemented" size="small" color="success" />
+                              </MenuItem>
+                            </Select>
+                          </FormControl>
                         </TableCell>
                       </TableRow>
                     ))}

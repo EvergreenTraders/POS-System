@@ -4,6 +4,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import {
   Box, Alert, Button, Dialog, DialogTitle, DialogContent, DialogActions,
   Typography, FormControlLabel, Checkbox, CircularProgress,
+  List, ListItem, ListItemAvatar, Avatar, ListItemText,
 } from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
 import axios from 'axios';
@@ -12,8 +13,10 @@ import { CartProvider } from './context/CartContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WorkingDateProvider } from './context/WorkingDateContext';
 import { StoreStatusProvider, useStoreStatus } from './context/StoreStatusContext';
+import { WorkspaceGuardProvider } from './context/WorkspaceGuardContext';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
+import CloseStoreIssuesDialog from './components/CloseStoreIssuesDialog';
 import Login from './components/Login';
 import Dashboard from './pages/Dashboard';
 import Home from './pages/Home';
@@ -95,8 +98,14 @@ const AuthenticatedLayout = ({ children }) => {
   const [closeStoreDialogOpen, setCloseStoreDialogOpen] = React.useState(false);
   const [closeStoreLoading, setCloseStoreLoading] = React.useState(false);
   const [clockedInEmployees, setClockedInEmployees] = React.useState([]);
+  const [clockingOutId, setClockingOutId] = React.useState(null);
   const [isBackupComputer, setIsBackupComputer] = React.useState(false);
   const [closeStoreError, setCloseStoreError] = React.useState('');
+  const [closeStoreIssuesOpen, setCloseStoreIssuesOpen] = React.useState(false);
+  const [closeStoreIssues, setCloseStoreIssues] = React.useState([]);
+  const [closeStoreIssuesMessage, setCloseStoreIssuesMessage] = React.useState('');
+  const [parkedWorkspaces, setParkedWorkspaces] = React.useState([]);
+  const [deletingParkedId, setDeletingParkedId] = React.useState(null);
 
   const { isStoreClosed, isPastBusinessHours, todayHours, refreshStatus } = useStoreStatus();
 
@@ -147,18 +156,80 @@ const AuthenticatedLayout = ({ children }) => {
     setCloseStoreError('');
     setCloseStoreLoading(true);
     try {
-      await axios.get(`${config.apiUrl}/store-sessions/check-open-drawers`);
-      const clockedInResponse = await axios.get(`${config.apiUrl}/employee-sessions/clocked-in`);
-      setClockedInEmployees(clockedInResponse.data || []);
-      if (clockedInResponse.data && clockedInResponse.data.length > 0) {
+      const token = localStorage.getItem('token');
+      const [drawersResult, clockedInResult, parkedResult] = await Promise.allSettled([
+        axios.get(`${config.apiUrl}/store-sessions/check-open-drawers`),
+        axios.get(`${config.apiUrl}/employee-sessions/clocked-in`),
+        axios.get(`${config.apiUrl}/parked-workspaces`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      const clockedInList = clockedInResult.status === 'fulfilled' ? (clockedInResult.value.data || []) : [];
+      setClockedInEmployees(clockedInList);
+      const freshParked = parkedResult.status === 'fulfilled' ? (parkedResult.value.data || []) : [];
+      setParkedWorkspaces(freshParked);
+
+      if (drawersResult.status === 'rejected') {
+        const err = drawersResult.reason;
+        setCloseStoreIssuesMessage(err.response?.data?.error || 'Failed to check store closure prerequisites');
+        setCloseStoreIssues(err.response?.data?.openDrawers || []);
+        setCloseStoreIssuesOpen(true);
+        return;
+      }
+
+      if (clockedInList.length > 0) {
         await axios.post(`${config.apiUrl}/employee-sessions/notify-closing`);
       }
+
+      if (freshParked.length > 0) {
+        setCloseStoreIssuesMessage('');
+        setCloseStoreIssues([]);
+        setCloseStoreIssuesOpen(true);
+        return;
+      }
+
       setIsBackupComputer(false);
       setCloseStoreDialogOpen(true);
-    } catch (err) {
-      setCloseStoreError(err.response?.data?.error || 'Failed to check store closure prerequisites');
     } finally {
       setCloseStoreLoading(false);
+    }
+  };
+
+  const handleClockOutEmployee = async (emp) => {
+    setClockingOutId(emp.session_id);
+    try {
+      await axios.post(`${config.apiUrl}/employee-sessions/clock-out`, { employee_id: emp.employee_id });
+      setClockedInEmployees(prev => prev.filter(e => e.session_id !== emp.session_id));
+    } catch (err) {
+      setCloseStoreError(err.response?.data?.error || 'Failed to clock out employee');
+    } finally {
+      setClockingOutId(null);
+    }
+  };
+
+  const handleDeleteParkedWorkspace = async (pw) => {
+    setDeletingParkedId(pw.id);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`${config.apiUrl}/parked-workspaces/${pw.id}`, { headers: { Authorization: `Bearer ${token}` } });
+      setParkedWorkspaces(prev => prev.filter(p => p.id !== pw.id));
+      window.dispatchEvent(new CustomEvent('parkedWorkspacesChanged'));
+    } catch {
+      // non-critical
+    } finally {
+      setDeletingParkedId(null);
+    }
+  };
+
+  const handleKeepParkedWorkspacesOnClose = () => {
+    setCloseStoreIssuesOpen(false);
+    setIsBackupComputer(false);
+    setCloseStoreDialogOpen(true);
+  };
+
+  const handleCloseStoreIssuesDismiss = () => {
+    if (closeStoreIssues.length === 0) {
+      handleKeepParkedWorkspacesOnClose();
+    } else {
+      setCloseStoreIssuesOpen(false);
     }
   };
 
@@ -245,16 +316,47 @@ const AuthenticatedLayout = ({ children }) => {
             <Typography component="li" variant="body2">All pending transactions are complete</Typography>
           </Box>
           {clockedInEmployees.length > 0 && (
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
-                Currently Clocked-In Employees ({clockedInEmployees.length}):
-              </Typography>
-              {clockedInEmployees.map((emp) => (
-                <Typography key={emp.session_id} variant="body2">
-                  {emp.employee_name} - {emp.role} (since {new Date(emp.clock_in_time).toLocaleTimeString()})
+            <Box sx={{ mb: 2 }}>
+              <Alert severity="warning" sx={{ mb: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                  Currently Clocked-In Employees ({clockedInEmployees.length}):
                 </Typography>
-              ))}
-            </Alert>
+              </Alert>
+              <List dense sx={{ pt: 0 }}>
+                {clockedInEmployees.map((emp) => (
+                  <ListItem
+                    key={emp.session_id}
+                    disableGutters
+                    secondaryAction={
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="warning"
+                        disabled={clockingOutId === emp.session_id}
+                        startIcon={clockingOutId === emp.session_id ? <CircularProgress size={14} /> : null}
+                        onClick={() => handleClockOutEmployee(emp)}
+                      >
+                        Clock Out
+                      </Button>
+                    }
+                  >
+                    <ListItemAvatar>
+                      <Avatar
+                        src={emp.image ? `data:image/jpeg;base64,${emp.image}` : undefined}
+                        sx={{ width: 32, height: 32 }}
+                      >
+                        {!emp.image && (emp.first_name ? emp.first_name[0].toUpperCase() : '?')}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={emp.employee_name}
+                      secondary={`${emp.role} - since ${new Date(emp.clock_in_time).toLocaleTimeString()}`}
+                      sx={{ pr: 10 }}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
           )}
           {closeStoreError && (
             <Alert severity="error" sx={{ mb: 2 }}>{closeStoreError}</Alert>
@@ -287,6 +389,20 @@ const AuthenticatedLayout = ({ children }) => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <CloseStoreIssuesDialog
+        open={closeStoreIssuesOpen}
+        onClose={handleCloseStoreIssuesDismiss}
+        message={closeStoreIssuesMessage}
+        issues={closeStoreIssues}
+        clockedInEmployees={clockedInEmployees}
+        onClockOut={handleClockOutEmployee}
+        clockingOutId={clockingOutId}
+        parkedWorkspaces={parkedWorkspaces}
+        onDeleteParkedWorkspace={handleDeleteParkedWorkspace}
+        deletingParkedId={deletingParkedId}
+        onKeepParkedWorkspaces={handleKeepParkedWorkspacesOnClose}
+      />
     </Box>
   );
 };
@@ -300,6 +416,7 @@ function App() {
           <WorkingDateProvider>
             <StoreStatusProvider>
             <CartProvider>
+            <WorkspaceGuardProvider>
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route
@@ -702,6 +819,7 @@ function App() {
               />
               <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
+            </WorkspaceGuardProvider>
             </CartProvider>
             </StoreStatusProvider>
           </WorkingDateProvider>
