@@ -15,6 +15,7 @@ import { StoreStatusProvider, useStoreStatus } from './context/StoreStatusContex
 import { WorkspaceGuardProvider } from './context/WorkspaceGuardContext';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
+import CloseStoreIssuesDialog from './components/CloseStoreIssuesDialog';
 import Login from './components/Login';
 import Dashboard from './pages/Dashboard';
 import Home from './pages/Home';
@@ -98,6 +99,9 @@ const AuthenticatedLayout = ({ children }) => {
   const [clockedInEmployees, setClockedInEmployees] = React.useState([]);
   const [isBackupComputer, setIsBackupComputer] = React.useState(false);
   const [closeStoreError, setCloseStoreError] = React.useState('');
+  const [closeStoreIssuesOpen, setCloseStoreIssuesOpen] = React.useState(false);
+  const [closeStoreIssues, setCloseStoreIssues] = React.useState([]);
+  const [closeStoreIssuesMessage, setCloseStoreIssuesMessage] = React.useState('');
 
   const { isStoreClosed, isPastBusinessHours, todayHours, refreshStatus } = useStoreStatus();
 
@@ -157,7 +161,9 @@ const AuthenticatedLayout = ({ children }) => {
       setIsBackupComputer(false);
       setCloseStoreDialogOpen(true);
     } catch (err) {
-      setCloseStoreError(err.response?.data?.error || 'Failed to check store closure prerequisites');
+      setCloseStoreIssuesMessage(err.response?.data?.error || 'Failed to check store closure prerequisites');
+      setCloseStoreIssues(err.response?.data?.openDrawers || []);
+      setCloseStoreIssuesOpen(true);
     } finally {
       setCloseStoreLoading(false);
     }
@@ -288,6 +294,13 @@ const AuthenticatedLayout = ({ children }) => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <CloseStoreIssuesDialog
+        open={closeStoreIssuesOpen}
+        onClose={() => setCloseStoreIssuesOpen(false)}
+        message={closeStoreIssuesMessage}
+        issues={closeStoreIssues}
+      />
     </Box>
   );
 };

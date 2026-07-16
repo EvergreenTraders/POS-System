@@ -45,6 +45,7 @@ import { useWorkingDate } from '../context/WorkingDateContext';
 import { useStoreStatus } from '../context/StoreStatusContext';
 import { useNavigate } from 'react-router-dom';
 import Cart from './Cart';
+import CloseStoreIssuesDialog from './CloseStoreIssuesDialog';
 import config from '../config';
 
 const StyledAppBar = styled(AppBar)({
@@ -78,6 +79,10 @@ function Navbar() {
   const [storeActionError, setStoreActionError] = useState('');
   const [closeStoreClockedIn, setCloseStoreClockedIn] = useState([]);
   const [isBackupComputer, setIsBackupComputer] = useState(false);
+  const [parkedWorkspacesWarningOpen, setParkedWorkspacesWarningOpen] = useState(false);
+  const [closeStoreIssuesOpen, setCloseStoreIssuesOpen] = useState(false);
+  const [closeStoreIssues, setCloseStoreIssues] = useState([]);
+  const [closeStoreIssuesMessage, setCloseStoreIssuesMessage] = useState('');
   const navigate = useNavigate();
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
@@ -160,7 +165,7 @@ function Navbar() {
   }, [user]);
 
   const fetchParkedWorkspaces = async () => {
-    if (!user) return;
+    if (!user) return [];
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(`${config.apiUrl}/parked-workspaces`, {
@@ -168,11 +173,14 @@ function Navbar() {
       });
       if (res.ok) {
         const data = await res.json();
-        setParkedWorkspaces(Array.isArray(data) ? data : []);
+        const list = Array.isArray(data) ? data : [];
+        setParkedWorkspaces(list);
+        return list;
       }
     } catch {
       // non-critical
     }
+    return [];
   };
 
   useEffect(() => {
@@ -448,8 +456,9 @@ function Navbar() {
         setIsBackupComputer(false);
         setCloseStoreDialogOpen(true);
       } catch (err) {
-        setStoreActionError(err.response?.data?.error || 'Failed to check store closure prerequisites');
-        setCloseStoreDialogOpen(true);
+        setCloseStoreIssuesMessage(err.response?.data?.error || 'Failed to check store closure prerequisites');
+        setCloseStoreIssues(err.response?.data?.openDrawers || []);
+        setCloseStoreIssuesOpen(true);
       } finally {
         setStoreActionLoading(false);
       }
@@ -474,31 +483,53 @@ function Navbar() {
     }
   };
 
-  const handleCloseStoreConfirm = async () => {
+  const performCloseStore = async () => {
     setStoreActionLoading(true);
     try {
       await axios.post(`${config.apiUrl}/store-sessions/close`, {
         employee_id: user?.id || user?.employee_id,
       });
-      // Clear all parked workspaces at end of day
-      try {
-        const token = localStorage.getItem('token');
-        await fetch(`${config.apiUrl}/parked-workspaces`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setParkedWorkspaces([]);
-      } catch {
-        // non-critical — store still closes successfully
-      }
       await refreshStatus();
       window.dispatchEvent(new Event('storeStatusChanged'));
       setCloseStoreDialogOpen(false);
+      setParkedWorkspacesWarningOpen(false);
     } catch (err) {
       setStoreActionError(err.response?.data?.error || 'Failed to close store');
+      setParkedWorkspacesWarningOpen(false);
+      setCloseStoreDialogOpen(true);
     } finally {
       setStoreActionLoading(false);
     }
+  };
+
+  const handleCloseStoreConfirm = async () => {
+    setStoreActionLoading(true);
+    const freshParked = await fetchParkedWorkspaces();
+    setStoreActionLoading(false);
+    if (freshParked.length > 0) {
+      setCloseStoreDialogOpen(false);
+      setParkedWorkspacesWarningOpen(true);
+      return;
+    }
+    await performCloseStore();
+  };
+
+  const handleDeleteParkedWorkspacesOnClose = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      await fetch(`${config.apiUrl}/parked-workspaces`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setParkedWorkspaces([]);
+    } catch {
+      // non-critical — proceed with closing anyway
+    }
+    await performCloseStore();
+  };
+
+  const handleKeepParkedWorkspacesOnClose = async () => {
+    await performCloseStore();
   };
 
   return (
@@ -944,6 +975,23 @@ function Navbar() {
         </DialogActions>
       </Dialog>
 
+      {/* Parked Workspaces on Store Close Warning */}
+      <Dialog open={parkedWorkspacesWarningOpen} onClose={handleKeepParkedWorkspacesOnClose} maxWidth="xs" fullWidth>
+        <DialogTitle>Parked Tickets Found</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 1 }}>
+            There {parkedWorkspaces.length === 1 ? 'is' : 'are'} {parkedWorkspaces.length} parked ticket{parkedWorkspaces.length !== 1 ? 's' : ''} still open.
+          </Alert>
+          <Typography variant="body2">
+            Do you want to delete them or save them for later?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button color="error" onClick={handleDeleteParkedWorkspacesOnClose}>Delete</Button>
+          <Button variant="contained" onClick={handleKeepParkedWorkspacesOnClose}>Save</Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Resume Parked Workspace Dialog */}
       <Dialog open={resumeDialogOpen} onClose={() => setResumeDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1050,6 +1098,13 @@ function Navbar() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <CloseStoreIssuesDialog
+        open={closeStoreIssuesOpen}
+        onClose={() => setCloseStoreIssuesOpen(false)}
+        message={closeStoreIssuesMessage}
+        issues={closeStoreIssues}
+      />
     </>
   );
 }

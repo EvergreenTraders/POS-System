@@ -70,6 +70,7 @@ import axios from 'axios';
 import config from '../config';
 import { useStoreStatus } from '../context/StoreStatusContext';
 import { useAuth } from '../context/AuthContext';
+import CloseStoreIssuesDialog from '../components/CloseStoreIssuesDialog';
 
 function CashDrawer() {
   const API_BASE_URL = config.apiUrl;
@@ -100,6 +101,9 @@ function CashDrawer() {
   const [closeStoreDialogOpen, setCloseStoreDialogOpen] = useState(false);
   const [isBackupComputer, setIsBackupComputer] = useState(false);
   const [clockedInEmployees, setClockedInEmployees] = useState([]);
+  const [closeStoreIssuesOpen, setCloseStoreIssuesOpen] = useState(false);
+  const [closeStoreIssues, setCloseStoreIssues] = useState([]);
+  const [closeStoreIssuesMessage, setCloseStoreIssuesMessage] = useState('');
 
   // Dialog states
   const [openDrawerDialog, setOpenDrawerDialog] = useState(false);
@@ -1032,19 +1036,9 @@ function CashDrawer() {
       setCloseStoreDialogOpen(true);
     } catch (error) {
       console.error('Error checking store closure prerequisites:', error);
-      if (error.response?.data?.error) {
-        setSnackbar({
-          open: true,
-          message: error.response.data.error,
-          severity: 'error'
-        });
-      } else {
-        setSnackbar({
-          open: true,
-          message: 'Failed to check store closure prerequisites',
-          severity: 'error'
-        });
-      }
+      setCloseStoreIssuesMessage(error.response?.data?.error || 'Failed to check store closure prerequisites');
+      setCloseStoreIssues(error.response?.data?.openDrawers || []);
+      setCloseStoreIssuesOpen(true);
     } finally {
       setStoreStatusLoading(false);
     }
@@ -7751,6 +7745,13 @@ function CashDrawer() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <CloseStoreIssuesDialog
+        open={closeStoreIssuesOpen}
+        onClose={() => setCloseStoreIssuesOpen(false)}
+        message={closeStoreIssuesMessage}
+        issues={closeStoreIssues}
+      />
 
       {/* Clock-In Warning Dialog */}
       <Dialog
