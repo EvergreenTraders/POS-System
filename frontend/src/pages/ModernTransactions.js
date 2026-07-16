@@ -874,6 +874,7 @@ export default function ModernTransactions() {
   const showMessagesCard = currentEmployee?.show_messages_card !== false;
   const showTasksCard = currentEmployee?.show_tasks_card !== false;
   const showLoansLayawaysCard = currentEmployee?.show_loans_layaways_card !== false;
+  const showStatsCard = currentEmployee?.show_stats_card !== false;
 
   const [cardPrefsAnchor, setCardPrefsAnchor] = useState(null);
   const handleToggleCardPref = async (field, currentValue) => {
@@ -884,6 +885,7 @@ export default function ModernTransactions() {
         showMessagesCard: field === 'show_messages_card' ? nextValue : showMessagesCard,
         showTasksCard: field === 'show_tasks_card' ? nextValue : showTasksCard,
         showLoansLayawaysCard: field === 'show_loans_layaways_card' ? nextValue : showLoansLayawaysCard,
+        showStatsCard: field === 'show_stats_card' ? nextValue : showStatsCard,
       });
     } catch (err) {
       console.error('Failed to update workspace card preferences:', err);
@@ -2339,19 +2341,25 @@ export default function ModernTransactions() {
                   </IconButton>
                 </Tooltip>
 
-                <Grid container spacing={{ md: 1.5, xl: 1 }} sx={{ mb: 2, pr: 5 }}>
-                  {DASHBOARD_STATS.map((stat) => (
-                    <Grid item xs={12} sm={6} md={3} key={stat.title}>
-                      <StatCard {...stat} />
-                    </Grid>
-                  ))}
-                </Grid>
+                {showStatsCard && (
+                  <Grid container spacing={{ md: 1.5, xl: 1 }} sx={{ mb: 2, pr: 5 }}>
+                    {DASHBOARD_STATS.map((stat) => (
+                      <Grid item xs={12} sm={6} md={3} key={stat.title}>
+                        <StatCard {...stat} />
+                      </Grid>
+                    ))}
+                  </Grid>
+                )}
 
                 <Menu anchorEl={cardPrefsAnchor} open={Boolean(cardPrefsAnchor)} onClose={() => setCardPrefsAnchor(null)}>
                   <Box sx={{ px: 2, py: 1 }}>
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                       Show on this screen
                     </Typography>
+                    <FormControlLabel
+                      control={<Checkbox size="small" checked={showStatsCard} onChange={() => handleToggleCardPref('show_stats_card', showStatsCard)} />}
+                      label={<Typography variant="body2">Stats</Typography>}
+                    />
                     <FormControlLabel
                       control={<Checkbox size="small" checked={showMessagesCard} onChange={() => handleToggleCardPref('show_messages_card', showMessagesCard)} />}
                       label={<Typography variant="body2">Messages</Typography>}
@@ -2367,7 +2375,7 @@ export default function ModernTransactions() {
                   </Box>
                 </Menu>
 
-                {!showMessagesCard && !showTasksCard && !showLoansLayawaysCard ? (
+                {!showStatsCard && !showMessagesCard && !showTasksCard && !showLoansLayawaysCard ? (
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 6, gap: 1.5, color: 'text.secondary' }}>
                     <MuiIcons.Receipt sx={{ fontSize: 48, opacity: 0.15 }} />
                     <Typography variant="body2" color="text.secondary">No transactions in workspace yet.</Typography>

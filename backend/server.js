@@ -349,6 +349,9 @@ pool.query(`
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS show_loans_layaways_card BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('show_loans_layaways_card migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS show_stats_card BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('show_stats_card migration:', err.message));
 
 // Transfer and cash handling permissions
 pool.query(`
@@ -764,7 +767,7 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
             transferAllowedDrawer, transferAllowedSafe, transferAllowedBank, transferAllowedStore,
             transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold, employmentType,
             canResumeParkedWorkspaces,
-            showMessagesCard, showTasksCard, showLoansLayawaysCard } = req.body;
+            showMessagesCard, showTasksCard, showLoansLayawaysCard, showStatsCard } = req.body;
 
     const empType = employmentType === 'salary' ? 'salary' : 'hourly';
     // Salary employees are always exempt from clocking in
@@ -780,13 +783,15 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
           discrepancy_threshold = $13, employment_type = $14,
           can_resume_parked_workspaces = $15,
           show_messages_card = $16, show_tasks_card = $17, show_loans_layaways_card = $18,
+          show_stats_card = $19,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $19
+      WHERE employee_id = $20
       RETURNING employee_id, username, first_name, last_name, role,
         track_hours, can_open_store, can_open_drawer, can_view_drawer, can_view_safe,
         transfer_allowed_drawer, transfer_allowed_safe, transfer_allowed_bank, transfer_allowed_store,
         transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold, employment_type,
-        can_resume_parked_workspaces, show_messages_card, show_tasks_card, show_loans_layaways_card
+        can_resume_parked_workspaces, show_messages_card, show_tasks_card, show_loans_layaways_card,
+        show_stats_card
     `;
     const result = await pool.query(query, [
       effectiveTrackHours,
@@ -807,6 +812,7 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
       showMessagesCard !== false,
       showTasksCard !== false,
       showLoansLayawaysCard !== false,
+      showStatsCard !== false,
       id
     ]);
 
@@ -829,15 +835,16 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
 app.put('/api/employees/:id/workspace-card-preferences', async (req, res) => {
   try {
     const { id } = req.params;
-    const { showMessagesCard, showTasksCard, showLoansLayawaysCard } = req.body;
+    const { showMessagesCard, showTasksCard, showLoansLayawaysCard, showStatsCard } = req.body;
 
     const result = await pool.query(`
       UPDATE employees
       SET show_messages_card = $1, show_tasks_card = $2, show_loans_layaways_card = $3,
+          show_stats_card = $4,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $4
-      RETURNING employee_id, show_messages_card, show_tasks_card, show_loans_layaways_card
-    `, [showMessagesCard !== false, showTasksCard !== false, showLoansLayawaysCard !== false, id]);
+      WHERE employee_id = $5
+      RETURNING employee_id, show_messages_card, show_tasks_card, show_loans_layaways_card, show_stats_card
+    `, [showMessagesCard !== false, showTasksCard !== false, showLoansLayawaysCard !== false, showStatsCard !== false, id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found' });

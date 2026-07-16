@@ -1115,6 +1115,7 @@ function SystemConfig() {
       showMessagesCard: get('show_messages_card', true),
       showTasksCard: get('show_tasks_card', true),
       showLoansLayawaysCard: get('show_loans_layaways_card', true),
+      showStatsCard: get('show_stats_card', true),
     };
   };
 
@@ -5654,6 +5655,11 @@ const handleTabChange = (event, newValue) => {
                             <FormControlLabel
                               control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.show_loans_layaways_card !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'show_loans_layaways_card', emp.show_loans_layaways_card !== false)} />}
                               label={<Typography variant="caption">Loans/Layaways</Typography>}
+                              sx={{ m: 0 }}
+                            />
+                            <FormControlLabel
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.show_stats_card !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'show_stats_card', emp.show_stats_card !== false)} />}
+                              label={<Typography variant="caption">Stats</Typography>}
                               sx={{ m: 0 }}
                             />
                           </Box>
