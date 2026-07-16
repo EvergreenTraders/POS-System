@@ -12655,7 +12655,7 @@ app.put('/api/trade-tax-config', async (req, res) => {
 
 app.post('/api/feedback', async (req, res) => {
   try {
-    const { employee_id, message, page } = req.body;
+    const { employee_id, message } = req.body;
     if (!message || !message.trim()) {
       return res.status(400).json({ error: 'Feedback message is required' });
     }
@@ -12663,10 +12663,10 @@ app.post('/api/feedback', async (req, res) => {
     const store_id = storeRes.rows[0]?.store_id || null;
 
     const result = await pool.query(`
-      INSERT INTO feedback (employee_id, store_id, message, page)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO feedback (employee_id, store_id, message)
+      VALUES ($1, $2, $3)
       RETURNING *
-    `, [employee_id || null, store_id, message.trim(), page || null]);
+    `, [employee_id || null, store_id, message.trim()]);
 
     res.status(201).json(result.rows[0]);
   } catch (error) {

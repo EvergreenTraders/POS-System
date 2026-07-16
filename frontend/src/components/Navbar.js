@@ -50,7 +50,7 @@ import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
 import { useStoreStatus } from '../context/StoreStatusContext';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import Cart from './Cart';
 import CloseStoreIssuesDialog from './CloseStoreIssuesDialog';
 import config from '../config';
@@ -98,7 +98,6 @@ function Navbar() {
   const [feedbackNewAlert, setFeedbackNewAlert] = useState(null);
   const feedbackLastSeenIdRef = useRef(null);
   const navigate = useNavigate();
-  const location = useLocation();
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
 
@@ -542,7 +541,6 @@ function Navbar() {
       await axios.post(`${config.apiUrl}/feedback`, {
         employee_id: user?.id || user?.employee_id,
         message: feedbackMessage.trim(),
-        page: location.pathname,
       });
       setFeedbackMessage('');
       setFeedbackDialogOpen(false);

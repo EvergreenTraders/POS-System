@@ -5,7 +5,6 @@ CREATE TABLE IF NOT EXISTS feedback (
     employee_id INTEGER REFERENCES employees(employee_id),
     store_id INTEGER REFERENCES stores(store_id),
     message TEXT NOT NULL,
-    page VARCHAR(255),
     status VARCHAR(20) NOT NULL DEFAULT 'new',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -13,3 +12,6 @@ CREATE TABLE IF NOT EXISTS feedback (
 
 CREATE INDEX IF NOT EXISTS idx_feedback_store ON feedback(store_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);
+
+-- Never used in the UI (which page a tester submitted from) — dropped.
+ALTER TABLE feedback DROP COLUMN IF EXISTS page;
