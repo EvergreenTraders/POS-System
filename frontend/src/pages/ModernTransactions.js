@@ -7,6 +7,7 @@ import {
   Divider, TextField, InputAdornment, Badge, Tooltip, Stack, Snackbar, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions,
   List, ListItem, ListItemText, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Menu, FormControlLabel, Checkbox,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
@@ -835,12 +836,29 @@ export default function ModernTransactions() {
   // Clean up expired workspace entries on mount
   useEffect(() => { cleanupExpiredWorkspaces(); }, []);
 
-  // Which of the empty-workspace dashboard cards this employee sees —
-  // configured per employee from SystemConfig's Employee Configuration tab.
+  // Which of the empty-workspace dashboard cards this employee sees. A manager can
+  // set this for anyone from SystemConfig's Employee Configuration tab, but each
+  // employee can also override it for themselves via the gear icon below.
   const currentEmployee = employees.find(e => e.employee_id === currentUser?.id);
   const showMessagesCard = currentEmployee?.show_messages_card !== false;
   const showTasksCard = currentEmployee?.show_tasks_card !== false;
   const showLoansLayawaysCard = currentEmployee?.show_loans_layaways_card !== false;
+
+  const [cardPrefsAnchor, setCardPrefsAnchor] = useState(null);
+  const handleToggleCardPref = async (field, currentValue) => {
+    const nextValue = !currentValue;
+    setEmployees(prev => prev.map(e => e.employee_id === currentUser?.id ? { ...e, [field]: nextValue } : e));
+    try {
+      await axios.put(`${config.apiUrl}/employees/${currentUser.id}/workspace-card-preferences`, {
+        showMessagesCard: field === 'show_messages_card' ? nextValue : showMessagesCard,
+        showTasksCard: field === 'show_tasks_card' ? nextValue : showTasksCard,
+        showLoansLayawaysCard: field === 'show_loans_layaways_card' ? nextValue : showLoansLayawaysCard,
+      });
+    } catch (err) {
+      console.error('Failed to update workspace card preferences:', err);
+      setEmployees(prev => prev.map(e => e.employee_id === currentUser?.id ? { ...e, [field]: currentValue } : e));
+    }
+  };
 
 
 
@@ -2258,20 +2276,50 @@ export default function ModernTransactions() {
         {/* ── MIDDLE: Transaction workspace ── */}
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, overflow: 'hidden', minWidth: 0 }}>
           {/* Workspace header */}
-          <Paper sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>TRANSACTION WORKSPACE</Typography>
-              <Badge badgeContent={workspaceTransactions.length} color="primary" sx={{ '& .MuiBadge-badge': { position: 'relative', transform: 'none', ml: 0.5 } }}>
-                <Box />
-              </Badge>
-              <Typography variant="caption" color="text.secondary">Add, edit or remove transactions before checkout.</Typography>
-            </Box>
-          </Paper>
+          {workspaceTransactions.length > 0 && (
+            <Paper sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>TRANSACTION WORKSPACE</Typography>
+                <Badge badgeContent={workspaceTransactions.length} color="primary" sx={{ '& .MuiBadge-badge': { position: 'relative', transform: 'none', ml: 0.5 } }}>
+                  <Box />
+                </Badge>
+                <Typography variant="caption" color="text.secondary">Add, edit or remove transactions before checkout.</Typography>
+              </Box>
+            </Paper>
+          )}
 
           {/* Transaction cards grid */}
           <Box sx={{ flex: 1, overflowY: 'auto' }}>
             {workspaceTransactions.length === 0 ? (
-              <Box sx={{ py: 1 }}>
+              <Box sx={{ py: 1, position: 'relative' }}>
+                <Tooltip title="Choose which cards you see here">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => setCardPrefsAnchor(e.currentTarget)}
+                    sx={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}
+                  >
+                    <MuiIcons.Settings fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Menu anchorEl={cardPrefsAnchor} open={Boolean(cardPrefsAnchor)} onClose={() => setCardPrefsAnchor(null)}>
+                  <Box sx={{ px: 2, py: 1 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                      Show on this screen
+                    </Typography>
+                    <FormControlLabel
+                      control={<Checkbox size="small" checked={showMessagesCard} onChange={() => handleToggleCardPref('show_messages_card', showMessagesCard)} />}
+                      label={<Typography variant="body2">Messages</Typography>}
+                    />
+                    <FormControlLabel
+                      control={<Checkbox size="small" checked={showTasksCard} onChange={() => handleToggleCardPref('show_tasks_card', showTasksCard)} />}
+                      label={<Typography variant="body2">Tasks</Typography>}
+                    />
+                    <FormControlLabel
+                      control={<Checkbox size="small" checked={showLoansLayawaysCard} onChange={() => handleToggleCardPref('show_loans_layaways_card', showLoansLayawaysCard)} />}
+                      label={<Typography variant="body2">Loans/Layaways Due Today</Typography>}
+                    />
+                  </Box>
+                </Menu>
 
                 {!showMessagesCard && !showTasksCard && !showLoansLayawaysCard ? (
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 6, gap: 1.5, color: 'text.secondary' }}>

@@ -819,6 +819,35 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
   }
 });
 
+// Self-service: an employee choosing which dashboard cards they personally see on
+// the empty Modern Transactions workspace. Scoped to just these 3 fields (unlike
+// PUT /api/employees/:id/permissions, which requires the full permissions payload
+// and is reserved for manager/owner configuration in SystemConfig.js) so an
+// employee can't accidentally clobber their own drawer/petty-cash/transfer limits.
+app.put('/api/employees/:id/workspace-card-preferences', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { showMessagesCard, showTasksCard, showLoansLayawaysCard } = req.body;
+
+    const result = await pool.query(`
+      UPDATE employees
+      SET show_messages_card = $1, show_tasks_card = $2, show_loans_layaways_card = $3,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE employee_id = $4
+      RETURNING employee_id, show_messages_card, show_tasks_card, show_loans_layaways_card
+    `, [showMessagesCard !== false, showTasksCard !== false, showLoansLayawaysCard !== false, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating workspace card preferences:', err);
+    res.status(500).json({ error: 'Failed to update workspace card preferences' });
+  }
+});
+
 // ============================================================================
 // Employee Sessions (Clock-In/Clock-Out) API Routes
 // ============================================================================
