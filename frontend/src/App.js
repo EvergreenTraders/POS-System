@@ -44,7 +44,6 @@ import Cart from './pages/Cart';
 import JewelryEdit from './pages/JewelryEdit';
 import SalesHistory from './pages/SalesHistory';
 import EmployeeSalesHistory from './pages/EmployeeSalesHistory';
-import Layaway from './pages/Layaway';
 import CashDrawer from './pages/CashDrawer';
 import TimeClock from './pages/TimeClock';
 
@@ -712,76 +711,6 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <EmployeeSalesHistory />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/past-due"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/active"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/no-activity"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/no-payment"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/locate"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/reporting"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

@@ -51,7 +51,6 @@ const MIGRATION_FILES = [
   'item_history.sql',
   'transactions.sql',
   'customer_ticket.sql',
-  'layaway.sql',
   'scrap.sql',
   'scrap_history.sql',
   'quotes.sql',
