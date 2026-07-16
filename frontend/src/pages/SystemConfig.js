@@ -94,6 +94,8 @@ function SystemConfig() {
   const { user } = useAuth();
   const location = useLocation();
   const isManagerOrOwner = user?.role === 'Store Manager' || user?.role === 'Store Owner';
+  // The developer account also needs to see submitted feedback, even though he/ she isn't a manager/owner.
+  const canViewFeedback = isManagerOrOwner || user?.role === 'Software Developer';
   const [activeTab, setActiveTab] = useState(location.state?.initialTab ?? 0);
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -437,6 +439,10 @@ function SystemConfig() {
   });
   const [selectedProvince, setSelectedProvince] = useState('ON');
   const [tradeTaxable, setTradeTaxable] = useState(true);
+
+  // Feedback (submitted by staff via the Navbar feedback icon)
+  const [feedbackList, setFeedbackList] = useState([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
 
   // Linked Account Authorization Template state (one for each link type)
   const [authorizationTemplates, setAuthorizationTemplates] = useState({
@@ -855,8 +861,31 @@ function SystemConfig() {
     fetchStorageFeeConfig();
     fetchBankAccounts();
     fetchBusinessHours();
+    if (canViewFeedback) fetchFeedback();
     axios.get(`${API_BASE_URL}/stores/current`).then(res => setCurrentStoreId(res.data.store_id)).catch(() => {});
   }, []);
+
+  const fetchFeedback = async () => {
+    setFeedbackLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/feedback`);
+      setFeedbackList(response.data || []);
+    } catch (error) {
+      console.error('Error fetching feedback:', error);
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
+
+  const handleUpdateFeedbackStatus = async (id, status) => {
+    setFeedbackList(prev => prev.map(f => f.id === id ? { ...f, status } : f));
+    try {
+      await axios.put(`${API_BASE_URL}/feedback/${id}/status`, { status });
+    } catch (error) {
+      console.error('Error updating feedback status:', error);
+      fetchFeedback();
+    }
+  };
 
   const fetchBusinessHours = async () => {
     try {
@@ -2870,14 +2899,15 @@ const handleTabChange = (event, newValue) => {
     <Container>
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
         <Tabs value={activeTab} onChange={handleTabChange} variant="scrollable" scrollButtons="auto">
-          <Tab label="General" />
-          <Tab label="Pawn Configuration" />
-          <Tab label="Tax Configuration" />
-          <Tab label="Pricing Calculator" />
-          <Tab label="Account Authorization" />
-          <Tab label="Item Attributes" />
-          <Tab label="Quotes" />
-          {isManagerOrOwner && <Tab label="Employee Configuration" />}
+          <Tab label="General" value={0} />
+          <Tab label="Pawn Configuration" value={1} />
+          <Tab label="Tax Configuration" value={2} />
+          <Tab label="Pricing Calculator" value={3} />
+          <Tab label="Account Authorization" value={4} />
+          <Tab label="Item Attributes" value={5} />
+          <Tab label="Quotes" value={6} />
+          {isManagerOrOwner && <Tab label="Employee Configuration" value={7} />}
+          {canViewFeedback && <Tab label="Feedback" value={8} />}
         </Tabs>
       </Box>
 
@@ -5618,6 +5648,70 @@ const handleTabChange = (event, newValue) => {
                               sx={{ m: 0 }}
                             />
                           </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </ConfigSection>
+        </StyledPaper>
+      </TabPanel>}
+
+      {canViewFeedback && <TabPanel value={activeTab} index={8}>
+        <StyledPaper elevation={2}>
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Feedback
+            </Typography>
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+              Submitted by staff testing the software via the feedback icon in the top navigation bar.
+            </Typography>
+            {feedbackLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress size={28} />
+              </Box>
+            ) : feedbackList.length === 0 ? (
+              <Typography variant="body2" color="textSecondary" sx={{ py: 4, textAlign: 'center' }}>
+                No feedback submitted yet.
+              </Typography>
+            ) : (
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell><strong>Date</strong></TableCell>
+                      <TableCell><strong>From</strong></TableCell>
+                      <TableCell><strong>Message</strong></TableCell>
+                      <TableCell align="center"><strong>Status</strong></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {feedbackList.map((fb) => (
+                      <TableRow key={fb.id}>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          {new Date(fb.created_at).toLocaleString()}
+                        </TableCell>
+                        <TableCell>{fb.employee_name || 'Unknown'}</TableCell>
+                        <TableCell sx={{ whiteSpace: 'pre-wrap', maxWidth: 400 }}>{fb.message}</TableCell>
+                        <TableCell align="center">
+                          <FormControl size="small" sx={{ minWidth: 130 }}>
+                            <Select
+                              value={fb.status}
+                              onChange={(e) => handleUpdateFeedbackStatus(fb.id, e.target.value)}
+                            >
+                              <MenuItem value="new">
+                                <Chip label="New" size="small" color="warning" />
+                              </MenuItem>
+                              <MenuItem value="reviewed">
+                                <Chip label="Reviewed" size="small" color="info" />
+                              </MenuItem>
+                              <MenuItem value="implemented">
+                                <Chip label="Implemented" size="small" color="success" />
+                              </MenuItem>
+                            </Select>
+                          </FormControl>
                         </TableCell>
                       </TableRow>
                     ))}

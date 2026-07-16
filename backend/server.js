@@ -271,6 +271,7 @@ const storeClosedMiddleware = async (req, res, next) => {
     '/api/inventory-status',
     '/api/migrate',
     '/api/pawn/check-forfeitures',
+    '/api/feedback',
   ];
 
   const isAllowed = alwaysAllowedPaths.some(path => req.path.startsWith(path));
@@ -12645,6 +12646,72 @@ app.put('/api/trade-tax-config', async (req, res) => {
   } catch (error) {
     console.error('Error updating trade tax config:', error);
     res.status(500).json({ error: 'Failed to update trade tax config' });
+  }
+});
+
+// ============================================================================
+// Feedback (from staff testing the software) API Routes
+// ============================================================================
+
+app.post('/api/feedback', async (req, res) => {
+  try {
+    const { employee_id, message, page } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Feedback message is required' });
+    }
+    const storeRes = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const store_id = storeRes.rows[0]?.store_id || null;
+
+    const result = await pool.query(`
+      INSERT INTO feedback (employee_id, store_id, message, page)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [employee_id || null, store_id, message.trim(), page || null]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error submitting feedback:', error);
+    res.status(500).json({ error: 'Failed to submit feedback' });
+  }
+});
+
+app.get('/api/feedback', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT f.*, CONCAT(e.first_name, ' ', e.last_name) AS employee_name
+      FROM feedback f
+      LEFT JOIN employees e ON f.employee_id = e.employee_id
+      WHERE f.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+         OR f.store_id IS NULL
+      ORDER BY f.created_at DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching feedback:', error);
+    res.status(500).json({ error: 'Failed to fetch feedback' });
+  }
+});
+
+app.put('/api/feedback/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!['new', 'reviewed', 'implemented'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    const result = await pool.query(`
+      UPDATE feedback SET status = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      RETURNING *
+    `, [status, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Feedback not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating feedback status:', error);
+    res.status(500).json({ error: 'Failed to update feedback status' });
   }
 });
 

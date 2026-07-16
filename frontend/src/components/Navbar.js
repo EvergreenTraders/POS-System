@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   AppBar,
   Toolbar,
@@ -27,6 +27,8 @@ import {
   ListItem,
   ListItemAvatar,
   ListItemText,
+  Snackbar,
+  TextField,
 } from '@mui/material';
 import axios from 'axios';
 import {
@@ -42,12 +44,13 @@ import {
   PlayArrow as PlayArrowIcon,
   Delete as DeleteIcon,
   LocalParking as ParkingIcon,
+  Feedback as FeedbackIcon,
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
 import { useStoreStatus } from '../context/StoreStatusContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Cart from './Cart';
 import CloseStoreIssuesDialog from './CloseStoreIssuesDialog';
 import config from '../config';
@@ -88,7 +91,14 @@ function Navbar() {
   const [closeStoreIssuesOpen, setCloseStoreIssuesOpen] = useState(false);
   const [closeStoreIssues, setCloseStoreIssues] = useState([]);
   const [closeStoreIssuesMessage, setCloseStoreIssuesMessage] = useState('');
+  const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [feedbackNewAlert, setFeedbackNewAlert] = useState(null);
+  const feedbackLastSeenIdRef = useRef(null);
   const navigate = useNavigate();
+  const location = useLocation();
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
 
@@ -197,6 +207,41 @@ function Navbar() {
       window.removeEventListener('parkedWorkspacesChanged', fetchParkedWorkspaces);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // Alert the developer account as soon as any new feedback comes in, instead of
+  // requiring her to go check SystemConfig's Feedback tab.
+  useEffect(() => {
+    if (user?.username !== 'pguntupalli') return;
+    const storageKey = `feedbackLastSeenId_${user.username}`;
+    feedbackLastSeenIdRef.current = parseInt(localStorage.getItem(storageKey) || '0', 10);
+
+    const checkFeedback = async () => {
+      try {
+        const res = await axios.get(`${config.apiUrl}/feedback`);
+        const list = Array.isArray(res.data) ? res.data : [];
+        if (list.length === 0) return;
+        const newestId = Math.max(...list.map(f => f.id));
+        if (newestId > feedbackLastSeenIdRef.current) {
+          const unseen = list
+            .filter(f => f.id > feedbackLastSeenIdRef.current)
+            .sort((a, b) => b.id - a.id);
+          const latest = unseen[0];
+          setFeedbackNewAlert(
+            `New feedback from ${latest.employee_name || 'someone'}: "${latest.message.length > 100 ? latest.message.slice(0, 100) + '…' : latest.message}"` +
+            (unseen.length > 1 ? ` (+${unseen.length - 1} more)` : '')
+          );
+          feedbackLastSeenIdRef.current = newestId;
+          localStorage.setItem(storageKey, String(newestId));
+        }
+      } catch {
+        // non-critical
+      }
+    };
+
+    checkFeedback();
+    const interval = setInterval(checkFeedback, 30000);
+    return () => clearInterval(interval);
   }, [user]);
 
   const handleOpenResumeDialog = () => {
@@ -487,6 +532,25 @@ function Navbar() {
       }
     } else {
       setOpenStoreDialogOpen(true);
+    }
+  };
+
+  const handleSubmitFeedback = async () => {
+    if (!feedbackMessage.trim()) return;
+    setFeedbackSubmitting(true);
+    try {
+      await axios.post(`${config.apiUrl}/feedback`, {
+        employee_id: user?.id || user?.employee_id,
+        message: feedbackMessage.trim(),
+        page: location.pathname,
+      });
+      setFeedbackMessage('');
+      setFeedbackDialogOpen(false);
+      setFeedbackSubmitted(true);
+    } catch (err) {
+      console.error('Failed to submit feedback:', err);
+    } finally {
+      setFeedbackSubmitting(false);
     }
   };
 
@@ -827,6 +891,16 @@ function Navbar() {
                 </span>
               </Tooltip>
 
+              <Tooltip title="Send Feedback">
+                <IconButton
+                  color="inherit"
+                  onClick={() => setFeedbackDialogOpen(true)}
+                  sx={{ mr: 1 }}
+                >
+                  <FeedbackIcon />
+                </IconButton>
+              </Tooltip>
+
               <IconButton
                 color="inherit"
                 onClick={() => setCartOpen(true)}
@@ -1163,6 +1237,70 @@ function Navbar() {
         deletingParkedId={deletingParkedId}
         onKeepParkedWorkspaces={handleKeepParkedWorkspacesOnClose}
       />
+
+      <Dialog open={feedbackDialogOpen} onClose={() => setFeedbackDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Send Feedback</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Found a bug or have an idea? Let us know and we'll take a look.
+          </Typography>
+          <TextField
+            autoFocus
+            multiline
+            minRows={4}
+            fullWidth
+            placeholder="What's on your mind?"
+            value={feedbackMessage}
+            onChange={(e) => setFeedbackMessage(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFeedbackDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleSubmitFeedback}
+            disabled={!feedbackMessage.trim() || feedbackSubmitting}
+            startIcon={feedbackSubmitting ? <CircularProgress size={16} /> : null}
+          >
+            Submit
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        open={feedbackSubmitted}
+        autoHideDuration={4000}
+        onClose={() => setFeedbackSubmitted(false)}
+      >
+        <Alert severity="success" onClose={() => setFeedbackSubmitted(false)}>
+          Thanks for your feedback!
+        </Alert>
+      </Snackbar>
+
+      <Snackbar
+        open={!!feedbackNewAlert}
+        autoHideDuration={10000}
+        onClose={() => setFeedbackNewAlert(null)}
+      >
+        <Alert
+          severity="info"
+          onClose={() => setFeedbackNewAlert(null)}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => {
+                setFeedbackNewAlert(null);
+                navigate('/system-config/settings', { state: { initialTab: 8 } });
+              }}
+            >
+              View
+            </Button>
+          }
+        >
+          {feedbackNewAlert}
+        </Alert>
+      </Snackbar>
     </>
   );
 }
