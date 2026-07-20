@@ -8887,11 +8887,12 @@ app.put('/api/parked-workspace-config', async (req, res) => {
 
 app.get('/api/parked-workspaces', async (req, res) => {
   try {
-    // Anonymous (no customer) parked workspaces expire after the configured retention period
+    // Parked workspaces expire after the configured retention period, regardless of
+    // whether a customer is attached.
     const configResult = await pool.query('SELECT hours FROM parked_workspace_config ORDER BY created_at DESC LIMIT 1');
     const retentionHours = configResult.rows[0]?.hours || 24;
     await pool.query(
-      `DELETE FROM parked_workspaces WHERE customer_id IS NULL AND parked_at < NOW() - ($1 || ' hours')::interval`,
+      `DELETE FROM parked_workspaces WHERE parked_at < NOW() - ($1 || ' hours')::interval`,
       [retentionHours]
     );
 
