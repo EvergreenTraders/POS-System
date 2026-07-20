@@ -3,7 +3,7 @@ import {
   Box, Typography, Paper, Button, IconButton, TextField, Select, MenuItem,
   FormControl, InputLabel, FormHelperText, Chip, Divider, Checkbox, FormControlLabel,
   InputAdornment, Dialog, DialogContent, DialogActions, DialogTitle,
-  Tabs, Tab, Table, TableHead, TableBody, TableRow, TableCell,
+  Tabs, Tab, Table, TableHead, TableBody, TableRow, TableCell, Avatar, Tooltip,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import axios from 'axios';
@@ -12,6 +12,18 @@ import { RadioGroup, Radio, Slider } from '@mui/material';
 
 const GREEN      = '#2e5c3e';
 const DARK_GREEN = '#1a3d28';
+
+// ── Scrap Lot batch entry — fixed metal/purity rows + custom rows ────────────
+// Purity fractions match backend/database/metal_estimator.sql's metal_purity seed data.
+const METAL_TYPE_ID_BY_NAME = { Gold: 1, Platinum: 2, Silver: 3, Palladium: 4 };
+const SCRAP_FIXED_ROWS = [
+  { key: '10k_gold',   metal: 'Gold',   purityLabel: '10K Gold',   purityValue: 0.417 },
+  { key: '14k_gold',   metal: 'Gold',   purityLabel: '14K Gold',   purityValue: 0.585 },
+  { key: '18k_gold',   metal: 'Gold',   purityLabel: '18K Gold',   purityValue: 0.750 },
+  { key: '22k_gold',   metal: 'Gold',   purityLabel: '22K Gold',   purityValue: 0.917 },
+  { key: 'silver_925', metal: 'Silver', purityLabel: '.925 Silver', purityValue: 0.925 },
+];
+const emptyScrapRowData = () => ({ pieces: '', grossWt: '', estStoneWt: '', notes: '', image: null, buyPct: '', pawnPct: '' });
 
 // ── Gem entry dialog — mirrors GemEstimator's primary/secondary gem form ──────
 const COLOR_SCALE = Array.from({ length: 23 }, (_, i) => String.fromCharCode(68 + i)); // D–Z
@@ -432,6 +444,40 @@ function GemEntryDialog({ open, onClose, onSave, title = 'Gem', initial = null }
   );
 }
 
+// Small per-row photo picker for the Scrap Lot batch table — no live camera
+// stream (unlike the main item photo), just a tap-to-pick file input.
+function ScrapPhotoCell({ image, onChange }) {
+  const inputRef = useRef(null);
+  return (
+    <Box sx={{ width: 54, height: 54 }}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: 'none' }}
+        onChange={e => { const f = e.target.files?.[0]; if (f) onChange(f); e.target.value = ''; }}
+      />
+      {image ? (
+        <Box
+          component="img"
+          src={image}
+          onClick={() => inputRef.current?.click()}
+          sx={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 1, border: '1px solid #e0e0e0', cursor: 'pointer' }}
+        />
+      ) : (
+        <Box
+          onClick={() => inputRef.current?.click()}
+          sx={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '1px dashed #ccc', borderRadius: 1, cursor: 'pointer', color: 'text.disabled' }}
+        >
+          <MuiIcons.PhotoCamera sx={{ fontSize: 16 }} />
+          <Typography sx={{ fontSize: 8 }}>Take Photo</Typography>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 export default function JewelryIntakeScreen({
   customer,
   ticketId,
@@ -501,14 +547,27 @@ export default function JewelryIntakeScreen({
   const [buyVal,   setBuyVal]   = useState('');
   const [meltVal,  setMeltVal]  = useState('');
 
+  // Scrap Lot batch entry
+  const [scrapFixedRows, setScrapFixedRows] = useState(() =>
+    SCRAP_FIXED_ROWS.reduce((acc, r) => { acc[r.key] = emptyScrapRowData(); return acc; }, {})
+  );
+  const [scrapCustomRows, setScrapCustomRows] = useState([]);
+  const [scrapFinalPrice, setScrapFinalPrice] = useState('');
+  const [scrapFinalPriceManual, setScrapFinalPriceManual] = useState(false);
+  const [allMetalPurities, setAllMetalPurities] = useState({});
+
   const parsedParts = [category, colour, metal, purity.purity || String(purity.value || '')].filter(Boolean);
+  // Editing/viewing an already-saved item (even one originally created via the scrap
+  // batch flow, tagged mode:'scrap') always shows the normal single-item form — the
+  // batch table is only for creating new scrap lines, never for revisiting one line.
+  const showScrapBatchUI = mode === 'scrap' && !editItem;
 
   const breadcrumbs = [
     { label: 'Transactions',                          onClick: () => onBack('transactions') },
     { label: `${ticketLabel} (${ticketId ?? '—'})`,   onClick: () => onBack() },
     { label: 'Intake' },
     { label: 'Jewellery Item Intake' },
-    { label: 'Unique Jewellery Item', current: true },
+    { label: showScrapBatchUI ? 'Scrap Batch Entry' : 'Unique Jewellery Item', current: true },
   ];
 
   // ── Metal data fetching (ported from MetalEstimator) ─────────────────────
@@ -597,6 +656,21 @@ export default function JewelryIntakeScreen({
     if (metalTypeId) fetchPurities(metalTypeId);
     else setMetalPurities([]);
   }, [metalTypeId, fetchPurities]);
+
+  // Scrap mode: fetch purities for every metal type up front (custom rows can be
+  // any metal, not just whichever one is currently selected in unique mode).
+  useEffect(() => {
+    if (mode !== 'scrap' || preciousMetalTypes.length === 0 || Object.keys(allMetalPurities).length > 0) return;
+    (async () => {
+      const entries = await Promise.all(preciousMetalTypes.map(async t => {
+        try {
+          const res = await axios.get(`${config.apiUrl}/metal_purity/${t.id}`);
+          return [t.id, res.data || []];
+        } catch { return [t.id, []]; }
+      }));
+      setAllMetalPurities(Object.fromEntries(entries));
+    })();
+  }, [mode, preciousMetalTypes, allMetalPurities]);
 
   const handleSavePrimaryGem = (gemData) => setPrimaryGem(gemData);
 
@@ -1084,6 +1158,148 @@ export default function JewelryIntakeScreen({
     else onSaveItem(item);
   }
 
+  // ── Scrap Lot batch entry ─────────────────────────────────────────────────
+
+  const getScrapPctDefault = (typeId, txnType, fallback) => {
+    const arr = priceEstimatePercentages[typeId] || [];
+    const found = arr.find(e => e.transaction_type === txnType);
+    return found ? String(parseFloat(found.estimate)) : String(fallback);
+  };
+
+  const computeScrapRowValues = (purityValue, metalName, grossWt, estStoneWt, buyPctStr, pawnPctStr) => {
+    const gw = parseFloat(grossWt) || 0;
+    const esw = parseFloat(estStoneWt) || 0;
+    const netWt = Math.max(0, gw - esw);
+    const spGram = parseFloat(spotPriceForMetal(metalName, metalSpotPrices)) || 0;
+    const meltValue = netWt * (parseFloat(purityValue) || 0) * spGram;
+    const buyTradeValue = meltValue * (parseFloat(buyPctStr) || 0) / 100;
+    const pawnValue = meltValue * (parseFloat(pawnPctStr) || 0) / 100;
+    return { netWt, meltValue, buyTradeValue, pawnValue };
+  };
+
+  const updateScrapFixedRow = (key, field, value) => {
+    setScrapFixedRows(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
+  };
+
+  const addScrapCustomRow = () => {
+    setScrapCustomRows(prev => [...prev, {
+      id: Date.now() + Math.random(),
+      metalTypeId: '', metal: '', purityId: '', purityLabel: '', purityValue: 0,
+      ...emptyScrapRowData(),
+    }]);
+  };
+  const updateScrapCustomRow = (id, field, value) => {
+    setScrapCustomRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+  const removeScrapCustomRow = (id) => setScrapCustomRows(prev => prev.filter(r => r.id !== id));
+
+  const handleScrapCustomMetalChange = (id, typeId, purityId) => {
+    const type = preciousMetalTypes.find(t => String(t.id) === String(typeId));
+    const purities = allMetalPurities[typeId] || [];
+    const p = purities.find(pu => String(pu.id) === String(purityId));
+    if (!type || !p) return;
+    const purityLabel = p.purity || String(p.value || '');
+    setScrapCustomRows(prev => prev.map(r => r.id === id ? {
+      ...r,
+      metalTypeId: typeId,
+      metal: type.type,
+      purityId,
+      purityLabel: `${purityLabel} ${type.type}`,
+      purityValue: parseFloat(p.value) || 0,
+      buyPct: getScrapPctDefault(typeId, 'buy', 70),
+      pawnPct: getScrapPctDefault(typeId, 'pawn', 50),
+    } : r));
+  };
+
+  const handleScrapRowPhoto = (file, onSet) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onSet(reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  // Raw (unscaled) active rows — used both for the table and the summary totals.
+  const getActiveScrapRows = () => {
+    const rows = [];
+    SCRAP_FIXED_ROWS.forEach(def => {
+      const data = scrapFixedRows[def.key];
+      if (!data || !(parseFloat(data.grossWt) > 0)) return;
+      const buyPct = data.buyPct !== '' ? data.buyPct : getScrapPctDefault(METAL_TYPE_ID_BY_NAME[def.metal], 'buy', 70);
+      const pawnPct = data.pawnPct !== '' ? data.pawnPct : getScrapPctDefault(METAL_TYPE_ID_BY_NAME[def.metal], 'pawn', 50);
+      const computed = computeScrapRowValues(def.purityValue, def.metal, data.grossWt, data.estStoneWt, buyPct, pawnPct);
+      rows.push({ metal: def.metal, purityLabel: def.purityLabel, purityValue: def.purityValue, ...data, ...computed });
+    });
+    scrapCustomRows.forEach(row => {
+      if (!(parseFloat(row.grossWt) > 0) || !row.metal) return;
+      const buyPct = row.buyPct !== '' ? row.buyPct : getScrapPctDefault(row.metalTypeId, 'buy', 70);
+      const pawnPct = row.pawnPct !== '' ? row.pawnPct : getScrapPctDefault(row.metalTypeId, 'pawn', 50);
+      const computed = computeScrapRowValues(row.purityValue, row.metal, row.grossWt, row.estStoneWt, buyPct, pawnPct);
+      rows.push({ ...row, ...computed });
+    });
+    return rows;
+  };
+
+  function buildScrapItems() {
+    const activeRows = getActiveScrapRows();
+    const suggestedBuyTotal = activeRows.reduce((s, r) => s + r.buyTradeValue, 0);
+    const finalPriceNum = parseFloat(scrapFinalPrice) || 0;
+    const scaleRatio = (scrapFinalPriceManual && suggestedBuyTotal > 0 && finalPriceNum > 0)
+      ? finalPriceNum / suggestedBuyTotal
+      : 1;
+
+    return activeRows.map((r, idx) => {
+      const scaledBuy = r.buyTradeValue * scaleRatio;
+      return {
+        id: Date.now() + idx + Math.random(),
+        item: `${r.purityLabel} Scrap`,
+        category: 'Scrap',
+        serial: '', serial_number: '',
+        qty: parseInt(r.pieces) || 1,
+        amount: scaledBuy || r.pawnValue || 0,
+        precious_metal_type: r.metal,
+        metal_category: 'Scrap',
+        jewelry_color: '',
+        metal_purity: r.purityLabel,
+        purity_value: r.purityValue,
+        metal_weight: r.netWt,
+        metal_spot_price: parseFloat(spotPriceForMetal(r.metal, metalSpotPrices)) || 0,
+        est_metal_value: r.meltValue.toFixed(2),
+        primary_gem_category: null,
+        secondary_gems: [],
+        pawn_price: r.pawnValue,
+        buy_price: scaledBuy,
+        melt_value: r.meltValue,
+        paid_amount: scaledBuy,
+        price_estimates: { pawn: r.pawnValue, buy: scaledBuy, melt: r.meltValue },
+        images: r.image ? [{ url: r.image, isPrimary: true, file: null, type: 'photo' }] : [],
+        short_desc: `${r.purityLabel} Scrap - ${r.netWt.toFixed(2)}g`,
+        long_desc: [`${r.purityLabel} Scrap`, r.notes].filter(Boolean).join(' · '),
+        sourceEstimator: 'jewelry',
+        mode: 'scrap',
+      };
+    });
+  }
+
+  function resetScrapForm() {
+    setScrapFixedRows(SCRAP_FIXED_ROWS.reduce((acc, r) => { acc[r.key] = emptyScrapRowData(); return acc; }, {}));
+    setScrapCustomRows([]);
+    setScrapFinalPrice('');
+    setScrapFinalPriceManual(false);
+  }
+
+  function handleSaveScrapBatch() {
+    const items = buildScrapItems();
+    if (items.length === 0) return;
+    items.forEach(item => onSaveItem(item));
+  }
+
+  function handleSaveScrapBatchAndAdd() {
+    const items = buildScrapItems();
+    if (items.length === 0) return;
+    items.forEach(item => onSaveItem(item));
+    resetScrapForm();
+  }
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden', ...(readOnly && { pointerEvents: 'none', userSelect: 'none' }) }}>
 
@@ -1146,7 +1362,8 @@ export default function JewelryIntakeScreen({
         </Box>
       </Box>
 
-      {/* Main 3-column content */}
+      {!showScrapBatchUI ? (
+      /* Main 3-column content */
       <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
 
         {/* ── LEFT: scrollable form ── */}
@@ -1679,6 +1896,236 @@ export default function JewelryIntakeScreen({
 
         </Box>
       </Box>
+      ) : (
+      /* ── Scrap Lot batch entry ── */
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+
+        {/* Header: original entry note + live spot prices */}
+        <Box sx={{ px: 2.5, py: 1.5, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', borderBottom: '1px solid #e8e8e8', bgcolor: 'white', flexShrink: 0 }}>
+          <Box>
+            <Typography variant="body2" color="text.secondary">
+              Original Entry: <Typography component="span" variant="body2" fontWeight={700} color={GREEN}>{initialEntry || 'scrap'}</Typography>
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              Enter weights for each metal/purity group. Rows with zero or blank gross weight are ignored automatically.
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Avatar sx={{ width: 32, height: 32, bgcolor: '#f2a900', fontSize: 13, fontWeight: 700 }}>Au</Avatar>
+              <Box>
+                <Typography variant="body2" fontWeight={700} lineHeight={1.2}>Gold</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  ${(parseFloat(metalSpotPrices.CADXAU) || 0).toFixed(2)}/g | ${((parseFloat(metalSpotPrices.CADXAU) || 0) * 31.1035).toFixed(2)}/oz
+                </Typography>
+              </Box>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Avatar sx={{ width: 32, height: 32, bgcolor: '#9e9e9e', fontSize: 13, fontWeight: 700 }}>Ag</Avatar>
+              <Box>
+                <Typography variant="body2" fontWeight={700} lineHeight={1.2}>Silver</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  ${(parseFloat(metalSpotPrices.CADXAG) || 0).toFixed(2)}/g | ${((parseFloat(metalSpotPrices.CADXAG) || 0) * 31.1035).toFixed(2)}/oz
+                </Typography>
+              </Box>
+            </Box>
+            <Button size="small" variant="outlined" startIcon={<MuiIcons.Refresh sx={{ fontSize: 14 }} />}
+              onClick={() => fetchLiveSpotPrice('Gold')}
+              sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12, borderColor: GREEN, color: GREEN }}>
+              Refresh Spot
+            </Button>
+          </Box>
+        </Box>
+
+        {/* Table */}
+        <Box sx={{ flex: 1, overflow: 'auto', px: 2.5, py: 2 }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow sx={{ bgcolor: '#f8f9fa' }}>
+                {['Photo','Metal / Purity'].map(h => (
+                  <TableCell key={h} sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary' }}>{h}</TableCell>
+                ))}
+                {['Pieces','Gross Wt (g)','Est Stone Wt (g)','Net Wt (g)','Melt Value','Buy/Trade %','Buy/Trade Value','Pawn %','Pawn Value'].map(h => (
+                  <TableCell key={h} align="right" sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary' }}>{h}</TableCell>
+                ))}
+                <TableCell sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary' }}>Notes</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {SCRAP_FIXED_ROWS.map((def, i) => {
+                const data = scrapFixedRows[def.key];
+                const buyPct = data.buyPct !== '' ? data.buyPct : getScrapPctDefault(METAL_TYPE_ID_BY_NAME[def.metal], 'buy', 70);
+                const pawnPct = data.pawnPct !== '' ? data.pawnPct : getScrapPctDefault(METAL_TYPE_ID_BY_NAME[def.metal], 'pawn', 50);
+                const { netWt, meltValue, buyTradeValue, pawnValue } = computeScrapRowValues(def.purityValue, def.metal, data.grossWt, data.estStoneWt, buyPct, pawnPct);
+                const hasWeight = parseFloat(data.grossWt) > 0;
+                return (
+                  <TableRow key={def.key} sx={{ bgcolor: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                    <TableCell>
+                      <ScrapPhotoCell image={data.image} onChange={(file) => handleScrapRowPhoto(file, (dataUrl) => updateScrapFixedRow(def.key, 'image', dataUrl))} />
+                    </TableCell>
+                    <TableCell><Typography variant="body2" fontWeight={600}>{def.purityLabel}</Typography></TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" type="number" value={data.pieces} onChange={e => updateScrapFixedRow(def.key, 'pieces', e.target.value)} sx={{ width: 64 }} inputProps={{ min: 0 }} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" type="number" value={data.grossWt} onChange={e => updateScrapFixedRow(def.key, 'grossWt', e.target.value)} sx={{ width: 80 }} inputProps={{ min: 0, step: 0.01 }} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" type="number" value={data.estStoneWt} onChange={e => updateScrapFixedRow(def.key, 'estStoneWt', e.target.value)} sx={{ width: 80 }} inputProps={{ min: 0, step: 0.01 }} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" value={hasWeight ? netWt.toFixed(2) : '—'} disabled
+                        sx={{ width: 80, '& .MuiInputBase-input': { bgcolor: '#f5f5f5' } }} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2">{hasWeight ? `$${meltValue.toFixed(2)}` : '—'}</Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" type="number" value={buyPct} onChange={e => updateScrapFixedRow(def.key, 'buyPct', e.target.value)}
+                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" fontWeight={600}>{hasWeight ? `$${buyTradeValue.toFixed(2)}` : '$0.00'}</Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" type="number" value={pawnPct} onChange={e => updateScrapFixedRow(def.key, 'pawnPct', e.target.value)}
+                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" fontWeight={600}>{hasWeight ? `$${pawnValue.toFixed(2)}` : '$0.00'}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <TextField size="small" value={data.notes} onChange={e => updateScrapFixedRow(def.key, 'notes', e.target.value)} sx={{ width: 140 }} placeholder="Notes" />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+
+              <TableRow>
+                <TableCell colSpan={12} sx={{ borderBottom: 'none', pt: 2, pb: 0.5 }}>
+                  <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
+                    Custom Rows
+                    <Tooltip title="Add a row for any metal/purity not covered above (e.g. Platinum, Palladium, or unusual gold karats).">
+                      <MuiIcons.InfoOutlined sx={{ fontSize: 13, ml: 0.5, color: 'text.disabled' }} />
+                    </Tooltip>
+                  </Typography>
+                </TableCell>
+              </TableRow>
+
+              {scrapCustomRows.map((row, i) => {
+                const buyPct = row.buyPct !== '' ? row.buyPct : getScrapPctDefault(row.metalTypeId, 'buy', 70);
+                const pawnPct = row.pawnPct !== '' ? row.pawnPct : getScrapPctDefault(row.metalTypeId, 'pawn', 50);
+                const { netWt, meltValue, buyTradeValue, pawnValue } = computeScrapRowValues(row.purityValue, row.metal, row.grossWt, row.estStoneWt, buyPct, pawnPct);
+                const hasWeight = parseFloat(row.grossWt) > 0;
+                const purityOptions = row.metalTypeId ? (allMetalPurities[row.metalTypeId] || []) : [];
+                return (
+                  <TableRow key={row.id} sx={{ bgcolor: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                    <TableCell>
+                      <ScrapPhotoCell image={row.image} onChange={(file) => handleScrapRowPhoto(file, (dataUrl) => updateScrapCustomRow(row.id, 'image', dataUrl))} />
+                    </TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        <FormControl size="small" sx={{ width: 90 }}>
+                          <Select displayEmpty value={row.metalTypeId}
+                            onChange={e => setScrapCustomRows(prev => prev.map(r => r.id === row.id ? { ...r, metalTypeId: e.target.value, purityId: '', metal: '', purityLabel: '', purityValue: 0 } : r))}>
+                            <MenuItem value=""><em>Metal</em></MenuItem>
+                            {preciousMetalTypes.map(t => <MenuItem key={t.id} value={t.id}>{t.type}</MenuItem>)}
+                          </Select>
+                        </FormControl>
+                        <FormControl size="small" sx={{ width: 90 }} disabled={!row.metalTypeId}>
+                          <Select displayEmpty value={row.purityId} onChange={e => handleScrapCustomMetalChange(row.id, row.metalTypeId, e.target.value)}>
+                            <MenuItem value=""><em>Purity</em></MenuItem>
+                            {purityOptions.map(p => <MenuItem key={p.id} value={p.id}>{p.purity || p.value}</MenuItem>)}
+                          </Select>
+                        </FormControl>
+                      </Box>
+                    </TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" type="number" value={row.pieces} onChange={e => updateScrapCustomRow(row.id, 'pieces', e.target.value)} sx={{ width: 64 }} inputProps={{ min: 0 }} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" type="number" value={row.grossWt} onChange={e => updateScrapCustomRow(row.id, 'grossWt', e.target.value)} sx={{ width: 80 }} inputProps={{ min: 0, step: 0.01 }} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" type="number" value={row.estStoneWt} onChange={e => updateScrapCustomRow(row.id, 'estStoneWt', e.target.value)} sx={{ width: 80 }} inputProps={{ min: 0, step: 0.01 }} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" value={hasWeight ? netWt.toFixed(2) : '—'} disabled sx={{ width: 80, '& .MuiInputBase-input': { bgcolor: '#f5f5f5' } }} />
+                    </TableCell>
+                    <TableCell align="right"><Typography variant="body2">{hasWeight ? `$${meltValue.toFixed(2)}` : '—'}</Typography></TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" type="number" value={buyPct} onChange={e => updateScrapCustomRow(row.id, 'buyPct', e.target.value)}
+                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} disabled={!row.metal} />
+                    </TableCell>
+                    <TableCell align="right"><Typography variant="body2" fontWeight={600}>{hasWeight ? `$${buyTradeValue.toFixed(2)}` : '$0.00'}</Typography></TableCell>
+                    <TableCell align="right">
+                      <TextField size="small" type="number" value={pawnPct} onChange={e => updateScrapCustomRow(row.id, 'pawnPct', e.target.value)}
+                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} disabled={!row.metal} />
+                    </TableCell>
+                    <TableCell align="right"><Typography variant="body2" fontWeight={600}>{hasWeight ? `$${pawnValue.toFixed(2)}` : '$0.00'}</Typography></TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <TextField size="small" value={row.notes} onChange={e => updateScrapCustomRow(row.id, 'notes', e.target.value)} sx={{ width: 110 }} placeholder="Notes" />
+                        <IconButton size="small" color="error" onClick={() => removeScrapCustomRow(row.id)}>
+                          <MuiIcons.Delete sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+
+              <TableRow>
+                <TableCell colSpan={12} sx={{ borderBottom: 'none', pt: 0.5 }}>
+                  <Button size="small" startIcon={<MuiIcons.Add sx={{ fontSize: 14 }} />} onClick={addScrapCustomRow}
+                    sx={{ textTransform: 'none', fontSize: 12, color: GREEN }}>
+                    Add Custom Row
+                  </Button>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </Box>
+
+        {/* Summary footer */}
+        <Box sx={{ px: 2.5, py: 1.5, borderTop: '1px solid #e0e0e0', bgcolor: 'white', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+          {(() => {
+            const activeRows = getActiveScrapRows();
+            const suggestedBuyTotal = activeRows.reduce((s, r) => s + r.buyTradeValue, 0);
+            const suggestedPawnTotal = activeRows.reduce((s, r) => s + r.pawnValue, 0);
+            return (
+              <>
+                <Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Lines to Create</Typography>
+                  <Typography variant="h6" fontWeight={700}>{activeRows.length}</Typography>
+                  <Typography variant="caption" color="text.secondary">Only rows with gross weight entered will be used.</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Suggested Buy/Trade Total</Typography>
+                  <Typography variant="h6" fontWeight={700} color={GREEN}>${suggestedBuyTotal.toFixed(2)}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Suggested Pawn Total</Typography>
+                  <Typography variant="h6" fontWeight={700}>${suggestedPawnTotal.toFixed(2)}</Typography>
+                </Box>
+                <Box sx={{ ml: 'auto' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Final Price *</Typography>
+                  <TextField
+                    size="small"
+                    type="number"
+                    value={scrapFinalPriceManual ? scrapFinalPrice : suggestedBuyTotal.toFixed(2)}
+                    onChange={e => { setScrapFinalPrice(e.target.value); setScrapFinalPriceManual(true); }}
+                    InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
+                    sx={{ width: 140 }}
+                  />
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>This is the total amount for the selected items.</Typography>
+                </Box>
+              </>
+            );
+          })()}
+        </Box>
+      </Box>
+      )}
 
       {/* Bottom action bar */}
       <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0, pointerEvents: 'auto', userSelect: 'auto' }}>
@@ -1719,6 +2166,25 @@ export default function JewelryIntakeScreen({
             sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
             Close
           </Button>
+        ) : showScrapBatchUI ? (
+          <>
+            <Button size="small" variant="outlined" color="inherit" onClick={() => onBack('pawn')}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Cancel
+            </Button>
+            <Button size="small" variant="outlined" onClick={() => onBack('pawn')}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Back to Results
+            </Button>
+            <Button size="small" variant="contained" onClick={handleSaveScrapBatch} disabled={getActiveScrapRows().length === 0}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN } }}>
+              Save Item(s) to Ticket
+            </Button>
+            <Button size="small" variant="outlined" onClick={handleSaveScrapBatchAndAdd} disabled={getActiveScrapRows().length === 0}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, borderColor: GREEN, color: GREEN }}>
+              Save + Add Another
+            </Button>
+          </>
         ) : (
           <>
             <Button size="small" variant="outlined" color="inherit" onClick={() => onBack('pawn')}
