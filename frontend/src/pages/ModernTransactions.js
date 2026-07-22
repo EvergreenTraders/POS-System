@@ -23,6 +23,78 @@ const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 const BUY_BLUE = '#0284c7';
 
+// ── "scrap" search-bar shortcut parsing ──────────────────────────────────────
+// Recognizes a weight + purity (in any order, e.g. "5.6g 14k" or "14k 5.6g")
+// typed into the transactions search bar. Purity fractions mirror the fixed
+// rows in JewelryIntakeScreen's SCRAP_FIXED_ROWS/backend metal_purity seed data.
+const SCRAP_PURITY_BY_KARAT = {
+  10: { rowKey: '10k_gold', value: 0.417 },
+  14: { rowKey: '14k_gold', value: 0.585 },
+  18: { rowKey: '18k_gold', value: 0.750 },
+  22: { rowKey: '22k_gold', value: 0.917 },
+};
+const SCRAP_PURITY_BY_DECIMAL = [
+  { rowKey: '10k_gold',   value: 0.417, metal: 'Gold',   karat: 10 },
+  { rowKey: '14k_gold',   value: 0.585, metal: 'Gold',   karat: 14 },
+  { rowKey: '18k_gold',   value: 0.750, metal: 'Gold',   karat: 18 },
+  { rowKey: '22k_gold',   value: 0.917, metal: 'Gold',   karat: 22 },
+  { rowKey: 'silver_925', value: 0.925, metal: 'Silver', karat: null },
+];
+const SCRAP_METAL_WORDS = { gold: 'Gold', silver: 'Silver', platinum: 'Platinum', palladium: 'Palladium' };
+
+function parseQuickScrapEntry(text) {
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  let hasScrapWord = false;
+  let weightG = null;
+  let karat = null;
+  let purityValue = null;
+  let metal = null;
+  let rowKey = null;
+  const leftover = [];
+
+  for (const tok of tokens) {
+    const lower = tok.toLowerCase();
+    let m;
+    if (lower === 'scrap') { hasScrapWord = true; continue; }
+    if (SCRAP_METAL_WORDS[lower]) { metal = SCRAP_METAL_WORDS[lower]; continue; }
+    if (weightG === null && (m = lower.match(/^(\d+(?:\.\d+)?)g$/))) {
+      weightG = parseFloat(m[1]);
+      continue;
+    }
+    if (purityValue === null && (m = lower.match(/^(\d+)k$/))) {
+      const k = parseInt(m[1], 10);
+      const known = SCRAP_PURITY_BY_KARAT[k];
+      karat = k;
+      purityValue = known ? known.value : Math.round((k / 24) * 1000) / 1000;
+      rowKey = known ? known.rowKey : null;
+      metal = metal || 'Gold';
+      continue;
+    }
+    if (purityValue === null && (m = lower.match(/^0?(\.\d+)$/))) {
+      const dec = parseFloat(`0${m[1]}`);
+      const nearest = SCRAP_PURITY_BY_DECIMAL.reduce((best, c) =>
+        Math.abs(c.value - dec) < Math.abs(best.value - dec) ? c : best, SCRAP_PURITY_BY_DECIMAL[0]);
+      if (Math.abs(nearest.value - dec) <= 0.01) {
+        purityValue = nearest.value;
+        karat = nearest.karat;
+        rowKey = nearest.rowKey;
+        metal = metal || nearest.metal;
+      } else {
+        purityValue = dec;
+        metal = metal || 'Gold';
+      }
+      continue;
+    }
+    leftover.push(tok);
+  }
+
+  const hasWeightAndPurity = weightG != null && purityValue != null;
+  const isBulkScrap = hasScrapWord || (hasWeightAndPurity && leftover.length === 0);
+  const isUniqueWithPrefill = !isBulkScrap && hasWeightAndPurity;
+
+  return { hasScrapWord, weightG, karat, purityValue, metal, rowKey, leftover, isBulkScrap, isUniqueWithPrefill };
+}
+
 // ── Dashboard-style placeholder cards shown when the workspace is empty ──────
 // Copied from Home.js's Messages/Tasks/Loans-Layaways widgets (same dummy data,
 // not wired to any live source) so this screen doubles as a landing page.
@@ -692,6 +764,10 @@ export default function ModernTransactions() {
   const [quickSaleMaxAmount, setQuickSaleMaxAmount] = useState(100);
   const [employees, setEmployees] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
+  const [buyAutoScrap, setBuyAutoScrap]   = useState(false);
+  const [scrapPrefill, setScrapPrefill]   = useState(null);
+  const [buyAutoUnique, setBuyAutoUnique] = useState(false);
+  const [uniquePrefill, setUniquePrefill] = useState(null);
   const [buyOpen, setBuyOpen] = useState(() => {
     if (location.state?.customerUpdated) {
       const raw = sessionStorage.getItem('pendingBuyState');
@@ -1661,6 +1737,10 @@ export default function ModernTransactions() {
       setSaleOpen(true);
     } else if (type === 'buy') {
       if (!customer) { setNoCustomerWarning('buy ticket'); return; }
+      setBuyAutoScrap(false);
+      setScrapPrefill(null);
+      setBuyAutoUnique(false);
+      setUniquePrefill(null);
       setBuyOpen(true);
     } else if (type === 'trade') {
       if (!customer) { setNoCustomerWarning('trade ticket'); return; }
@@ -1714,6 +1794,10 @@ export default function ModernTransactions() {
     });
     setBuyOpen(false);
     setExistingBuyData(null);
+    setBuyAutoScrap(false);
+    setScrapPrefill(null);
+    setBuyAutoUnique(false);
+    setUniquePrefill(null);
   };
 
   const handleAddTradeToWorkspace = (tradeData) => {
@@ -1764,6 +1848,10 @@ export default function ModernTransactions() {
     setTradeOpen(false);
     setExistingTradeData(null);
     setExistingBuyData({ buyItems, ticketNote, showOnReceipt });
+    setBuyAutoScrap(false);
+    setScrapPrefill(null);
+    setBuyAutoUnique(false);
+    setUniquePrefill(null);
     setBuyOpen(true);
   };
 
@@ -2022,16 +2110,28 @@ export default function ModernTransactions() {
       <BuyTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => { setBuyOpen(false); setExistingBuyData(null); }}
+        onClose={() => {
+          setBuyOpen(false); setExistingBuyData(null);
+          setBuyAutoScrap(false); setScrapPrefill(null);
+          setBuyAutoUnique(false); setUniquePrefill(null);
+        }}
         onAddToWorkspace={handleAddBuyToWorkspace}
         onRemoveFromWorkspace={(ticketId) => {
           setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'BUY' && t.ticketId === ticketId)));
           setBuyOpen(false);
           setExistingBuyData(null);
+          setBuyAutoScrap(false);
+          setScrapPrefill(null);
+          setBuyAutoUnique(false);
+          setUniquePrefill(null);
         }}
         onConvertTo={handleBuyConvertTo}
         existingBuyData={existingBuyData}
         workspaceTradeTickets={workspaceTradeTickets}
+        autoOpenScrap={buyAutoScrap}
+        scrapPrefill={scrapPrefill}
+        autoOpenUnique={buyAutoUnique}
+        uniqueParsedValues={uniquePrefill}
       />
     );
   }
@@ -2099,9 +2199,30 @@ export default function ModernTransactions() {
           value={search}
           onChange={e => setSearch(e.target.value)}
           onKeyDown={e => {
-            if (e.key === 'Enter' && search.trim().toLowerCase().includes('scrap')) {
+            if (e.key !== 'Enter') return;
+            const parsed = parseQuickScrapEntry(search);
+            if (parsed.isBulkScrap) {
               setSearch('');
-              navigate('/scrap');
+              setExistingBuyData(null);
+              setBuyAutoScrap(true);
+              setScrapPrefill(parsed.rowKey && parsed.weightG != null
+                ? { rowKey: parsed.rowKey, grossWt: String(parsed.weightG) }
+                : null);
+              setBuyAutoUnique(false);
+              setUniquePrefill(null);
+              setBuyOpen(true);
+            } else if (parsed.isUniqueWithPrefill) {
+              setSearch('');
+              setExistingBuyData(null);
+              setBuyAutoScrap(false);
+              setScrapPrefill(null);
+              setUniquePrefill({
+                weight: parsed.weightG,
+                metal: parsed.metal,
+                purity: parsed.karat != null ? `${parsed.karat}K` : parsed.purityValue,
+              });
+              setBuyAutoUnique(true);
+              setBuyOpen(true);
             }
           }}
           placeholder="Scan barcode or search (item, customer, ticket, receipt, SKU, phone...)"
@@ -2473,7 +2594,12 @@ export default function ModernTransactions() {
                         tx={tx}
                         buyIcon={transactionTypes.find(t => t.type === 'buy')?.icon}
                         buyColor={transactionTypes.find(t => t.type === 'buy')?.color}
-                        onOpen={() => { setExistingBuyData(tx); setBuyOpen(true); }}
+                        onOpen={() => {
+                          setExistingBuyData(tx);
+                          setBuyAutoScrap(false); setScrapPrefill(null);
+                          setBuyAutoUnique(false); setUniquePrefill(null);
+                          setBuyOpen(true);
+                        }}
                         onVoid={() => setVoidConfirm(tx)}
                       />
                     ) : tx.type === 'TRADE' ? (

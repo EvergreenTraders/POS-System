@@ -486,6 +486,8 @@ export default function JewelryIntakeScreen({
   parsedValues = null,
   editItem = null,
   readOnly = false,
+  initialMode = 'unique',
+  scrapPrefill = null,
   onBack,
   onSaveItem,
   onSaveAndAddAnother,
@@ -504,6 +506,7 @@ export default function JewelryIntakeScreen({
   const pendingPurityRef  = useRef(null);
   const parsedAppliedRef  = useRef(false);
   const editAppliedRef    = useRef(false);
+  const scrapPrefillAppliedRef = useRef(false);
   // Metal lookup data from API
   const [preciousMetalTypes,    setPreciousMetalTypes]    = useState([]);
   const [metalCategories,       setMetalCategories]       = useState([]);
@@ -531,7 +534,7 @@ export default function JewelryIntakeScreen({
   const [gemTab,               setGemTab]               = useState(0);
   const [secGemDialogOpen,     setSecGemDialogOpen]     = useState(false);
   const [editingSecIdx,        setEditingSecIdx]        = useState(null);
-  const [mode,              setMode]              = useState('unique');
+  const [mode,              setMode]              = useState(initialMode);
   const [suggestCatalog,    setSuggestCatalog]    = useState(true);
   const [paidAmount,        setPaidAmount]        = useState('');
   // Pricing
@@ -1180,6 +1183,22 @@ export default function JewelryIntakeScreen({
   const updateScrapFixedRow = (key, field, value) => {
     setScrapFixedRows(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
   };
+
+  // Apply a weight prefill parsed from the transactions search bar (e.g. "5.6g 14k")
+  // into the matching fixed scrap row, once.
+  useEffect(() => {
+    if (!scrapPrefill?.rowKey || scrapPrefillAppliedRef.current) return;
+    if (!SCRAP_FIXED_ROWS.some(r => r.key === scrapPrefill.rowKey)) return;
+    scrapPrefillAppliedRef.current = true;
+    setScrapFixedRows(prev => ({
+      ...prev,
+      [scrapPrefill.rowKey]: {
+        ...prev[scrapPrefill.rowKey],
+        grossWt: scrapPrefill.grossWt ?? prev[scrapPrefill.rowKey].grossWt,
+        pieces: prev[scrapPrefill.rowKey].pieces || '1',
+      },
+    }));
+  }, [scrapPrefill]);
 
   const addScrapCustomRow = () => {
     setScrapCustomRows(prev => [...prev, {

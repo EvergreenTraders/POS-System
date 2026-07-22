@@ -109,6 +109,10 @@ export default function BuyTransactionScreen({
   onConvertTo,
   existingBuyData,
   workspaceTradeTickets = [],
+  autoOpenScrap = false,
+  scrapPrefill = null,
+  autoOpenUnique = false,
+  uniqueParsedValues = null,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -166,6 +170,23 @@ export default function BuyTransactionScreen({
   useEffect(() => {
     if (existingBuyData?.ticketId) return;
     syncBuyTicketCounter().then(bumped => { if (bumped) setTicketId(generateBuyTicketId()); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // "scrap"/weight+purity shortcuts from the transactions search bar — jump
+  // straight into the intake screen instead of landing on the buy ticket table.
+  useEffect(() => {
+    if (autoOpenScrap) {
+      setParsedValues(null);
+      setIntakeEntry('');
+      setEditingIntakeItem(null);
+      setIntakeOpen(true);
+    } else if (autoOpenUnique) {
+      setParsedValues(uniqueParsedValues);
+      setIntakeEntry('');
+      setEditingIntakeItem(null);
+      setIntakeOpen(true);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -583,6 +604,8 @@ export default function BuyTransactionScreen({
         initialEntry={intakeEntry}
         parsedValues={editingIntakeItem ? null : parsedValues}
         editItem={editingIntakeItem}
+        initialMode={autoOpenScrap ? 'scrap' : 'unique'}
+        scrapPrefill={autoOpenScrap ? scrapPrefill : null}
         onBack={handleIntakeBack}
         onSaveItem={handleIntakeSave}
         onSaveAndAddAnother={handleIntakeSaveAndAdd}
