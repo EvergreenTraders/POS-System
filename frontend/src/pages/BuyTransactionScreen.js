@@ -368,19 +368,26 @@ export default function BuyTransactionScreen({
     setIntakeOpen(true);
   };
 
-  const jewelryItemToBuyItem = (item, seq) => ({
-    _lineId: Date.now() + Math.random(),
-    part_no: `${ticketId}-${String(seq).padStart(2, '0')}`,
-    category_id: categories.find(c => c.name === item.category)?.id || '',
-    category_name: item.category || '',
-    description: item.item || item.short_desc || '',
-    serial_number: item.serial_number || item.serial || '',
-    qty: 1,
-    paid: parseFloat(item.buy_price) || parseFloat(item.paid_amount) || 0,
-    images: item.images || [],
-    sourceEstimator: 'jewelry',
-    jewelryData: item,
-  });
+  const jewelryItemToBuyItem = (item, seq) => {
+    const qty = parseInt(item.qty) || 1;
+    // Scrap lots price the whole weighed group at once (buy_price/paid_amount is
+    // the lot total) — divide by pieces so qty * paid reproduces that total rather
+    // than multiplying it out again.
+    const totalPaid = parseFloat(item.buy_price) || parseFloat(item.paid_amount) || 0;
+    return {
+      _lineId: Date.now() + Math.random(),
+      part_no: `${ticketId}-${String(seq).padStart(2, '0')}`,
+      category_id: categories.find(c => c.name === item.category)?.id || '',
+      category_name: item.category || '',
+      description: item.item || item.short_desc || '',
+      serial_number: item.serial_number || item.serial || '',
+      qty,
+      paid: totalPaid / qty,
+      images: item.images || [],
+      sourceEstimator: 'jewelry',
+      jewelryData: item,
+    };
+  };
 
   const handleIntakeBack = () => {
     setIntakeOpen(false);
@@ -604,7 +611,7 @@ export default function BuyTransactionScreen({
         initialEntry={intakeEntry}
         parsedValues={editingIntakeItem ? null : parsedValues}
         editItem={editingIntakeItem}
-        initialMode={autoOpenScrap ? 'scrap' : 'unique'}
+        initialMode={autoOpenScrap || editingIntakeItem?.mode === 'scrap' ? 'scrap' : 'unique'}
         scrapPrefill={autoOpenScrap ? scrapPrefill : null}
         onBack={handleIntakeBack}
         onSaveItem={handleIntakeSave}

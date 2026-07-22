@@ -25,22 +25,18 @@ const BUY_BLUE = '#0284c7';
 
 // ── "scrap" search-bar shortcut parsing ──────────────────────────────────────
 // Recognizes a weight + purity (in any order, e.g. "5.6g 14k" or "14k 5.6g")
-// typed into the transactions search bar. Purity fractions mirror the fixed
-// rows in JewelryIntakeScreen's SCRAP_FIXED_ROWS/backend metal_purity seed data.
-const SCRAP_PURITY_BY_KARAT = {
-  10: { rowKey: '10k_gold', value: 0.417 },
-  14: { rowKey: '14k_gold', value: 0.585 },
-  18: { rowKey: '18k_gold', value: 0.750 },
-  22: { rowKey: '22k_gold', value: 0.917 },
-};
+// typed into the transactions search bar. rowKey matches one of
+// JewelryIntakeScreen's SCRAP_FIXED_ROWS keys (one row per metal); the actual
+// purity option within that row is resolved there once its dropdown loads.
 const SCRAP_PURITY_BY_DECIMAL = [
-  { rowKey: '10k_gold',   value: 0.417, metal: 'Gold',   karat: 10 },
-  { rowKey: '14k_gold',   value: 0.585, metal: 'Gold',   karat: 14 },
-  { rowKey: '18k_gold',   value: 0.750, metal: 'Gold',   karat: 18 },
-  { rowKey: '22k_gold',   value: 0.917, metal: 'Gold',   karat: 22 },
-  { rowKey: 'silver_925', value: 0.925, metal: 'Silver', karat: null },
+  { rowKey: 'gold',   value: 0.417, metal: 'Gold',   karat: 10 },
+  { rowKey: 'gold',   value: 0.585, metal: 'Gold',   karat: 14 },
+  { rowKey: 'gold',   value: 0.750, metal: 'Gold',   karat: 18 },
+  { rowKey: 'gold',   value: 0.917, metal: 'Gold',   karat: 22 },
+  { rowKey: 'silver', value: 0.925, metal: 'Silver', karat: null },
 ];
 const SCRAP_METAL_WORDS = { gold: 'Gold', silver: 'Silver', platinum: 'Platinum', palladium: 'Palladium' };
+const SCRAP_ROW_KEY_BY_METAL = { Gold: 'gold', Silver: 'silver', Platinum: 'platinum', Palladium: 'palladium' };
 
 function parseQuickScrapEntry(text) {
   const tokens = text.trim().split(/\s+/).filter(Boolean);
@@ -49,7 +45,6 @@ function parseQuickScrapEntry(text) {
   let karat = null;
   let purityValue = null;
   let metal = null;
-  let rowKey = null;
   const leftover = [];
 
   for (const tok of tokens) {
@@ -63,10 +58,8 @@ function parseQuickScrapEntry(text) {
     }
     if (purityValue === null && (m = lower.match(/^(\d+)k$/))) {
       const k = parseInt(m[1], 10);
-      const known = SCRAP_PURITY_BY_KARAT[k];
       karat = k;
-      purityValue = known ? known.value : Math.round((k / 24) * 1000) / 1000;
-      rowKey = known ? known.rowKey : null;
+      purityValue = Math.round((k / 24) * 1000) / 1000;
       metal = metal || 'Gold';
       continue;
     }
@@ -77,7 +70,6 @@ function parseQuickScrapEntry(text) {
       if (Math.abs(nearest.value - dec) <= 0.01) {
         purityValue = nearest.value;
         karat = nearest.karat;
-        rowKey = nearest.rowKey;
         metal = metal || nearest.metal;
       } else {
         purityValue = dec;
@@ -88,6 +80,7 @@ function parseQuickScrapEntry(text) {
     leftover.push(tok);
   }
 
+  const rowKey = metal ? SCRAP_ROW_KEY_BY_METAL[metal] : null;
   const hasWeightAndPurity = weightG != null && purityValue != null;
   const isBulkScrap = hasScrapWord || (hasWeightAndPurity && leftover.length === 0);
   const isUniqueWithPrefill = !isBulkScrap && hasWeightAndPurity;
@@ -2206,7 +2199,7 @@ export default function ModernTransactions() {
               setExistingBuyData(null);
               setBuyAutoScrap(true);
               setScrapPrefill(parsed.rowKey && parsed.weightG != null
-                ? { rowKey: parsed.rowKey, grossWt: String(parsed.weightG) }
+                ? { rowKey: parsed.rowKey, grossWt: String(parsed.weightG), purityValue: parsed.purityValue, karat: parsed.karat }
                 : null);
               setBuyAutoUnique(false);
               setUniquePrefill(null);

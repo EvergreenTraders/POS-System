@@ -13,17 +13,19 @@ import { RadioGroup, Radio, Slider } from '@mui/material';
 const GREEN      = '#2e5c3e';
 const DARK_GREEN = '#1a3d28';
 
-// ── Scrap Lot batch entry — fixed metal/purity rows + custom rows ────────────
+// ── Scrap Lot batch entry — one fixed row per metal (purity chosen via dropdown) + custom rows ──
 // Purity fractions match backend/database/metal_estimator.sql's metal_purity seed data.
 const METAL_TYPE_ID_BY_NAME = { Gold: 1, Platinum: 2, Silver: 3, Palladium: 4 };
 const SCRAP_FIXED_ROWS = [
-  { key: '10k_gold',   metal: 'Gold',   purityLabel: '10K Gold',   purityValue: 0.417 },
-  { key: '14k_gold',   metal: 'Gold',   purityLabel: '14K Gold',   purityValue: 0.585 },
-  { key: '18k_gold',   metal: 'Gold',   purityLabel: '18K Gold',   purityValue: 0.750 },
-  { key: '22k_gold',   metal: 'Gold',   purityLabel: '22K Gold',   purityValue: 0.917 },
-  { key: 'silver_925', metal: 'Silver', purityLabel: '.925 Silver', purityValue: 0.925 },
+  { key: 'gold',      metal: 'Gold' },
+  { key: 'silver',    metal: 'Silver' },
+  { key: 'platinum',  metal: 'Platinum' },
+  { key: 'palladium', metal: 'Palladium' },
 ];
-const emptyScrapRowData = () => ({ pieces: '', grossWt: '', estStoneWt: '', notes: '', image: null, buyPct: '', pawnPct: '' });
+const emptyScrapRowData = () => ({
+  pieces: '', grossWt: '', estStoneWt: '', notes: '', image: null, buyPct: '', pawnPct: '',
+  purityId: '', purityLabel: '', purityValue: 0,
+});
 
 // ── Gem entry dialog — mirrors GemEstimator's primary/secondary gem form ──────
 const COLOR_SCALE = Array.from({ length: 23 }, (_, i) => String.fromCharCode(68 + i)); // D–Z
@@ -507,6 +509,7 @@ export default function JewelryIntakeScreen({
   const parsedAppliedRef  = useRef(false);
   const editAppliedRef    = useRef(false);
   const scrapPrefillAppliedRef = useRef(false);
+  const scrapEditAppliedRef = useRef(false);
   // Metal lookup data from API
   const [preciousMetalTypes,    setPreciousMetalTypes]    = useState([]);
   const [metalCategories,       setMetalCategories]       = useState([]);
@@ -560,17 +563,21 @@ export default function JewelryIntakeScreen({
   const [allMetalPurities, setAllMetalPurities] = useState({});
 
   const parsedParts = [category, colour, metal, purity.purity || String(purity.value || '')].filter(Boolean);
-  // Editing/viewing an already-saved item (even one originally created via the scrap
-  // batch flow, tagged mode:'scrap') always shows the normal single-item form — the
-  // batch table is only for creating new scrap lines, never for revisiting one line.
-  const showScrapBatchUI = mode === 'scrap' && !editItem;
+  // Editing an item originally created via the scrap batch flow (tagged mode:'scrap')
+  // reopens the Scrap Lot screen, scoped to just that item's metal row, so its
+  // weight/purity/notes can be autofilled and updated in place. Any other saved item
+  // (including a scrap item whose metal is somehow unrecognized) uses the normal form.
+  const editScrapRowKey = editItem?.mode === 'scrap'
+    ? SCRAP_FIXED_ROWS.find(r => r.metal === editItem.precious_metal_type)?.key ?? null
+    : null;
+  const showScrapBatchUI = mode === 'scrap' && (!editItem || !!editScrapRowKey);
 
   const breadcrumbs = [
     { label: 'Transactions',                          onClick: () => onBack('transactions') },
     { label: `${ticketLabel} (${ticketId ?? '—'})`,   onClick: () => onBack() },
     { label: 'Intake' },
     { label: 'Jewellery Item Intake' },
-    { label: showScrapBatchUI ? 'Scrap Batch Entry' : 'Unique Jewellery Item', current: true },
+    { label: showScrapBatchUI ? (editItem ? 'Edit Scrap Item' : 'Scrap Batch Entry') : 'Unique Jewellery Item', current: true },
   ];
 
   // ── Metal data fetching (ported from MetalEstimator) ─────────────────────
@@ -1184,21 +1191,116 @@ export default function JewelryIntakeScreen({
     setScrapFixedRows(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
   };
 
-  // Apply a weight prefill parsed from the transactions search bar (e.g. "5.6g 14k")
-  // into the matching fixed scrap row, once.
-  useEffect(() => {
-    if (!scrapPrefill?.rowKey || scrapPrefillAppliedRef.current) return;
-    if (!SCRAP_FIXED_ROWS.some(r => r.key === scrapPrefill.rowKey)) return;
-    scrapPrefillAppliedRef.current = true;
+  const handleScrapFixedPurityChange = (key, typeId, purityId) => {
+    const purities = allMetalPurities[typeId] || [];
+    const p = purities.find(pu => String(pu.id) === String(purityId));
+    if (!p) {
+      setScrapFixedRows(prev => ({ ...prev, [key]: { ...prev[key], purityId: '', purityLabel: '', purityValue: 0 } }));
+      return;
+    }
+    const metalName = SCRAP_FIXED_ROWS.find(r => r.key === key)?.metal || '';
+    const purityLabel = p.purity || String(p.value || '');
     setScrapFixedRows(prev => ({
       ...prev,
-      [scrapPrefill.rowKey]: {
-        ...prev[scrapPrefill.rowKey],
-        grossWt: scrapPrefill.grossWt ?? prev[scrapPrefill.rowKey].grossWt,
-        pieces: prev[scrapPrefill.rowKey].pieces || '1',
+      [key]: {
+        ...prev[key],
+        purityId,
+        purityLabel: `${purityLabel} ${metalName}`,
+        purityValue: parseFloat(p.value) || 0,
+        buyPct: getScrapPctDefault(typeId, 'buy', 70),
+        pawnPct: getScrapPctDefault(typeId, 'pawn', 50),
       },
     }));
-  }, [scrapPrefill]);
+  };
+
+  // Apply a weight + purity prefill parsed from the transactions search bar
+  // (e.g. "5.6g 14k") into the matching fixed scrap row, once its purity
+  // options have loaded.
+  useEffect(() => {
+    if (!scrapPrefill?.rowKey || scrapPrefillAppliedRef.current) return;
+    const rowDef = SCRAP_FIXED_ROWS.find(r => r.key === scrapPrefill.rowKey);
+    if (!rowDef) return;
+    const typeId = METAL_TYPE_ID_BY_NAME[rowDef.metal];
+    const purities = allMetalPurities[typeId] || [];
+    if (!purities.length) return;
+    scrapPrefillAppliedRef.current = true;
+
+    let match = null;
+    if (scrapPrefill.karat != null) {
+      match = purities.find(p => p.purity?.toUpperCase() === `${scrapPrefill.karat}K`);
+    }
+    if (!match && scrapPrefill.purityValue != null) {
+      const nearest = purities.reduce((best, p) => {
+        const diff = Math.abs((parseFloat(p.value) || 0) - scrapPrefill.purityValue);
+        return (!best || diff < best.diff) ? { p, diff } : best;
+      }, null);
+      if (nearest && nearest.diff <= 0.01) match = nearest.p;
+    }
+
+    setScrapFixedRows(prev => ({
+      ...prev,
+      [rowDef.key]: {
+        ...prev[rowDef.key],
+        grossWt: scrapPrefill.grossWt ?? prev[rowDef.key].grossWt,
+        pieces: prev[rowDef.key].pieces || '1',
+        ...(match ? {
+          purityId: match.id,
+          purityLabel: `${match.purity || match.value} ${rowDef.metal}`,
+          purityValue: parseFloat(match.value) || 0,
+          buyPct: getScrapPctDefault(typeId, 'buy', 70),
+          pawnPct: getScrapPctDefault(typeId, 'pawn', 50),
+        } : {}),
+      },
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrapPrefill, allMetalPurities]);
+
+  // Editing a saved scrap item — autofill its metal row (weight, purity, pieces,
+  // notes, photo, buy/pawn %) once its purity options have loaded.
+  useEffect(() => {
+    if (!editScrapRowKey || scrapEditAppliedRef.current) return;
+    const typeId = METAL_TYPE_ID_BY_NAME[editItem.precious_metal_type];
+    const purities = allMetalPurities[typeId] || [];
+    if (!purities.length) return;
+    scrapEditAppliedRef.current = true;
+
+    const purityRaw = String(editItem.metal_purity || '')
+      .replace(new RegExp(`\\s*${editItem.precious_metal_type}$`, 'i'), '')
+      .trim();
+    let match = purities.find(p => p.purity?.toLowerCase() === purityRaw.toLowerCase());
+    if (!match && editItem.purity_value != null) {
+      const nearest = purities.reduce((best, p) => {
+        const diff = Math.abs((parseFloat(p.value) || 0) - parseFloat(editItem.purity_value));
+        return (!best || diff < best.diff) ? { p, diff } : best;
+      }, null);
+      if (nearest && nearest.diff <= 0.005) match = nearest.p;
+    }
+
+    const meltValue = parseFloat(editItem.melt_value) || 0;
+    const buyPct = meltValue > 0 ? String(Math.round((parseFloat(editItem.buy_price) || 0) / meltValue * 10000) / 100) : '';
+    const pawnPct = meltValue > 0 ? String(Math.round((parseFloat(editItem.pawn_price) || 0) / meltValue * 10000) / 100) : '';
+    const longDesc = editItem.long_desc || '';
+    const notes = longDesc.includes(' · ') ? longDesc.split(' · ').slice(1).join(' · ') : '';
+
+    setScrapFixedRows(prev => ({
+      ...prev,
+      [editScrapRowKey]: {
+        ...prev[editScrapRowKey],
+        grossWt: String(editItem.metal_weight || ''),
+        pieces: String(editItem.qty || '1'),
+        notes,
+        image: editItem.images?.[0]?.url || null,
+        buyPct,
+        pawnPct,
+        ...(match ? {
+          purityId: match.id,
+          purityLabel: `${match.purity || match.value} ${editItem.precious_metal_type}`,
+          purityValue: parseFloat(match.value) || 0,
+        } : {}),
+      },
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editScrapRowKey, editItem, allMetalPurities]);
 
   const addScrapCustomRow = () => {
     setScrapCustomRows(prev => [...prev, {
@@ -1242,11 +1344,12 @@ export default function JewelryIntakeScreen({
     const rows = [];
     SCRAP_FIXED_ROWS.forEach(def => {
       const data = scrapFixedRows[def.key];
-      if (!data || !(parseFloat(data.grossWt) > 0)) return;
-      const buyPct = data.buyPct !== '' ? data.buyPct : getScrapPctDefault(METAL_TYPE_ID_BY_NAME[def.metal], 'buy', 70);
-      const pawnPct = data.pawnPct !== '' ? data.pawnPct : getScrapPctDefault(METAL_TYPE_ID_BY_NAME[def.metal], 'pawn', 50);
-      const computed = computeScrapRowValues(def.purityValue, def.metal, data.grossWt, data.estStoneWt, buyPct, pawnPct);
-      rows.push({ metal: def.metal, purityLabel: def.purityLabel, purityValue: def.purityValue, ...data, ...computed });
+      if (!data || !data.purityId || !(parseFloat(data.grossWt) > 0)) return;
+      const typeId = METAL_TYPE_ID_BY_NAME[def.metal];
+      const buyPct = data.buyPct !== '' ? data.buyPct : getScrapPctDefault(typeId, 'buy', 70);
+      const pawnPct = data.pawnPct !== '' ? data.pawnPct : getScrapPctDefault(typeId, 'pawn', 50);
+      const computed = computeScrapRowValues(data.purityValue, def.metal, data.grossWt, data.estStoneWt, buyPct, pawnPct);
+      rows.push({ metal: def.metal, ...data, ...computed });
     });
     scrapCustomRows.forEach(row => {
       if (!(parseFloat(row.grossWt) > 0) || !row.metal) return;
@@ -1317,6 +1420,13 @@ export default function JewelryIntakeScreen({
     if (items.length === 0) return;
     items.forEach(item => onSaveItem(item));
     resetScrapForm();
+  }
+
+  function handleUpdateScrapItem() {
+    if (!onUpdateItem) return;
+    const items = buildScrapItems();
+    if (items.length === 0) return;
+    onUpdateItem({ ...items[0], id: editItem.id });
   }
 
   return (
@@ -1539,13 +1649,18 @@ export default function JewelryIntakeScreen({
 
           {/* Form grid */}
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.25 }}>
-            <FormControl size="small" fullWidth error={!!formErrors.category}>
-              <InputLabel>Category *</InputLabel>
-              <Select value={category} label="Category *" onChange={e => { setCategory(e.target.value); setFormErrors(p => ({ ...p, category: false })); }} sx={{ borderRadius: 2 }}>
-                {metalCategories.map(c => <MenuItem key={c.id} value={c.category}>{c.category}</MenuItem>)}
-              </Select>
-              {formErrors.category && <FormHelperText>Required</FormHelperText>}
-            </FormControl>
+            {mode === 'scrap' ? (
+              <TextField size="small" fullWidth label="Category" value="Scrap" disabled
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }} />
+            ) : (
+              <FormControl size="small" fullWidth error={!!formErrors.category}>
+                <InputLabel>Category *</InputLabel>
+                <Select value={category} label="Category *" onChange={e => { setCategory(e.target.value); setFormErrors(p => ({ ...p, category: false })); }} sx={{ borderRadius: 2 }}>
+                  {metalCategories.map(c => <MenuItem key={c.id} value={c.category}>{c.category}</MenuItem>)}
+                </Select>
+                {formErrors.category && <FormHelperText>Required</FormHelperText>}
+              </FormControl>
+            )}
             <FormControl size="small" fullWidth error={!!formErrors.metal}>
               <InputLabel>Metal *</InputLabel>
               <Select value={metal} label="Metal *" onChange={e => { handleMetalChange(e.target.value); setFormErrors(p => ({ ...p, metal: false })); }} sx={{ borderRadius: 2 }}>
@@ -1926,7 +2041,9 @@ export default function JewelryIntakeScreen({
               Original Entry: <Typography component="span" variant="body2" fontWeight={700} color={GREEN}>{initialEntry || 'scrap'}</Typography>
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-              Enter weights for each metal/purity group. Rows with zero or blank gross weight are ignored automatically.
+              {editItem
+                ? 'Update the weight, purity, or notes below and save to update this item.'
+                : 'Enter weights for each metal/purity group. Rows with zero or blank gross weight are ignored automatically.'}
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -1971,18 +2088,30 @@ export default function JewelryIntakeScreen({
               </TableRow>
             </TableHead>
             <TableBody>
-              {SCRAP_FIXED_ROWS.map((def, i) => {
+              {(editItem ? SCRAP_FIXED_ROWS.filter(r => r.key === editScrapRowKey) : SCRAP_FIXED_ROWS).map((def, i) => {
                 const data = scrapFixedRows[def.key];
-                const buyPct = data.buyPct !== '' ? data.buyPct : getScrapPctDefault(METAL_TYPE_ID_BY_NAME[def.metal], 'buy', 70);
-                const pawnPct = data.pawnPct !== '' ? data.pawnPct : getScrapPctDefault(METAL_TYPE_ID_BY_NAME[def.metal], 'pawn', 50);
-                const { netWt, meltValue, buyTradeValue, pawnValue } = computeScrapRowValues(def.purityValue, def.metal, data.grossWt, data.estStoneWt, buyPct, pawnPct);
+                const typeId = METAL_TYPE_ID_BY_NAME[def.metal];
+                const buyPct = data.buyPct !== '' ? data.buyPct : getScrapPctDefault(typeId, 'buy', 70);
+                const pawnPct = data.pawnPct !== '' ? data.pawnPct : getScrapPctDefault(typeId, 'pawn', 50);
+                const { netWt, meltValue, buyTradeValue, pawnValue } = computeScrapRowValues(data.purityValue, def.metal, data.grossWt, data.estStoneWt, buyPct, pawnPct);
                 const hasWeight = parseFloat(data.grossWt) > 0;
+                const purityOptions = allMetalPurities[typeId] || [];
                 return (
                   <TableRow key={def.key} sx={{ bgcolor: i % 2 === 0 ? 'white' : '#fafafa' }}>
                     <TableCell>
                       <ScrapPhotoCell image={data.image} onChange={(file) => handleScrapRowPhoto(file, (dataUrl) => updateScrapFixedRow(def.key, 'image', dataUrl))} />
                     </TableCell>
-                    <TableCell><Typography variant="body2" fontWeight={600}>{def.purityLabel}</Typography></TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                        <Typography variant="body2" fontWeight={700} sx={{ width: 70 }}>{def.metal}</Typography>
+                        <FormControl size="small" sx={{ width: 90 }}>
+                          <Select displayEmpty value={data.purityId} onChange={e => handleScrapFixedPurityChange(def.key, typeId, e.target.value)}>
+                            <MenuItem value=""><em>Purity</em></MenuItem>
+                            {purityOptions.map(p => <MenuItem key={p.id} value={p.id}>{p.purity || p.value}</MenuItem>)}
+                          </Select>
+                        </FormControl>
+                      </Box>
+                    </TableCell>
                     <TableCell align="right">
                       <TextField size="small" type="number" value={data.pieces} onChange={e => updateScrapFixedRow(def.key, 'pieces', e.target.value)} sx={{ width: 64 }} inputProps={{ min: 0 }} />
                     </TableCell>
@@ -2001,14 +2130,14 @@ export default function JewelryIntakeScreen({
                     </TableCell>
                     <TableCell align="right">
                       <TextField size="small" type="number" value={buyPct} onChange={e => updateScrapFixedRow(def.key, 'buyPct', e.target.value)}
-                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} />
+                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} disabled={!data.purityId} />
                     </TableCell>
                     <TableCell align="right">
                       <Typography variant="body2" fontWeight={600}>{hasWeight ? `$${buyTradeValue.toFixed(2)}` : '$0.00'}</Typography>
                     </TableCell>
                     <TableCell align="right">
                       <TextField size="small" type="number" value={pawnPct} onChange={e => updateScrapFixedRow(def.key, 'pawnPct', e.target.value)}
-                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} />
+                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} disabled={!data.purityId} />
                     </TableCell>
                     <TableCell align="right">
                       <Typography variant="body2" fontWeight={600}>{hasWeight ? `$${pawnValue.toFixed(2)}` : '$0.00'}</Typography>
@@ -2020,18 +2149,18 @@ export default function JewelryIntakeScreen({
                 );
               })}
 
-              <TableRow>
+              {!editItem && <TableRow>
                 <TableCell colSpan={12} sx={{ borderBottom: 'none', pt: 2, pb: 0.5 }}>
                   <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
                     Custom Rows
-                    <Tooltip title="Add a row for any metal/purity not covered above (e.g. Platinum, Palladium, or unusual gold karats).">
+                    <Tooltip title="Add a row for a second purity of the same metal, or any other metal/purity combo.">
                       <MuiIcons.InfoOutlined sx={{ fontSize: 13, ml: 0.5, color: 'text.disabled' }} />
                     </Tooltip>
                   </Typography>
                 </TableCell>
-              </TableRow>
+              </TableRow>}
 
-              {scrapCustomRows.map((row, i) => {
+              {!editItem && scrapCustomRows.map((row, i) => {
                 const buyPct = row.buyPct !== '' ? row.buyPct : getScrapPctDefault(row.metalTypeId, 'buy', 70);
                 const pawnPct = row.pawnPct !== '' ? row.pawnPct : getScrapPctDefault(row.metalTypeId, 'pawn', 50);
                 const { netWt, meltValue, buyTradeValue, pawnValue } = computeScrapRowValues(row.purityValue, row.metal, row.grossWt, row.estStoneWt, buyPct, pawnPct);
@@ -2094,14 +2223,14 @@ export default function JewelryIntakeScreen({
                 );
               })}
 
-              <TableRow>
+              {!editItem && <TableRow>
                 <TableCell colSpan={12} sx={{ borderBottom: 'none', pt: 0.5 }}>
                   <Button size="small" startIcon={<MuiIcons.Add sx={{ fontSize: 14 }} />} onClick={addScrapCustomRow}
                     sx={{ textTransform: 'none', fontSize: 12, color: GREEN }}>
                     Add Custom Row
                   </Button>
                 </TableCell>
-              </TableRow>
+              </TableRow>}
             </TableBody>
           </Table>
         </Box>
@@ -2195,14 +2324,18 @@ export default function JewelryIntakeScreen({
               sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
               Back to Results
             </Button>
-            <Button size="small" variant="contained" onClick={handleSaveScrapBatch} disabled={getActiveScrapRows().length === 0}
+            <Button size="small" variant="contained"
+              onClick={editItem ? handleUpdateScrapItem : handleSaveScrapBatch}
+              disabled={getActiveScrapRows().length === 0}
               sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN } }}>
-              Save Item(s) to Ticket
+              {editItem ? 'Update Item' : 'Save Item(s) to Ticket'}
             </Button>
-            <Button size="small" variant="outlined" onClick={handleSaveScrapBatchAndAdd} disabled={getActiveScrapRows().length === 0}
-              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, borderColor: GREEN, color: GREEN }}>
-              Save + Add Another
-            </Button>
+            {!editItem && (
+              <Button size="small" variant="outlined" onClick={handleSaveScrapBatchAndAdd} disabled={getActiveScrapRows().length === 0}
+                sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, borderColor: GREEN, color: GREEN }}>
+                Save + Add Another
+              </Button>
+            )}
           </>
         ) : (
           <>
