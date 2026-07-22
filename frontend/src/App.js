@@ -422,6 +422,16 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
+                      <ModernTransactions />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/home"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
                       <Home />
                     </AuthenticatedLayout>
                   </ProtectedRoute>

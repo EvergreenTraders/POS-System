@@ -131,8 +131,8 @@ function Sidebar() {
           </StyledListItem>
         </StyledLink>
 
-        <StyledLink to="/">
-          <StyledListItem active={isActive('/')}>
+        <StyledLink to="/home">
+          <StyledListItem active={isActive('/home')}>
             <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
             <StorefrontIcon />
             </ListItemIcon>
