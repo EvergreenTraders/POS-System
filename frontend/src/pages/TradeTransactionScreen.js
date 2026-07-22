@@ -114,7 +114,7 @@ export default function TradeTransactionScreen({
 
   const [categories, setCategories] = useState([]);
   const [taxRate, setTaxRate]       = useState(0.07);
-  const [tradeTaxable, setTradeTaxable] = useState(true);
+  const [tradeTaxBasis, setTradeTaxBasis] = useState('difference');
   const [tradeStats, setTradeStats] = useState(null);
 
   // Buy ticket picker (Add Existing Buy Ticket)
@@ -198,7 +198,7 @@ export default function TradeTransactionScreen({
     axios.get(`${config.apiUrl}/trade-tax-config`, {
       headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
     })
-      .then(res => setTradeTaxable(res.data?.taxable !== false))
+      .then(res => setTradeTaxBasis(res.data?.tax_basis === 'full' ? 'full' : 'difference'))
       .catch(() => {});
   }, []);
 
@@ -263,9 +263,12 @@ export default function TradeTransactionScreen({
 
   const saleAfterDiscount = saleSubtotal - saleDiscount;
 
-  // Tax on Difference: only tax the positive difference between sale and trade
+  // Trade tickets are always taxed — tradeTaxBasis only picks whether tax is
+  // calculated on the full sale amount or just the positive difference
+  // between sale and trade-in allowance.
   const taxableDifference = Math.max(0, saleAfterDiscount - totalTradeAllowance);
-  const taxAmount          = tradeTaxable ? taxableDifference * taxRate : 0;
+  const taxBase            = tradeTaxBasis === 'full' ? saleAfterDiscount : taxableDifference;
+  const taxAmount          = taxBase * taxRate;
   const totalSaleAfterTax  = saleAfterDiscount + taxAmount;
 
   const netDueToCustomer = totalTradeAllowance - totalSaleAfterTax;

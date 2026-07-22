@@ -12649,7 +12649,7 @@ app.get('/api/trade-tax-config', async (req, res) => {
       WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY created_at DESC LIMIT 1
     `);
-    res.json(result.rows[0] || { taxable: true });
+    res.json(result.rows[0] || { tax_basis: 'difference' });
   } catch (error) {
     console.error('Error fetching trade tax config:', error);
     res.status(500).json({ error: 'Failed to fetch trade tax config' });
@@ -12658,19 +12658,22 @@ app.get('/api/trade-tax-config', async (req, res) => {
 
 app.put('/api/trade-tax-config', async (req, res) => {
   try {
-    const { taxable } = req.body;
+    const { tax_basis } = req.body;
+    if (tax_basis !== 'full' && tax_basis !== 'difference') {
+      return res.status(400).json({ error: 'tax_basis must be "full" or "difference"' });
+    }
     const storeRes = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
     const store_id = storeRes.rows[0]?.store_id || null;
 
     const existing = await pool.query('SELECT id FROM trade_tax_config WHERE store_id = $1', [store_id]);
     const result = existing.rows.length > 0
       ? await pool.query(
-          'UPDATE trade_tax_config SET taxable = $1, updated_at = CURRENT_TIMESTAMP WHERE store_id = $2 RETURNING *',
-          [taxable !== false, store_id]
+          'UPDATE trade_tax_config SET tax_basis = $1, updated_at = CURRENT_TIMESTAMP WHERE store_id = $2 RETURNING *',
+          [tax_basis, store_id]
         )
       : await pool.query(
-          'INSERT INTO trade_tax_config (store_id, taxable) VALUES ($1, $2) RETURNING *',
-          [store_id, taxable !== false]
+          'INSERT INTO trade_tax_config (store_id, tax_basis) VALUES ($1, $2) RETURNING *',
+          [store_id, tax_basis]
         );
 
     res.json(result.rows[0]);

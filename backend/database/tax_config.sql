@@ -68,13 +68,21 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- Whether Trade transactions have tax applied at all (tax-on-difference), independent
--- of the provincial rate used above. Single row per store, same pattern as
--- storage_fee_config / quick_sale_config.
+-- Which amount Trade transactions are taxed on — the full sale amount, or just
+-- the taxable difference (sale minus trade-in allowance) — independent of the
+-- provincial rate used above. Trades are always taxed; this only picks the
+-- basis. Single row per store, same pattern as storage_fee_config / quick_sale_config.
 CREATE TABLE IF NOT EXISTS trade_tax_config (
     id SERIAL PRIMARY KEY,
     store_id INTEGER REFERENCES stores(store_id),
     taxable BOOLEAN NOT NULL DEFAULT TRUE,
+    tax_basis VARCHAR(10) NOT NULL DEFAULT 'difference' CHECK (tax_basis IN ('full', 'difference')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Migration: add tax_basis for existing deployments (taxable column kept for
+-- backward compatibility but no longer read by the app — trades are always taxed).
+ALTER TABLE trade_tax_config
+  ADD COLUMN IF NOT EXISTS tax_basis VARCHAR(10) NOT NULL DEFAULT 'difference'
+    CHECK (tax_basis IN ('full', 'difference'));

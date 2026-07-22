@@ -11,6 +11,8 @@ import {
   Divider,
   Switch,
   Checkbox,
+  Radio,
+  RadioGroup,
   FormControlLabel,
   Alert,
   Snackbar,
@@ -447,7 +449,7 @@ function SystemConfig() {
     'YT': { gst: 5, pst: 0, hst: 0 }   // Yukon
   });
   const [selectedProvince, setSelectedProvince] = useState('ON');
-  const [tradeTaxable, setTradeTaxable] = useState(true);
+  const [tradeTaxBasis, setTradeTaxBasis] = useState('difference');
 
   // Feedback (submitted by staff via the Navbar feedback icon)
   const [feedbackList, setFeedbackList] = useState([]);
@@ -769,7 +771,7 @@ function SystemConfig() {
 
       try {
         const tradeTaxResponse = await axios.get(`${API_BASE_URL}/trade-tax-config`);
-        setTradeTaxable(tradeTaxResponse.data?.taxable !== false);
+        setTradeTaxBasis(tradeTaxResponse.data?.tax_basis === 'full' ? 'full' : 'difference');
       } catch (error) {
         console.error('Error fetching trade tax configuration:', error);
       }
@@ -2347,14 +2349,14 @@ const handleTabChange = (event, newValue) => {
     }
   };
 
-  const handleToggleTradeTaxable = async () => {
-    const nextValue = !tradeTaxable;
-    setTradeTaxable(nextValue);
+  const handleTradeTaxBasisChange = async (nextValue) => {
+    const prevValue = tradeTaxBasis;
+    setTradeTaxBasis(nextValue);
     try {
-      await axios.put(`${API_BASE_URL}/trade-tax-config`, { taxable: nextValue });
+      await axios.put(`${API_BASE_URL}/trade-tax-config`, { tax_basis: nextValue });
     } catch (error) {
       console.error('Error updating trade tax configuration:', error);
-      setTradeTaxable(!nextValue);
+      setTradeTaxBasis(prevValue);
       setSnackbar({
         open: true,
         message: 'Failed to update trade tax configuration',
@@ -4809,20 +4811,27 @@ const handleTabChange = (event, newValue) => {
 
             <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
               <Typography variant="body2" fontWeight="bold" gutterBottom>
-                Taxable Transaction Types
+                Trade Tax Basis
               </Typography>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={tradeTaxable}
-                    onChange={handleToggleTradeTaxable}
-                    color="primary"
+              <FormControl>
+                <RadioGroup
+                  value={tradeTaxBasis}
+                  onChange={e => handleTradeTaxBasisChange(e.target.value)}
+                >
+                  <FormControlLabel
+                    value="difference"
+                    control={<Radio color="primary" />}
+                    label={<Typography variant="body2">Difference Only — tax the sale amount minus the trade-in allowance</Typography>}
                   />
-                }
-                label={<Typography variant="body2">Apply tax to Trade transactions</Typography>}
-              />
+                  <FormControlLabel
+                    value="full"
+                    control={<Radio color="primary" />}
+                    label={<Typography variant="body2">Full Sale Amount — tax the entire sale amount, ignoring the trade-in allowance</Typography>}
+                  />
+                </RadioGroup>
+              </FormControl>
               <Typography variant="caption" color="textSecondary" display="block">
-                When off, Trade tickets are not taxed regardless of the provincial rates below.
+                Trade tickets are always taxed at the provincial rates below — this only picks which amount tax is calculated on.
               </Typography>
             </Paper>
 
