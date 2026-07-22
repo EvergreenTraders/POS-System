@@ -24,7 +24,9 @@ const SCRAP_FIXED_ROWS = [
 ];
 const emptyScrapRowData = () => ({
   pieces: '', grossWt: '', estStoneWt: '', notes: '', image: null, buyPct: '', pawnPct: '',
-  purityId: '', purityLabel: '', purityValue: 0,
+  // purity: raw purity only (e.g. "14K") — used for the metal_purity DB field.
+  // purityLabel: purity + metal (e.g. "14K Gold") — used for display/description text only.
+  purityId: '', purity: '', purityLabel: '', purityValue: 0,
 });
 
 // ── Gem entry dialog — mirrors GemEstimator's primary/secondary gem form ──────
@@ -451,7 +453,7 @@ function GemEntryDialog({ open, onClose, onSave, title = 'Gem', initial = null }
 function ScrapPhotoCell({ image, onChange }) {
   const inputRef = useRef(null);
   return (
-    <Box sx={{ width: 54, height: 54 }}>
+    <Box sx={{ width: 40, height: 40 }}>
       <input
         ref={inputRef}
         type="file"
@@ -472,8 +474,7 @@ function ScrapPhotoCell({ image, onChange }) {
           onClick={() => inputRef.current?.click()}
           sx={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '1px dashed #ccc', borderRadius: 1, cursor: 'pointer', color: 'text.disabled' }}
         >
-          <MuiIcons.PhotoCamera sx={{ fontSize: 16 }} />
-          <Typography sx={{ fontSize: 8 }}>Take Photo</Typography>
+          <MuiIcons.PhotoCamera sx={{ fontSize: 14 }} />
         </Box>
       )}
     </Box>
@@ -1195,17 +1196,18 @@ export default function JewelryIntakeScreen({
     const purities = allMetalPurities[typeId] || [];
     const p = purities.find(pu => String(pu.id) === String(purityId));
     if (!p) {
-      setScrapFixedRows(prev => ({ ...prev, [key]: { ...prev[key], purityId: '', purityLabel: '', purityValue: 0 } }));
+      setScrapFixedRows(prev => ({ ...prev, [key]: { ...prev[key], purityId: '', purity: '', purityLabel: '', purityValue: 0 } }));
       return;
     }
     const metalName = SCRAP_FIXED_ROWS.find(r => r.key === key)?.metal || '';
-    const purityLabel = p.purity || String(p.value || '');
+    const purity = p.purity || String(p.value || '');
     setScrapFixedRows(prev => ({
       ...prev,
       [key]: {
         ...prev[key],
         purityId,
-        purityLabel: `${purityLabel} ${metalName}`,
+        purity,
+        purityLabel: `${purity} ${metalName}`,
         purityValue: parseFloat(p.value) || 0,
         buyPct: getScrapPctDefault(typeId, 'buy', 70),
         pawnPct: getScrapPctDefault(typeId, 'pawn', 50),
@@ -1245,6 +1247,7 @@ export default function JewelryIntakeScreen({
         pieces: prev[rowDef.key].pieces || '1',
         ...(match ? {
           purityId: match.id,
+          purity: match.purity || String(match.value || ''),
           purityLabel: `${match.purity || match.value} ${rowDef.metal}`,
           purityValue: parseFloat(match.value) || 0,
           buyPct: getScrapPctDefault(typeId, 'buy', 70),
@@ -1279,8 +1282,10 @@ export default function JewelryIntakeScreen({
     const meltValue = parseFloat(editItem.melt_value) || 0;
     const buyPct = meltValue > 0 ? String(Math.round((parseFloat(editItem.buy_price) || 0) / meltValue * 10000) / 100) : '';
     const pawnPct = meltValue > 0 ? String(Math.round((parseFloat(editItem.pawn_price) || 0) / meltValue * 10000) / 100) : '';
+    // Older saved items kept notes folded into long_desc instead of the
+    // dedicated notes field — fall back to parsing that out for those.
     const longDesc = editItem.long_desc || '';
-    const notes = longDesc.includes(' · ') ? longDesc.split(' · ').slice(1).join(' · ') : '';
+    const notes = editItem.notes || (longDesc.includes(' · ') ? longDesc.split(' · ').slice(1).join(' · ') : '');
 
     setScrapFixedRows(prev => ({
       ...prev,
@@ -1294,6 +1299,7 @@ export default function JewelryIntakeScreen({
         pawnPct,
         ...(match ? {
           purityId: match.id,
+          purity: match.purity || String(match.value || ''),
           purityLabel: `${match.purity || match.value} ${editItem.precious_metal_type}`,
           purityValue: parseFloat(match.value) || 0,
         } : {}),
@@ -1319,13 +1325,14 @@ export default function JewelryIntakeScreen({
     const purities = allMetalPurities[typeId] || [];
     const p = purities.find(pu => String(pu.id) === String(purityId));
     if (!type || !p) return;
-    const purityLabel = p.purity || String(p.value || '');
+    const purity = p.purity || String(p.value || '');
     setScrapCustomRows(prev => prev.map(r => r.id === id ? {
       ...r,
       metalTypeId: typeId,
       metal: type.type,
       purityId,
-      purityLabel: `${purityLabel} ${type.type}`,
+      purity,
+      purityLabel: `${purity} ${type.type}`,
       purityValue: parseFloat(p.value) || 0,
       buyPct: getScrapPctDefault(typeId, 'buy', 70),
       pawnPct: getScrapPctDefault(typeId, 'pawn', 50),
@@ -1381,7 +1388,7 @@ export default function JewelryIntakeScreen({
         precious_metal_type: r.metal,
         metal_category: 'Scrap',
         jewelry_color: '',
-        metal_purity: r.purityLabel,
+        metal_purity: r.purity,
         purity_value: r.purityValue,
         metal_weight: r.netWt,
         metal_spot_price: parseFloat(spotPriceForMetal(r.metal, metalSpotPrices)) || 0,
@@ -1394,8 +1401,9 @@ export default function JewelryIntakeScreen({
         paid_amount: scaledBuy,
         price_estimates: { pawn: r.pawnValue, buy: scaledBuy, melt: r.meltValue },
         images: r.image ? [{ url: r.image, isPrimary: true, file: null, type: 'photo' }] : [],
+        notes: r.notes || '',
         short_desc: `${r.purityLabel} Scrap - ${r.netWt.toFixed(2)}g`,
-        long_desc: [`${r.purityLabel} Scrap`, r.notes].filter(Boolean).join(' · '),
+        long_desc: `${r.purityLabel} Scrap`,
         sourceEstimator: 'jewelry',
         mode: 'scrap',
       };
@@ -1454,22 +1462,44 @@ export default function JewelryIntakeScreen({
       </Box>
 
       {/* Entry + mode bar */}
-      <Box sx={{ bgcolor: 'white', px: 2.5, py: 1, display: 'flex', alignItems: 'center', gap: 3, borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
+      <Box sx={{ bgcolor: 'white', px: 2.5, py: 1, display: 'flex', alignItems: 'center', gap: 3, borderBottom: '1px solid #e0e0e0', flexShrink: 0, flexWrap: 'wrap' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Typography variant="body2" color="text.secondary">Original Entry:</Typography>
           <Typography variant="body2" fontWeight={700} fontFamily="monospace">
-            {initialEntry || 'JERIYG10K'}
+            {initialEntry || (showScrapBatchUI ? 'scrap' : 'JERIYG10K')}
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="body2" color="text.secondary">Parsed As:</Typography>
-          {parsedParts.map((part, i) => (
-            <React.Fragment key={i}>
-              {i > 0 && <Typography variant="body2" color="#ccc">|</Typography>}
-              <Typography variant="body2" fontWeight={500}>{part}</Typography>
-            </React.Fragment>
-          ))}
-        </Box>
+        {!showScrapBatchUI ? (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2" color="text.secondary">Parsed As:</Typography>
+            {parsedParts.map((part, i) => (
+              <React.Fragment key={i}>
+                {i > 0 && <Typography variant="body2" color="#ccc">|</Typography>}
+                <Typography variant="body2" fontWeight={500}>{part}</Typography>
+              </React.Fragment>
+            ))}
+          </Box>
+        ) : (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <Avatar sx={{ width: 26, height: 26, bgcolor: '#f2a900', fontSize: 11, fontWeight: 700 }}>Au</Avatar>
+              <Typography variant="caption" color="text.secondary">
+                ${(parseFloat(metalSpotPrices.CADXAU) || 0).toFixed(2)}/g
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <Avatar sx={{ width: 26, height: 26, bgcolor: '#9e9e9e', fontSize: 11, fontWeight: 700 }}>Ag</Avatar>
+              <Typography variant="caption" color="text.secondary">
+                ${(parseFloat(metalSpotPrices.CADXAG) || 0).toFixed(2)}/g
+              </Typography>
+            </Box>
+            <Button size="small" variant="outlined" startIcon={<MuiIcons.Refresh sx={{ fontSize: 14 }} />}
+              onClick={() => fetchLiveSpotPrice('Gold')}
+              sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12, borderColor: GREEN, color: GREEN, py: 0.25 }}>
+              Refresh Spot
+            </Button>
+          </Box>
+        )}
         <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Typography variant="body2" color="text.secondary">Mode:</Typography>
           <Box sx={{ display: 'flex', border: `1px solid ${GREEN}`, borderRadius: 2, overflow: 'hidden' }}>
@@ -2034,54 +2064,27 @@ export default function JewelryIntakeScreen({
       /* ── Scrap Lot batch entry ── */
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
 
-        {/* Header: original entry note + live spot prices */}
-        <Box sx={{ px: 2.5, py: 1.5, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', borderBottom: '1px solid #e8e8e8', bgcolor: 'white', flexShrink: 0 }}>
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              Original Entry: <Typography component="span" variant="body2" fontWeight={700} color={GREEN}>{initialEntry || 'scrap'}</Typography>
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-              {editItem
-                ? 'Update the weight, purity, or notes below and save to update this item.'
-                : 'Enter weights for each metal/purity group. Rows with zero or blank gross weight are ignored automatically.'}
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Avatar sx={{ width: 32, height: 32, bgcolor: '#f2a900', fontSize: 13, fontWeight: 700 }}>Au</Avatar>
-              <Box>
-                <Typography variant="body2" fontWeight={700} lineHeight={1.2}>Gold</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  ${(parseFloat(metalSpotPrices.CADXAU) || 0).toFixed(2)}/g | ${((parseFloat(metalSpotPrices.CADXAU) || 0) * 31.1035).toFixed(2)}/oz
-                </Typography>
-              </Box>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Avatar sx={{ width: 32, height: 32, bgcolor: '#9e9e9e', fontSize: 13, fontWeight: 700 }}>Ag</Avatar>
-              <Box>
-                <Typography variant="body2" fontWeight={700} lineHeight={1.2}>Silver</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  ${(parseFloat(metalSpotPrices.CADXAG) || 0).toFixed(2)}/g | ${((parseFloat(metalSpotPrices.CADXAG) || 0) * 31.1035).toFixed(2)}/oz
-                </Typography>
-              </Box>
-            </Box>
-            <Button size="small" variant="outlined" startIcon={<MuiIcons.Refresh sx={{ fontSize: 14 }} />}
-              onClick={() => fetchLiveSpotPrice('Gold')}
-              sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12, borderColor: GREEN, color: GREEN }}>
-              Refresh Spot
-            </Button>
-          </Box>
+        {/* Helper note */}
+        <Box sx={{ px: 2.5, py: 1, borderBottom: '1px solid #e8e8e8', bgcolor: 'white', flexShrink: 0 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {editItem
+              ? 'Update the weight, purity, or notes below and save to update this item.'
+              : 'Enter weights for each metal/purity group. Rows with zero or blank gross weight are ignored automatically.'}
+          </Typography>
         </Box>
 
         {/* Table */}
-        <Box sx={{ flex: 1, overflow: 'auto', px: 2.5, py: 2 }}>
-          <Table size="small">
+        <Box sx={{ flex: 1, overflow: 'auto', px: 1.5, py: 2 }}>
+          <Table size="small" sx={{
+            '& th, & td': { px: 0.75, py: 0.5, whiteSpace: 'nowrap' },
+            '& .MuiInputBase-input, & .MuiSelect-select': { fontSize: 12 },
+          }}>
             <TableHead>
               <TableRow sx={{ bgcolor: '#f8f9fa' }}>
-                {['Photo','Metal / Purity'].map(h => (
+                {['Photo','Metal','Purity'].map(h => (
                   <TableCell key={h} sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary' }}>{h}</TableCell>
                 ))}
-                {['Pieces','Gross Wt (g)','Est Stone Wt (g)','Net Wt (g)','Melt Value','Buy/Trade %','Buy/Trade Value','Pawn %','Pawn Value'].map(h => (
+                {['Pieces','Gross (g)','Stone (g)','Net (g)','Melt $','Buy %','Buy $','Pawn %','Pawn $'].map(h => (
                   <TableCell key={h} align="right" sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary' }}>{h}</TableCell>
                 ))}
                 <TableCell sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary' }}>Notes</TableCell>
@@ -2102,55 +2105,55 @@ export default function JewelryIntakeScreen({
                       <ScrapPhotoCell image={data.image} onChange={(file) => handleScrapRowPhoto(file, (dataUrl) => updateScrapFixedRow(def.key, 'image', dataUrl))} />
                     </TableCell>
                     <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                        <Typography variant="body2" fontWeight={700} sx={{ width: 70 }}>{def.metal}</Typography>
-                        <FormControl size="small" sx={{ width: 90 }}>
-                          <Select displayEmpty value={data.purityId} onChange={e => handleScrapFixedPurityChange(def.key, typeId, e.target.value)}>
-                            <MenuItem value=""><em>Purity</em></MenuItem>
-                            {purityOptions.map(p => <MenuItem key={p.id} value={p.id}>{p.purity || p.value}</MenuItem>)}
-                          </Select>
-                        </FormControl>
-                      </Box>
+                      <Typography variant="body2" fontWeight={700}>{def.metal}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <FormControl size="small" sx={{ width: 76 }}>
+                        <Select displayEmpty value={data.purityId} onChange={e => handleScrapFixedPurityChange(def.key, typeId, e.target.value)}>
+                          <MenuItem value=""><em>—</em></MenuItem>
+                          {purityOptions.map(p => <MenuItem key={p.id} value={p.id}>{p.purity || p.value}</MenuItem>)}
+                        </Select>
+                      </FormControl>
                     </TableCell>
                     <TableCell align="right">
-                      <TextField size="small" type="number" value={data.pieces} onChange={e => updateScrapFixedRow(def.key, 'pieces', e.target.value)} sx={{ width: 64 }} inputProps={{ min: 0 }} />
+                      <TextField size="small" type="number" value={data.pieces} onChange={e => updateScrapFixedRow(def.key, 'pieces', e.target.value)} sx={{ width: 52 }} inputProps={{ min: 0 }} />
                     </TableCell>
                     <TableCell align="right">
-                      <TextField size="small" type="number" value={data.grossWt} onChange={e => updateScrapFixedRow(def.key, 'grossWt', e.target.value)} sx={{ width: 80 }} inputProps={{ min: 0, step: 0.01 }} />
+                      <TextField size="small" type="number" value={data.grossWt} onChange={e => updateScrapFixedRow(def.key, 'grossWt', e.target.value)} sx={{ width: 64 }} inputProps={{ min: 0, step: 0.01 }} />
                     </TableCell>
                     <TableCell align="right">
-                      <TextField size="small" type="number" value={data.estStoneWt} onChange={e => updateScrapFixedRow(def.key, 'estStoneWt', e.target.value)} sx={{ width: 80 }} inputProps={{ min: 0, step: 0.01 }} />
+                      <TextField size="small" type="number" value={data.estStoneWt} onChange={e => updateScrapFixedRow(def.key, 'estStoneWt', e.target.value)} sx={{ width: 64 }} inputProps={{ min: 0, step: 0.01 }} />
                     </TableCell>
                     <TableCell align="right">
                       <TextField size="small" value={hasWeight ? netWt.toFixed(2) : '—'} disabled
-                        sx={{ width: 80, '& .MuiInputBase-input': { bgcolor: '#f5f5f5' } }} />
+                        sx={{ width: 64, '& .MuiInputBase-input': { bgcolor: '#f5f5f5' } }} />
                     </TableCell>
                     <TableCell align="right">
                       <Typography variant="body2">{hasWeight ? `$${meltValue.toFixed(2)}` : '—'}</Typography>
                     </TableCell>
                     <TableCell align="right">
                       <TextField size="small" type="number" value={buyPct} onChange={e => updateScrapFixedRow(def.key, 'buyPct', e.target.value)}
-                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} disabled={!data.purityId} />
+                        sx={{ width: 56 }} disabled={!data.purityId} />
                     </TableCell>
                     <TableCell align="right">
                       <Typography variant="body2" fontWeight={600}>{hasWeight ? `$${buyTradeValue.toFixed(2)}` : '$0.00'}</Typography>
                     </TableCell>
                     <TableCell align="right">
                       <TextField size="small" type="number" value={pawnPct} onChange={e => updateScrapFixedRow(def.key, 'pawnPct', e.target.value)}
-                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} disabled={!data.purityId} />
+                        sx={{ width: 56 }} disabled={!data.purityId} />
                     </TableCell>
                     <TableCell align="right">
                       <Typography variant="body2" fontWeight={600}>{hasWeight ? `$${pawnValue.toFixed(2)}` : '$0.00'}</Typography>
                     </TableCell>
                     <TableCell>
-                      <TextField size="small" value={data.notes} onChange={e => updateScrapFixedRow(def.key, 'notes', e.target.value)} sx={{ width: 140 }} placeholder="Notes" />
+                      <TextField size="small" value={data.notes} onChange={e => updateScrapFixedRow(def.key, 'notes', e.target.value)} sx={{ width: 100 }} placeholder="Notes" />
                     </TableCell>
                   </TableRow>
                 );
               })}
 
               {!editItem && <TableRow>
-                <TableCell colSpan={12} sx={{ borderBottom: 'none', pt: 2, pb: 0.5 }}>
+                <TableCell colSpan={13} sx={{ borderBottom: 'none', pt: 2, pb: 0.5 }}>
                   <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
                     Custom Rows
                     <Tooltip title="Add a row for a second purity of the same metal, or any other metal/purity combo.">
@@ -2172,48 +2175,48 @@ export default function JewelryIntakeScreen({
                       <ScrapPhotoCell image={row.image} onChange={(file) => handleScrapRowPhoto(file, (dataUrl) => updateScrapCustomRow(row.id, 'image', dataUrl))} />
                     </TableCell>
                     <TableCell>
-                      <Box sx={{ display: 'flex', gap: 0.5 }}>
-                        <FormControl size="small" sx={{ width: 90 }}>
-                          <Select displayEmpty value={row.metalTypeId}
-                            onChange={e => setScrapCustomRows(prev => prev.map(r => r.id === row.id ? { ...r, metalTypeId: e.target.value, purityId: '', metal: '', purityLabel: '', purityValue: 0 } : r))}>
-                            <MenuItem value=""><em>Metal</em></MenuItem>
-                            {preciousMetalTypes.map(t => <MenuItem key={t.id} value={t.id}>{t.type}</MenuItem>)}
-                          </Select>
-                        </FormControl>
-                        <FormControl size="small" sx={{ width: 90 }} disabled={!row.metalTypeId}>
-                          <Select displayEmpty value={row.purityId} onChange={e => handleScrapCustomMetalChange(row.id, row.metalTypeId, e.target.value)}>
-                            <MenuItem value=""><em>Purity</em></MenuItem>
-                            {purityOptions.map(p => <MenuItem key={p.id} value={p.id}>{p.purity || p.value}</MenuItem>)}
-                          </Select>
-                        </FormControl>
-                      </Box>
+                      <FormControl size="small" sx={{ width: 80 }}>
+                        <Select displayEmpty value={row.metalTypeId}
+                          onChange={e => setScrapCustomRows(prev => prev.map(r => r.id === row.id ? { ...r, metalTypeId: e.target.value, purityId: '', metal: '', purity: '', purityLabel: '', purityValue: 0 } : r))}>
+                          <MenuItem value=""><em>—</em></MenuItem>
+                          {preciousMetalTypes.map(t => <MenuItem key={t.id} value={t.id}>{t.type}</MenuItem>)}
+                        </Select>
+                      </FormControl>
+                    </TableCell>
+                    <TableCell>
+                      <FormControl size="small" sx={{ width: 76 }} disabled={!row.metalTypeId}>
+                        <Select displayEmpty value={row.purityId} onChange={e => handleScrapCustomMetalChange(row.id, row.metalTypeId, e.target.value)}>
+                          <MenuItem value=""><em>—</em></MenuItem>
+                          {purityOptions.map(p => <MenuItem key={p.id} value={p.id}>{p.purity || p.value}</MenuItem>)}
+                        </Select>
+                      </FormControl>
                     </TableCell>
                     <TableCell align="right">
-                      <TextField size="small" type="number" value={row.pieces} onChange={e => updateScrapCustomRow(row.id, 'pieces', e.target.value)} sx={{ width: 64 }} inputProps={{ min: 0 }} />
+                      <TextField size="small" type="number" value={row.pieces} onChange={e => updateScrapCustomRow(row.id, 'pieces', e.target.value)} sx={{ width: 52 }} inputProps={{ min: 0 }} />
                     </TableCell>
                     <TableCell align="right">
-                      <TextField size="small" type="number" value={row.grossWt} onChange={e => updateScrapCustomRow(row.id, 'grossWt', e.target.value)} sx={{ width: 80 }} inputProps={{ min: 0, step: 0.01 }} />
+                      <TextField size="small" type="number" value={row.grossWt} onChange={e => updateScrapCustomRow(row.id, 'grossWt', e.target.value)} sx={{ width: 64 }} inputProps={{ min: 0, step: 0.01 }} />
                     </TableCell>
                     <TableCell align="right">
-                      <TextField size="small" type="number" value={row.estStoneWt} onChange={e => updateScrapCustomRow(row.id, 'estStoneWt', e.target.value)} sx={{ width: 80 }} inputProps={{ min: 0, step: 0.01 }} />
+                      <TextField size="small" type="number" value={row.estStoneWt} onChange={e => updateScrapCustomRow(row.id, 'estStoneWt', e.target.value)} sx={{ width: 64 }} inputProps={{ min: 0, step: 0.01 }} />
                     </TableCell>
                     <TableCell align="right">
-                      <TextField size="small" value={hasWeight ? netWt.toFixed(2) : '—'} disabled sx={{ width: 80, '& .MuiInputBase-input': { bgcolor: '#f5f5f5' } }} />
+                      <TextField size="small" value={hasWeight ? netWt.toFixed(2) : '—'} disabled sx={{ width: 64, '& .MuiInputBase-input': { bgcolor: '#f5f5f5' } }} />
                     </TableCell>
                     <TableCell align="right"><Typography variant="body2">{hasWeight ? `$${meltValue.toFixed(2)}` : '—'}</Typography></TableCell>
                     <TableCell align="right">
                       <TextField size="small" type="number" value={buyPct} onChange={e => updateScrapCustomRow(row.id, 'buyPct', e.target.value)}
-                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} disabled={!row.metal} />
+                        sx={{ width: 56 }} disabled={!row.metal} />
                     </TableCell>
                     <TableCell align="right"><Typography variant="body2" fontWeight={600}>{hasWeight ? `$${buyTradeValue.toFixed(2)}` : '$0.00'}</Typography></TableCell>
                     <TableCell align="right">
                       <TextField size="small" type="number" value={pawnPct} onChange={e => updateScrapCustomRow(row.id, 'pawnPct', e.target.value)}
-                        sx={{ width: 64 }} InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} disabled={!row.metal} />
+                        sx={{ width: 56 }} disabled={!row.metal} />
                     </TableCell>
                     <TableCell align="right"><Typography variant="body2" fontWeight={600}>{hasWeight ? `$${pawnValue.toFixed(2)}` : '$0.00'}</Typography></TableCell>
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <TextField size="small" value={row.notes} onChange={e => updateScrapCustomRow(row.id, 'notes', e.target.value)} sx={{ width: 110 }} placeholder="Notes" />
+                        <TextField size="small" value={row.notes} onChange={e => updateScrapCustomRow(row.id, 'notes', e.target.value)} sx={{ width: 90 }} placeholder="Notes" />
                         <IconButton size="small" color="error" onClick={() => removeScrapCustomRow(row.id)}>
                           <MuiIcons.Delete sx={{ fontSize: 16 }} />
                         </IconButton>
@@ -2224,7 +2227,7 @@ export default function JewelryIntakeScreen({
               })}
 
               {!editItem && <TableRow>
-                <TableCell colSpan={12} sx={{ borderBottom: 'none', pt: 0.5 }}>
+                <TableCell colSpan={13} sx={{ borderBottom: 'none', pt: 0.5 }}>
                   <Button size="small" startIcon={<MuiIcons.Add sx={{ fontSize: 14 }} />} onClick={addScrapCustomRow}
                     sx={{ textTransform: 'none', fontSize: 12, color: GREEN }}>
                     Add Custom Row

@@ -246,7 +246,7 @@ export default function BuyTransactionScreen({
     if (quickAddMode) quickInputRef.current?.focus();
   }, [quickAddMode]);
 
-  const totalPaid = buyItems.reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
+  const totalPaid = Math.round(buyItems.reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0) * 100) / 100;
   const effectiveTotalPaid = totalPaidOverride ?? totalPaid;
 
   // Editing Total Paid proportionally rescales every item's own paid amount
@@ -382,7 +382,7 @@ export default function BuyTransactionScreen({
       description: item.item || item.short_desc || '',
       serial_number: item.serial_number || item.serial || '',
       qty,
-      paid: totalPaid / qty,
+      paid: Math.round((totalPaid / qty) * 100) / 100,
       images: item.images || [],
       sourceEstimator: 'jewelry',
       jewelryData: item,

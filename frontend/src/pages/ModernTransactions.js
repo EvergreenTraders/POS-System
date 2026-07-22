@@ -2194,6 +2194,8 @@ export default function ModernTransactions() {
           onKeyDown={e => {
             if (e.key !== 'Enter') return;
             const parsed = parseQuickScrapEntry(search);
+            if (!parsed.isBulkScrap && !parsed.isUniqueWithPrefill) return;
+            if (!customer) { setNoCustomerWarning('buy ticket'); return; }
             if (parsed.isBulkScrap) {
               setSearch('');
               setExistingBuyData(null);
