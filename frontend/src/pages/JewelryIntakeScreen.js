@@ -1410,24 +1410,10 @@ export default function JewelryIntakeScreen({
     });
   }
 
-  function resetScrapForm() {
-    setScrapFixedRows(SCRAP_FIXED_ROWS.reduce((acc, r) => { acc[r.key] = emptyScrapRowData(); return acc; }, {}));
-    setScrapCustomRows([]);
-    setScrapFinalPrice('');
-    setScrapFinalPriceManual(false);
-  }
-
   function handleSaveScrapBatch() {
     const items = buildScrapItems();
     if (items.length === 0) return;
     items.forEach(item => onSaveItem(item));
-  }
-
-  function handleSaveScrapBatchAndAdd() {
-    const items = buildScrapItems();
-    if (items.length === 0) return;
-    items.forEach(item => onSaveItem(item));
-    resetScrapForm();
   }
 
   function handleUpdateScrapItem() {
@@ -2239,38 +2225,40 @@ export default function JewelryIntakeScreen({
         </Box>
 
         {/* Summary footer */}
-        <Box sx={{ px: 2.5, py: 1.5, borderTop: '1px solid #e0e0e0', bgcolor: 'white', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+        <Box sx={{ px: 2.5, py: 0.75, borderTop: '1px solid #e0e0e0', bgcolor: 'white', display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
           {(() => {
             const activeRows = getActiveScrapRows();
             const suggestedBuyTotal = activeRows.reduce((s, r) => s + r.buyTradeValue, 0);
             const suggestedPawnTotal = activeRows.reduce((s, r) => s + r.pawnValue, 0);
             return (
               <>
+                <Tooltip title="Only rows with gross weight entered will be used.">
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 11, lineHeight: 1.2 }}>Lines to Create</Typography>
+                    <Typography variant="subtitle1" fontWeight={700} sx={{ lineHeight: 1.2 }}>{activeRows.length}</Typography>
+                  </Box>
+                </Tooltip>
                 <Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Lines to Create</Typography>
-                  <Typography variant="h6" fontWeight={700}>{activeRows.length}</Typography>
-                  <Typography variant="caption" color="text.secondary">Only rows with gross weight entered will be used.</Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 11, lineHeight: 1.2 }}>Suggested Buy/Trade Total</Typography>
+                  <Typography variant="subtitle1" fontWeight={700} color={GREEN} sx={{ lineHeight: 1.2 }}>${suggestedBuyTotal.toFixed(2)}</Typography>
                 </Box>
                 <Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Suggested Buy/Trade Total</Typography>
-                  <Typography variant="h6" fontWeight={700} color={GREEN}>${suggestedBuyTotal.toFixed(2)}</Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 11, lineHeight: 1.2 }}>Suggested Pawn Total</Typography>
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ lineHeight: 1.2 }}>${suggestedPawnTotal.toFixed(2)}</Typography>
                 </Box>
-                <Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Suggested Pawn Total</Typography>
-                  <Typography variant="h6" fontWeight={700}>${suggestedPawnTotal.toFixed(2)}</Typography>
-                </Box>
-                <Box sx={{ ml: 'auto' }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Final Price *</Typography>
-                  <TextField
-                    size="small"
-                    type="number"
-                    value={scrapFinalPriceManual ? scrapFinalPrice : suggestedBuyTotal.toFixed(2)}
-                    onChange={e => { setScrapFinalPrice(e.target.value); setScrapFinalPriceManual(true); }}
-                    InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
-                    sx={{ width: 140 }}
-                  />
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>This is the total amount for the selected items.</Typography>
-                </Box>
+                <Tooltip title="This is the total amount for the selected items.">
+                  <Box sx={{ ml: 'auto' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 11, lineHeight: 1.2 }}>Final Price *</Typography>
+                    <TextField
+                      size="small"
+                      type="number"
+                      value={scrapFinalPriceManual ? scrapFinalPrice : suggestedBuyTotal.toFixed(2)}
+                      onChange={e => { setScrapFinalPrice(e.target.value); setScrapFinalPriceManual(true); }}
+                      InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
+                      sx={{ width: 130, mt: 0.25, '& .MuiInputBase-input': { py: 0.5 } }}
+                    />
+                  </Box>
+                </Tooltip>
               </>
             );
           })()}
@@ -2333,12 +2321,6 @@ export default function JewelryIntakeScreen({
               sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN } }}>
               {editItem ? 'Update Item' : 'Save Item(s) to Ticket'}
             </Button>
-            {!editItem && (
-              <Button size="small" variant="outlined" onClick={handleSaveScrapBatchAndAdd} disabled={getActiveScrapRows().length === 0}
-                sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, borderColor: GREEN, color: GREEN }}>
-                Save + Add Another
-              </Button>
-            )}
           </>
         ) : (
           <>
