@@ -18,7 +18,6 @@ import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import CloseStoreIssuesDialog from './components/CloseStoreIssuesDialog';
 import Login from './components/Login';
-import Dashboard from './pages/Dashboard';
 import Home from './pages/Home';
 import Scrap from './pages/Scrap';
 import TransactionJournals from './pages/TransactionJournals';
@@ -45,7 +44,6 @@ import Cart from './pages/Cart';
 import JewelryEdit from './pages/JewelryEdit';
 import SalesHistory from './pages/SalesHistory';
 import EmployeeSalesHistory from './pages/EmployeeSalesHistory';
-import Layaway from './pages/Layaway';
 import CashDrawer from './pages/CashDrawer';
 import TimeClock from './pages/TimeClock';
 
@@ -424,17 +422,17 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <Home />
+                      <ModernTransactions />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
               />
               <Route
-                path="/dashboard"
+                path="/home"
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <Dashboard />
+                      <Home />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
@@ -723,76 +721,6 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <EmployeeSalesHistory />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/past-due"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/active"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/no-activity"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/no-payment"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/locate"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/layaways/reporting"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Layaway />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

@@ -75,6 +75,13 @@ ALTER TABLE jewelry
 
 UPDATE jewelry SET mode = 'PIECE' WHERE mode IS NULL;
 
+-- Migration: add pieces column — number of individual pieces represented by a
+-- single jewelry row (e.g. a scrap lot weighed as one group of several items).
+ALTER TABLE jewelry
+  ADD COLUMN IF NOT EXISTS pieces INTEGER DEFAULT 1;
+
+UPDATE jewelry SET pieces = 1 WHERE pieces IS NULL;
+
 -- Migration: backfill processing_status and sellable_status from existing status values
 UPDATE jewelry SET processing_status = 'ON_RETAIL_FLOOR', sellable_status = 'SELLABLE'
   WHERE status = 'ACTIVE';
@@ -131,6 +138,7 @@ CREATE TABLE IF NOT EXISTS jewelry (
     
     -- Metal details
     metal_weight DECIMAL(10,2) NOT NULL,
+    pieces INTEGER DEFAULT 1,
     precious_metal_type VARCHAR(50),
     non_precious_metal_type VARCHAR(50),
     metal_purity VARCHAR(50),

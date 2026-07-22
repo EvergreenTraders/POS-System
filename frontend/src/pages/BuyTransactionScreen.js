@@ -109,6 +109,10 @@ export default function BuyTransactionScreen({
   onConvertTo,
   existingBuyData,
   workspaceTradeTickets = [],
+  autoOpenScrap = false,
+  scrapPrefill = null,
+  autoOpenUnique = false,
+  uniqueParsedValues = null,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -169,6 +173,23 @@ export default function BuyTransactionScreen({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // "scrap"/weight+purity shortcuts from the transactions search bar — jump
+  // straight into the intake screen instead of landing on the buy ticket table.
+  useEffect(() => {
+    if (autoOpenScrap) {
+      setParsedValues(null);
+      setIntakeEntry('');
+      setEditingIntakeItem(null);
+      setIntakeOpen(true);
+    } else if (autoOpenUnique) {
+      setParsedValues(uniqueParsedValues);
+      setIntakeEntry('');
+      setEditingIntakeItem(null);
+      setIntakeOpen(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
     axios.get(`${config.apiUrl}/categories`, { headers })
@@ -225,7 +246,7 @@ export default function BuyTransactionScreen({
     if (quickAddMode) quickInputRef.current?.focus();
   }, [quickAddMode]);
 
-  const totalPaid = buyItems.reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
+  const totalPaid = Math.round(buyItems.reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0) * 100) / 100;
   const effectiveTotalPaid = totalPaidOverride ?? totalPaid;
 
   // Editing Total Paid proportionally rescales every item's own paid amount
@@ -347,19 +368,26 @@ export default function BuyTransactionScreen({
     setIntakeOpen(true);
   };
 
-  const jewelryItemToBuyItem = (item, seq) => ({
-    _lineId: Date.now() + Math.random(),
-    part_no: `${ticketId}-${String(seq).padStart(2, '0')}`,
-    category_id: categories.find(c => c.name === item.category)?.id || '',
-    category_name: item.category || '',
-    description: item.item || item.short_desc || '',
-    serial_number: item.serial_number || item.serial || '',
-    qty: 1,
-    paid: parseFloat(item.buy_price) || parseFloat(item.paid_amount) || 0,
-    images: item.images || [],
-    sourceEstimator: 'jewelry',
-    jewelryData: item,
-  });
+  const jewelryItemToBuyItem = (item, seq) => {
+    const qty = parseInt(item.qty) || 1;
+    // Scrap lots price the whole weighed group at once (buy_price/paid_amount is
+    // the lot total) — divide by pieces so qty * paid reproduces that total rather
+    // than multiplying it out again.
+    const totalPaid = parseFloat(item.buy_price) || parseFloat(item.paid_amount) || 0;
+    return {
+      _lineId: Date.now() + Math.random(),
+      part_no: `${ticketId}-${String(seq).padStart(2, '0')}`,
+      category_id: categories.find(c => c.name === item.category)?.id || '',
+      category_name: item.category || '',
+      description: item.item || item.short_desc || '',
+      serial_number: item.serial_number || item.serial || '',
+      qty,
+      paid: Math.round((totalPaid / qty) * 100) / 100,
+      images: item.images || [],
+      sourceEstimator: 'jewelry',
+      jewelryData: item,
+    };
+  };
 
   const handleIntakeBack = () => {
     setIntakeOpen(false);
@@ -532,15 +560,23 @@ export default function BuyTransactionScreen({
     const cartItems = buyItems.flatMap(item => {
       const jewelryBase = item.jewelryData ? { ...item.jewelryData } : {};
       const itemPaid = (parseFloat(item.paid) || 0) * scale;
-      return Array.from({ length: parseInt(item.qty) || 1 }, () => ({
+      const qty = parseInt(item.qty) || 1;
+      // Scrap lots are weighed and valued as one whole group — keep them as a
+      // single inventory row carrying the piece count, rather than splitting
+      // into `qty` separate rows the way distinct unique items do.
+      const isScrapLot = item.jewelryData?.mode === 'scrap';
+      const copies = isScrapLot ? 1 : qty;
+      const rowPaid = isScrapLot ? itemPaid * qty : itemPaid;
+      return Array.from({ length: copies }, () => ({
         ...jewelryBase,
         ...item,
         id: `${ticketId}_${item._lineId}_${Date.now()}`,
         description: item.description || item.jewelryData?.short_desc || item.part_no,
         short_desc: item.description || item.jewelryData?.short_desc || '',
         long_desc: item.jewelryData?.long_desc || item.description || '',
-        price: itemPaid,
-        value: itemPaid,
+        price: rowPaid,
+        value: rowPaid,
+        pieces: isScrapLot ? qty : 1,
         transaction_type: 'buy',
         sourceEstimator: item.sourceEstimator || 'jewelry',
         category_id: item.category_id || item.jewelryData?.category_id || null,
@@ -583,6 +619,8 @@ export default function BuyTransactionScreen({
         initialEntry={intakeEntry}
         parsedValues={editingIntakeItem ? null : parsedValues}
         editItem={editingIntakeItem}
+        initialMode={autoOpenScrap || editingIntakeItem?.mode === 'scrap' ? 'scrap' : 'unique'}
+        scrapPrefill={autoOpenScrap ? scrapPrefill : null}
         onBack={handleIntakeBack}
         onSaveItem={handleIntakeSave}
         onSaveAndAddAnother={handleIntakeSaveAndAdd}

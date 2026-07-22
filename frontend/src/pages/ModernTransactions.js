@@ -23,6 +23,71 @@ const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 const BUY_BLUE = '#0284c7';
 
+// ── "scrap" search-bar shortcut parsing ──────────────────────────────────────
+// Recognizes a weight + purity (in any order, e.g. "5.6g 14k" or "14k 5.6g")
+// typed into the transactions search bar. rowKey matches one of
+// JewelryIntakeScreen's SCRAP_FIXED_ROWS keys (one row per metal); the actual
+// purity option within that row is resolved there once its dropdown loads.
+const SCRAP_PURITY_BY_DECIMAL = [
+  { rowKey: 'gold',   value: 0.417, metal: 'Gold',   karat: 10 },
+  { rowKey: 'gold',   value: 0.585, metal: 'Gold',   karat: 14 },
+  { rowKey: 'gold',   value: 0.750, metal: 'Gold',   karat: 18 },
+  { rowKey: 'gold',   value: 0.917, metal: 'Gold',   karat: 22 },
+  { rowKey: 'silver', value: 0.925, metal: 'Silver', karat: null },
+];
+const SCRAP_METAL_WORDS = { gold: 'Gold', silver: 'Silver', platinum: 'Platinum', palladium: 'Palladium' };
+const SCRAP_ROW_KEY_BY_METAL = { Gold: 'gold', Silver: 'silver', Platinum: 'platinum', Palladium: 'palladium' };
+
+function parseQuickScrapEntry(text) {
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  let hasScrapWord = false;
+  let weightG = null;
+  let karat = null;
+  let purityValue = null;
+  let metal = null;
+  const leftover = [];
+
+  for (const tok of tokens) {
+    const lower = tok.toLowerCase();
+    let m;
+    if (lower === 'scrap') { hasScrapWord = true; continue; }
+    if (SCRAP_METAL_WORDS[lower]) { metal = SCRAP_METAL_WORDS[lower]; continue; }
+    if (weightG === null && (m = lower.match(/^(\d+(?:\.\d+)?)g$/))) {
+      weightG = parseFloat(m[1]);
+      continue;
+    }
+    if (purityValue === null && (m = lower.match(/^(\d+)k$/))) {
+      const k = parseInt(m[1], 10);
+      karat = k;
+      purityValue = Math.round((k / 24) * 1000) / 1000;
+      metal = metal || 'Gold';
+      continue;
+    }
+    if (purityValue === null && (m = lower.match(/^0?(\.\d+)$/))) {
+      const dec = parseFloat(`0${m[1]}`);
+      const nearest = SCRAP_PURITY_BY_DECIMAL.reduce((best, c) =>
+        Math.abs(c.value - dec) < Math.abs(best.value - dec) ? c : best, SCRAP_PURITY_BY_DECIMAL[0]);
+      if (Math.abs(nearest.value - dec) <= 0.01) {
+        purityValue = nearest.value;
+        karat = nearest.karat;
+        metal = metal || nearest.metal;
+      } else {
+        purityValue = dec;
+        metal = metal || 'Gold';
+      }
+      continue;
+    }
+    leftover.push(tok);
+  }
+
+  const rowKey = metal ? SCRAP_ROW_KEY_BY_METAL[metal] : null;
+  const hasWeightAndPurity = weightG != null && purityValue != null;
+  const isBulkScrap = hasScrapWord || (hasWeightAndPurity && leftover.length === 0);
+  const isUniqueWithPrefill = !isBulkScrap && hasWeightAndPurity;
+
+  return { hasScrapWord, weightG, karat, purityValue, metal, rowKey, leftover, isBulkScrap, isUniqueWithPrefill };
+}
+
 // ── Dashboard-style placeholder cards shown when the workspace is empty ──────
 // Copied from Home.js's Messages/Tasks/Loans-Layaways widgets (same dummy data,
 // not wired to any live source) so this screen doubles as a landing page.
@@ -54,6 +119,37 @@ const DASHBOARD_LOANS_LAYAWAYS_DUE_TODAY = [
   { id: 'LWY-00456', name: 'Maria Garcia', type: 'Layaway', details: '$120.00 payment due' },
   { id: 'PT-00001198', name: 'Robert Chen', type: 'Loan', details: '$210.00 due' },
 ];
+
+// Copied from the now-removed Dashboard.js screen (same dummy data, not wired to
+// any live source).
+const DASHBOARD_STATS = [
+  { title: 'Daily Revenue', value: '$2,854', iconName: 'CurrencyExchange', change: '12.5%', timeFrame: 'last month' },
+  { title: 'Protection Plans sold', value: '124', iconName: 'Inventory', change: '8.2%', timeFrame: 'last month' },
+  { title: 'New Customers', value: '48', iconName: 'Person', change: '-3.1%', timeFrame: 'last month' },
+  { title: 'Sales Growth', value: '15.2%', iconName: 'TrendingUp', change: '2.3%', timeFrame: 'last month' },
+];
+
+function StatCard({ title, value, iconName, change, timeFrame }) {
+  const isPositive = !change.includes('-');
+  const IconComponent = MuiIcons[iconName];
+  return (
+    <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+        <Box>
+          <Typography color="text.secondary" variant="body2" gutterBottom>{title}</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{value}</Typography>
+        </Box>
+        <Box sx={{ bgcolor: '#e7f7ed', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <IconComponent sx={{ color: GREEN, fontSize: 18 }} />
+        </Box>
+      </Box>
+      <Typography variant="caption" sx={{ color: isPositive ? '#00a862' : '#d32f2f', display: 'flex', alignItems: 'center' }}>
+        <MuiIcons.TrendingUpOutlined sx={{ fontSize: 14, mr: 0.5, transform: !isPositive ? 'rotate(180deg)' : 'none' }} />
+        {change} vs {timeFrame}
+      </Typography>
+    </Paper>
+  );
+}
 
 // Maps workspace transaction type to the localStorage keys each ticket screen uses
 // to track voided ticket numbers (so they're never reused) and the in-flight
@@ -661,6 +757,10 @@ export default function ModernTransactions() {
   const [quickSaleMaxAmount, setQuickSaleMaxAmount] = useState(100);
   const [employees, setEmployees] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
+  const [buyAutoScrap, setBuyAutoScrap]   = useState(false);
+  const [scrapPrefill, setScrapPrefill]   = useState(null);
+  const [buyAutoUnique, setBuyAutoUnique] = useState(false);
+  const [uniquePrefill, setUniquePrefill] = useState(null);
   const [buyOpen, setBuyOpen] = useState(() => {
     if (location.state?.customerUpdated) {
       const raw = sessionStorage.getItem('pendingBuyState');
@@ -843,6 +943,7 @@ export default function ModernTransactions() {
   const showMessagesCard = currentEmployee?.show_messages_card !== false;
   const showTasksCard = currentEmployee?.show_tasks_card !== false;
   const showLoansLayawaysCard = currentEmployee?.show_loans_layaways_card !== false;
+  const showStatsCard = currentEmployee?.show_stats_card !== false;
 
   const [cardPrefsAnchor, setCardPrefsAnchor] = useState(null);
   const handleToggleCardPref = async (field, currentValue) => {
@@ -853,6 +954,7 @@ export default function ModernTransactions() {
         showMessagesCard: field === 'show_messages_card' ? nextValue : showMessagesCard,
         showTasksCard: field === 'show_tasks_card' ? nextValue : showTasksCard,
         showLoansLayawaysCard: field === 'show_loans_layaways_card' ? nextValue : showLoansLayawaysCard,
+        showStatsCard: field === 'show_stats_card' ? nextValue : showStatsCard,
       });
     } catch (err) {
       console.error('Failed to update workspace card preferences:', err);
@@ -1628,6 +1730,10 @@ export default function ModernTransactions() {
       setSaleOpen(true);
     } else if (type === 'buy') {
       if (!customer) { setNoCustomerWarning('buy ticket'); return; }
+      setBuyAutoScrap(false);
+      setScrapPrefill(null);
+      setBuyAutoUnique(false);
+      setUniquePrefill(null);
       setBuyOpen(true);
     } else if (type === 'trade') {
       if (!customer) { setNoCustomerWarning('trade ticket'); return; }
@@ -1681,6 +1787,10 @@ export default function ModernTransactions() {
     });
     setBuyOpen(false);
     setExistingBuyData(null);
+    setBuyAutoScrap(false);
+    setScrapPrefill(null);
+    setBuyAutoUnique(false);
+    setUniquePrefill(null);
   };
 
   const handleAddTradeToWorkspace = (tradeData) => {
@@ -1731,6 +1841,10 @@ export default function ModernTransactions() {
     setTradeOpen(false);
     setExistingTradeData(null);
     setExistingBuyData({ buyItems, ticketNote, showOnReceipt });
+    setBuyAutoScrap(false);
+    setScrapPrefill(null);
+    setBuyAutoUnique(false);
+    setUniquePrefill(null);
     setBuyOpen(true);
   };
 
@@ -1989,16 +2103,28 @@ export default function ModernTransactions() {
       <BuyTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => { setBuyOpen(false); setExistingBuyData(null); }}
+        onClose={() => {
+          setBuyOpen(false); setExistingBuyData(null);
+          setBuyAutoScrap(false); setScrapPrefill(null);
+          setBuyAutoUnique(false); setUniquePrefill(null);
+        }}
         onAddToWorkspace={handleAddBuyToWorkspace}
         onRemoveFromWorkspace={(ticketId) => {
           setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'BUY' && t.ticketId === ticketId)));
           setBuyOpen(false);
           setExistingBuyData(null);
+          setBuyAutoScrap(false);
+          setScrapPrefill(null);
+          setBuyAutoUnique(false);
+          setUniquePrefill(null);
         }}
         onConvertTo={handleBuyConvertTo}
         existingBuyData={existingBuyData}
         workspaceTradeTickets={workspaceTradeTickets}
+        autoOpenScrap={buyAutoScrap}
+        scrapPrefill={scrapPrefill}
+        autoOpenUnique={buyAutoUnique}
+        uniqueParsedValues={uniquePrefill}
       />
     );
   }
@@ -2065,6 +2191,35 @@ export default function ModernTransactions() {
         <TextField
           value={search}
           onChange={e => setSearch(e.target.value)}
+          onKeyDown={e => {
+            if (e.key !== 'Enter') return;
+            const parsed = parseQuickScrapEntry(search);
+            if (!parsed.isBulkScrap && !parsed.isUniqueWithPrefill) return;
+            if (!customer) { setNoCustomerWarning('buy ticket'); return; }
+            if (parsed.isBulkScrap) {
+              setSearch('');
+              setExistingBuyData(null);
+              setBuyAutoScrap(true);
+              setScrapPrefill(parsed.rowKey && parsed.weightG != null
+                ? { rowKey: parsed.rowKey, grossWt: String(parsed.weightG), purityValue: parsed.purityValue, karat: parsed.karat }
+                : null);
+              setBuyAutoUnique(false);
+              setUniquePrefill(null);
+              setBuyOpen(true);
+            } else if (parsed.isUniqueWithPrefill) {
+              setSearch('');
+              setExistingBuyData(null);
+              setBuyAutoScrap(false);
+              setScrapPrefill(null);
+              setUniquePrefill({
+                weight: parsed.weightG,
+                metal: parsed.metal,
+                purity: parsed.karat != null ? `${parsed.karat}K` : parsed.purityValue,
+              });
+              setBuyAutoUnique(true);
+              setBuyOpen(true);
+            }
+          }}
           placeholder="Scan barcode or search (item, customer, ticket, receipt, SKU, phone...)"
           size="small"
           fullWidth
@@ -2301,11 +2456,26 @@ export default function ModernTransactions() {
                     <MuiIcons.Settings fontSize="small" />
                   </IconButton>
                 </Tooltip>
+
+                {showStatsCard && (
+                  <Grid container spacing={{ md: 1.5, xl: 1 }} sx={{ mb: 2, pr: 5 }}>
+                    {DASHBOARD_STATS.map((stat) => (
+                      <Grid item xs={12} sm={6} md={3} key={stat.title}>
+                        <StatCard {...stat} />
+                      </Grid>
+                    ))}
+                  </Grid>
+                )}
+
                 <Menu anchorEl={cardPrefsAnchor} open={Boolean(cardPrefsAnchor)} onClose={() => setCardPrefsAnchor(null)}>
                   <Box sx={{ px: 2, py: 1 }}>
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                       Show on this screen
                     </Typography>
+                    <FormControlLabel
+                      control={<Checkbox size="small" checked={showStatsCard} onChange={() => handleToggleCardPref('show_stats_card', showStatsCard)} />}
+                      label={<Typography variant="body2">Stats</Typography>}
+                    />
                     <FormControlLabel
                       control={<Checkbox size="small" checked={showMessagesCard} onChange={() => handleToggleCardPref('show_messages_card', showMessagesCard)} />}
                       label={<Typography variant="body2">Messages</Typography>}
@@ -2321,7 +2491,7 @@ export default function ModernTransactions() {
                   </Box>
                 </Menu>
 
-                {!showMessagesCard && !showTasksCard && !showLoansLayawaysCard ? (
+                {!showStatsCard && !showMessagesCard && !showTasksCard && !showLoansLayawaysCard ? (
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 6, gap: 1.5, color: 'text.secondary' }}>
                     <MuiIcons.Receipt sx={{ fontSize: 48, opacity: 0.15 }} />
                     <Typography variant="body2" color="text.secondary">No transactions in workspace yet.</Typography>
@@ -2419,7 +2589,12 @@ export default function ModernTransactions() {
                         tx={tx}
                         buyIcon={transactionTypes.find(t => t.type === 'buy')?.icon}
                         buyColor={transactionTypes.find(t => t.type === 'buy')?.color}
-                        onOpen={() => { setExistingBuyData(tx); setBuyOpen(true); }}
+                        onOpen={() => {
+                          setExistingBuyData(tx);
+                          setBuyAutoScrap(false); setScrapPrefill(null);
+                          setBuyAutoUnique(false); setUniquePrefill(null);
+                          setBuyOpen(true);
+                        }}
                         onVoid={() => setVoidConfirm(tx)}
                       />
                     ) : tx.type === 'TRADE' ? (

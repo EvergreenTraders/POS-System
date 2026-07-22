@@ -13,6 +13,12 @@ function generateTempPassword() {
   return pw;
 }
 
+// Forgot-password temp passwords live only in server memory (never written to the
+// employees table), so the employee's real password keeps working unless they
+// actually complete the reset with the temp one — and it self-expires after 5 min.
+const TEMP_PASSWORD_TTL_MS = 5 * 60 * 1000;
+const tempPasswords = new Map(); // employee_id -> { password, expiresAt }
+
 const app = express();
 
 // Middleware
@@ -349,6 +355,9 @@ pool.query(`
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS show_loans_layaways_card BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('show_loans_layaways_card migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS show_stats_card BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('show_stats_card migration:', err.message));
 
 // Transfer and cash handling permissions
 pool.query(`
@@ -702,12 +711,23 @@ app.post('/api/auth/reset-password', async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found' });
     }
-    if (result.rows[0].password !== oldPassword) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
+    const employee = result.rows[0];
+
+    if (employee.password !== oldPassword) {
+      const pendingEntry = tempPasswords.get(employee.employee_id);
+      if (!pendingEntry || pendingEntry.password !== oldPassword) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+      if (Date.now() > pendingEntry.expiresAt) {
+        tempPasswords.delete(employee.employee_id);
+        return res.status(401).json({ error: 'Temporary password expired. Please request a new one.', expired: true });
+      }
+      tempPasswords.delete(employee.employee_id);
     }
+
     await pool.query(
       'UPDATE employees SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE employee_id = $2',
-      [newPassword, result.rows[0].employee_id]
+      [newPassword, employee.employee_id]
     );
     res.json({ message: 'Password reset successfully' });
   } catch (err) {
@@ -726,11 +746,13 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'No account found with that username or email' });
     }
+    // Held only in memory — never written to the employees table — so the real
+    // password keeps working unless the employee actually completes the reset.
     const tempPassword = generateTempPassword();
-    await pool.query(
-      'UPDATE employees SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE employee_id = $2',
-      [tempPassword, result.rows[0].employee_id]
-    );
+    tempPasswords.set(result.rows[0].employee_id, {
+      password: tempPassword,
+      expiresAt: Date.now() + TEMP_PASSWORD_TTL_MS,
+    });
     res.json({ tempPassword });
   } catch (err) {
     console.error('Forgot password error:', err);
@@ -764,7 +786,7 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
             transferAllowedDrawer, transferAllowedSafe, transferAllowedBank, transferAllowedStore,
             transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold, employmentType,
             canResumeParkedWorkspaces,
-            showMessagesCard, showTasksCard, showLoansLayawaysCard } = req.body;
+            showMessagesCard, showTasksCard, showLoansLayawaysCard, showStatsCard } = req.body;
 
     const empType = employmentType === 'salary' ? 'salary' : 'hourly';
     // Salary employees are always exempt from clocking in
@@ -780,13 +802,15 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
           discrepancy_threshold = $13, employment_type = $14,
           can_resume_parked_workspaces = $15,
           show_messages_card = $16, show_tasks_card = $17, show_loans_layaways_card = $18,
+          show_stats_card = $19,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $19
+      WHERE employee_id = $20
       RETURNING employee_id, username, first_name, last_name, role,
         track_hours, can_open_store, can_open_drawer, can_view_drawer, can_view_safe,
         transfer_allowed_drawer, transfer_allowed_safe, transfer_allowed_bank, transfer_allowed_store,
         transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold, employment_type,
-        can_resume_parked_workspaces, show_messages_card, show_tasks_card, show_loans_layaways_card
+        can_resume_parked_workspaces, show_messages_card, show_tasks_card, show_loans_layaways_card,
+        show_stats_card
     `;
     const result = await pool.query(query, [
       effectiveTrackHours,
@@ -807,6 +831,7 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
       showMessagesCard !== false,
       showTasksCard !== false,
       showLoansLayawaysCard !== false,
+      showStatsCard !== false,
       id
     ]);
 
@@ -829,15 +854,16 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
 app.put('/api/employees/:id/workspace-card-preferences', async (req, res) => {
   try {
     const { id } = req.params;
-    const { showMessagesCard, showTasksCard, showLoansLayawaysCard } = req.body;
+    const { showMessagesCard, showTasksCard, showLoansLayawaysCard, showStatsCard } = req.body;
 
     const result = await pool.query(`
       UPDATE employees
       SET show_messages_card = $1, show_tasks_card = $2, show_loans_layaways_card = $3,
+          show_stats_card = $4,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $4
-      RETURNING employee_id, show_messages_card, show_tasks_card, show_loans_layaways_card
-    `, [showMessagesCard !== false, showTasksCard !== false, showLoansLayawaysCard !== false, id]);
+      WHERE employee_id = $5
+      RETURNING employee_id, show_messages_card, show_tasks_card, show_loans_layaways_card, show_stats_card
+    `, [showMessagesCard !== false, showTasksCard !== false, showLoansLayawaysCard !== false, showStatsCard !== false, id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found' });
@@ -7681,8 +7707,9 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           item_price,
           melt_value,
           total_weight,
-          inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)
+          inventory_type,
+          pieces
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
         RETURNING *`;
 
       const jewelryValues = [
@@ -7727,7 +7754,8 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
         (item.secondary_gems || []).reduce((sum, gem) =>
           sum + (parseFloat(gem.weight) || 0) * (parseInt(gem.quantity) || 0), 0),
-        'jewelry'
+        'jewelry',
+        parseInt(item.pieces) || 1
       ];
 
       // A savepoint around just this item's insert so a duplicate item_id/part_number
@@ -7914,8 +7942,9 @@ app.post('/api/jewelry', async (req, res) => {
           item_price,
           melt_value,
           total_weight,
-          inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)
+          inventory_type,
+          pieces
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
         RETURNING *`;
 
       const jewelryValues = [
@@ -7960,7 +7989,8 @@ app.post('/api/jewelry', async (req, res) => {
         (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
         (item.secondary_gems || []).reduce((sum, gem) =>
           sum + (parseFloat(gem.secondary_gem_weight) || 0) * (parseInt(gem.secondary_gem_quantity) || 1), 0),
-        'jewelry'                                             // 39
+        'jewelry',                                            // 39
+        parseInt(item.pieces) || 1                            // 40
       ];
 
       // A savepoint around just this item's insert so a duplicate item_id/part_number
@@ -8861,11 +8891,12 @@ app.put('/api/parked-workspace-config', async (req, res) => {
 
 app.get('/api/parked-workspaces', async (req, res) => {
   try {
-    // Anonymous (no customer) parked workspaces expire after the configured retention period
+    // Parked workspaces expire after the configured retention period, regardless of
+    // whether a customer is attached.
     const configResult = await pool.query('SELECT hours FROM parked_workspace_config ORDER BY created_at DESC LIMIT 1');
     const retentionHours = configResult.rows[0]?.hours || 24;
     await pool.query(
-      `DELETE FROM parked_workspaces WHERE customer_id IS NULL AND parked_at < NOW() - ($1 || ' hours')::interval`,
+      `DELETE FROM parked_workspaces WHERE parked_at < NOW() - ($1 || ' hours')::interval`,
       [retentionHours]
     );
 
@@ -12618,7 +12649,7 @@ app.get('/api/trade-tax-config', async (req, res) => {
       WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY created_at DESC LIMIT 1
     `);
-    res.json(result.rows[0] || { taxable: true });
+    res.json(result.rows[0] || { tax_basis: 'difference' });
   } catch (error) {
     console.error('Error fetching trade tax config:', error);
     res.status(500).json({ error: 'Failed to fetch trade tax config' });
@@ -12627,19 +12658,22 @@ app.get('/api/trade-tax-config', async (req, res) => {
 
 app.put('/api/trade-tax-config', async (req, res) => {
   try {
-    const { taxable } = req.body;
+    const { tax_basis } = req.body;
+    if (tax_basis !== 'full' && tax_basis !== 'difference') {
+      return res.status(400).json({ error: 'tax_basis must be "full" or "difference"' });
+    }
     const storeRes = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
     const store_id = storeRes.rows[0]?.store_id || null;
 
     const existing = await pool.query('SELECT id FROM trade_tax_config WHERE store_id = $1', [store_id]);
     const result = existing.rows.length > 0
       ? await pool.query(
-          'UPDATE trade_tax_config SET taxable = $1, updated_at = CURRENT_TIMESTAMP WHERE store_id = $2 RETURNING *',
-          [taxable !== false, store_id]
+          'UPDATE trade_tax_config SET tax_basis = $1, updated_at = CURRENT_TIMESTAMP WHERE store_id = $2 RETURNING *',
+          [tax_basis, store_id]
         )
       : await pool.query(
-          'INSERT INTO trade_tax_config (store_id, taxable) VALUES ($1, $2) RETURNING *',
-          [store_id, taxable !== false]
+          'INSERT INTO trade_tax_config (store_id, tax_basis) VALUES ($1, $2) RETURNING *',
+          [store_id, tax_basis]
         );
 
     res.json(result.rows[0]);
@@ -14544,362 +14578,6 @@ app.put('/api/currency-types', async (req, res) => {
     res.status(500).json({ error: 'Failed to update currency types' });
   } finally {
     client.release();
-  }
-});
-
-// ==================== LAYAWAY ENDPOINTS ====================
-
-// GET layaways by view
-app.get('/api/layaways', async (req, res) => {
-  try {
-    const { view } = req.query;
-    let query;
-
-    // Note: All layaway views include customer_name via JOIN with customers table
-    switch (view) {
-      case 'overdue':
-        query = 'SELECT * FROM layaway_overdue';
-        break;
-      case 'past-due':
-        query = 'SELECT * FROM layaway_past_due';
-        break;
-      case 'active':
-        query = 'SELECT * FROM layaway_active';
-        break;
-      case 'no-activity':
-        query = 'SELECT * FROM layaway_no_activity';
-        break;
-      case 'no-payment':
-        query = 'SELECT * FROM layaway_no_payment_30_days';
-        break;
-      case 'locate':
-        query = 'SELECT * FROM layaway_locate';
-        break;
-      case 'reporting':
-        query = `
-          SELECT
-            l.*,
-            CONCAT(c.first_name, ' ', c.last_name) AS customer_name
-          FROM layaway l
-          LEFT JOIN customers c ON l.customer_id = c.id
-        `;
-        break;
-      default:
-        query = 'SELECT * FROM layaway_overdue';
-    }
-
-    const result = await pool.query(query);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching layaways:', err);
-    res.status(500).json({ error: 'Failed to fetch layaways' });
-  }
-});
-
-// GET single layaway by ID
-app.get('/api/layaways/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const query = 'SELECT * FROM layaway WHERE layaway_id = $1';
-    const result = await pool.query(query, [id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Layaway not found' });
-    }
-
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error fetching layaway:', err);
-    res.status(500).json({ error: 'Failed to fetch layaway' });
-  }
-});
-
-// POST create new layaway
-app.post('/api/layaways', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const {
-      customer_id,
-      item_id,
-      employee_id,
-      total_price,
-      down_payment,
-      payment_frequency,
-      payment_amount,
-      next_payment_date,
-      notes,
-      terms
-    } = req.body;
-
-    // Validate required fields
-    if (!customer_id || !item_id || !total_price) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    await client.query('BEGIN');
-
-    const amount_paid = parseFloat(down_payment) || 0;
-    const balance_remaining = parseFloat(total_price) - amount_paid;
-
-    // Create layaway
-    const insertQuery = `
-      INSERT INTO layaway (
-        customer_id, item_id, employee_id, total_price, down_payment,
-        amount_paid, balance_remaining, payment_frequency, payment_amount,
-        next_payment_date, notes, terms, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      RETURNING *
-    `;
-
-    const result = await client.query(insertQuery, [
-      customer_id,
-      item_id,
-      employee_id,
-      total_price,
-      down_payment || 0,
-      amount_paid,
-      balance_remaining,
-      payment_frequency || 'WEEKLY',
-      payment_amount,
-      next_payment_date,
-      notes,
-      terms,
-      'ACTIVE'
-    ]);
-
-    const layaway_id = result.rows[0].layaway_id;
-
-    // Record down payment if provided
-    if (amount_paid > 0) {
-      await client.query(
-        `INSERT INTO layaway_payments (layaway_id, amount, payment_method, notes, received_by)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [layaway_id, amount_paid, 'DOWN_PAYMENT', 'Initial down payment', employee_id]
-      );
-
-      await client.query(
-        'UPDATE layaway SET last_payment_date = CURRENT_TIMESTAMP WHERE layaway_id = $1',
-        [layaway_id]
-      );
-    }
-
-    // Create history record
-    await client.query(
-      `INSERT INTO layaway_history (layaway_id, action_type, performed_by, notes)
-       VALUES ($1, $2, $3, $4)`,
-      [layaway_id, 'CREATED', employee_id, 'Layaway created']
-    );
-
-    await client.query('COMMIT');
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error creating layaway:', err);
-    res.status(500).json({ error: 'Failed to create layaway' });
-  } finally {
-    client.release();
-  }
-});
-
-// POST make payment on layaway
-app.post('/api/layaways/:id/payment', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { id } = req.params;
-    const { amount, payment_method, notes, received_by } = req.body;
-
-    if (!amount || parseFloat(amount) <= 0) {
-      return res.status(400).json({ error: 'Invalid payment amount' });
-    }
-
-    await client.query('BEGIN');
-
-    // Get current layaway
-    const layawayResult = await client.query(
-      'SELECT * FROM layaway WHERE layaway_id = $1',
-      [id]
-    );
-
-    if (layawayResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Layaway not found' });
-    }
-
-    const layaway = layawayResult.rows[0];
-    const newAmountPaid = parseFloat(layaway.amount_paid) + parseFloat(amount);
-    const newBalance = parseFloat(layaway.total_price) - newAmountPaid;
-
-    // Record payment
-    await client.query(
-      `INSERT INTO layaway_payments (layaway_id, amount, payment_method, notes, received_by)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [id, amount, payment_method || 'cash', notes, received_by]
-    );
-
-    // Update layaway
-    const updateQuery = `
-      UPDATE layaway
-      SET amount_paid = $1,
-          balance_remaining = $2,
-          last_payment_date = CURRENT_TIMESTAMP,
-          status = CASE
-            WHEN $2 <= 0 THEN 'COMPLETED'
-            ELSE status
-          END,
-          completion_date = CASE
-            WHEN $2 <= 0 THEN CURRENT_TIMESTAMP
-            ELSE completion_date
-          END
-      WHERE layaway_id = $3
-      RETURNING *
-    `;
-
-    const result = await client.query(updateQuery, [newAmountPaid, newBalance, id]);
-
-    // Create history record
-    await client.query(
-      `INSERT INTO layaway_history (layaway_id, action_type, performed_by, old_value, new_value, notes)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [id, 'PAYMENT_MADE', received_by, layaway.amount_paid, newAmountPaid, `Payment of $${amount}`]
-    );
-
-    await client.query('COMMIT');
-    res.json(result.rows[0]);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error processing payment:', err);
-    res.status(500).json({ error: 'Failed to process payment' });
-  } finally {
-    client.release();
-  }
-});
-
-// POST update contact date
-app.post('/api/layaways/:id/contact', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { id } = req.params;
-    const { performed_by } = req.body;
-
-    await client.query('BEGIN');
-
-    // Update last contact date
-    const result = await client.query(
-      'UPDATE layaway SET last_contact_date = CURRENT_DATE WHERE layaway_id = $1 RETURNING *',
-      [id]
-    );
-
-    if (result.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Layaway not found' });
-    }
-
-    // Create history record
-    await client.query(
-      `INSERT INTO layaway_history (layaway_id, action_type, performed_by, notes)
-       VALUES ($1, $2, $3, $4)`,
-      [id, 'CONTACTED', performed_by, 'Customer contacted']
-    );
-
-    await client.query('COMMIT');
-    res.json(result.rows[0]);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error updating contact:', err);
-    res.status(500).json({ error: 'Failed to update contact' });
-  } finally {
-    client.release();
-  }
-});
-
-// PUT update layaway
-app.put('/api/layaways/:id', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { id } = req.params;
-    const { status, notes, payment_frequency, payment_amount, next_payment_date } = req.body;
-
-    await client.query('BEGIN');
-
-    const updateFields = [];
-    const values = [];
-    let paramCount = 1;
-
-    if (status) {
-      updateFields.push(`status = $${paramCount}`);
-      values.push(status);
-      paramCount++;
-    }
-    if (notes !== undefined) {
-      updateFields.push(`notes = $${paramCount}`);
-      values.push(notes);
-      paramCount++;
-    }
-    if (payment_frequency) {
-      updateFields.push(`payment_frequency = $${paramCount}`);
-      values.push(payment_frequency);
-      paramCount++;
-    }
-    if (payment_amount) {
-      updateFields.push(`payment_amount = $${paramCount}`);
-      values.push(payment_amount);
-      paramCount++;
-    }
-    if (next_payment_date) {
-      updateFields.push(`next_payment_date = $${paramCount}`);
-      values.push(next_payment_date);
-      paramCount++;
-    }
-
-    if (updateFields.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'No fields to update' });
-    }
-
-    values.push(id);
-    const query = `UPDATE layaway SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE layaway_id = $${paramCount} RETURNING *`;
-
-    const result = await client.query(query, values);
-
-    if (result.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Layaway not found' });
-    }
-
-    await client.query('COMMIT');
-    res.json(result.rows[0]);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error updating layaway:', err);
-    res.status(500).json({ error: 'Failed to update layaway' });
-  } finally {
-    client.release();
-  }
-});
-
-// GET layaway history
-app.get('/api/layaways/:id/history', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const query = 'SELECT * FROM layaway_history WHERE layaway_id = $1 ORDER BY action_date DESC';
-    const result = await pool.query(query, [id]);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching layaway history:', err);
-    res.status(500).json({ error: 'Failed to fetch layaway history' });
-  }
-});
-
-// GET layaway payments
-app.get('/api/layaways/:id/payments', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const query = 'SELECT * FROM layaway_payments WHERE layaway_id = $1 ORDER BY payment_date DESC';
-    const result = await pool.query(query, [id]);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching layaway payments:', err);
-    res.status(500).json({ error: 'Failed to fetch layaway payments' });
   }
 });
 

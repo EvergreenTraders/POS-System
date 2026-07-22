@@ -14,7 +14,6 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 import { useWorkspaceGuard } from '../context/WorkspaceGuardContext';
 
 import {
-  Dashboard as DashboardIcon,
   Recycling as ScrapIcon,
   Receipt,
   Inventory as InventoryIcon,
@@ -28,9 +27,8 @@ import {
   Description as QuoteIcon,
   People as PeopleIcon,
   Assessment as AssessmentIcon,
-  BookmarkAdded as LayawayIcon,
   PointOfSale as TransactionsIcon,
-  AutoAwesome as ModernTransactionsIcon,
+  Dashboard as ModernTransactionsIcon,
   AccountBalance as CashDrawerIcon,
   AccessTime as TimeClockIcon,
 } from '@mui/icons-material';
@@ -73,7 +71,6 @@ const StyledLink = styled(Link)({
 function Sidebar() {
   const [systemConfigOpen, setSystemConfigOpen] = useState(false);
   const [customersOpen, setCustomersOpen] = useState(false);
-  const [layawayOpen, setLayawayOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(true);
   const location = useLocation();
   const navigate = useNavigate();
@@ -101,10 +98,6 @@ function Sidebar() {
 
   const handleCustomersClick = () => {
     setCustomersOpen(!customersOpen);
-  };
-
-  const handleLayawayClick = () => {
-    setLayawayOpen(!layawayOpen);
   };
 
   const handleDrawerToggle = () => {
@@ -138,21 +131,12 @@ function Sidebar() {
           </StyledListItem>
         </StyledLink>
 
-        <StyledLink to="/">
-          <StyledListItem active={isActive('/')}>
+        <StyledLink to="/home">
+          <StyledListItem active={isActive('/home')}>
             <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
             <StorefrontIcon />
             </ListItemIcon>
             {isOpen && <ListItemText primary="Home" />}
-          </StyledListItem>
-        </StyledLink>
-
-        <StyledLink to="/dashboard">
-          <StyledListItem active={isActive('/dashboard')}>
-            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
-              <DashboardIcon />
-            </ListItemIcon>
-            {isOpen && <ListItemText primary="Dashboard" />}
           </StyledListItem>
         </StyledLink>
 
@@ -250,57 +234,6 @@ function Sidebar() {
           {isOpen && <ListItemText primary="Pawns" />}
         </ListItem>
 
-        <ListItem button onClick={handleLayawayClick}>
-          <ListItemIcon sx={{ color: 'white', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
-            <LayawayIcon />
-          </ListItemIcon>
-          {isOpen && (
-            <>
-              <ListItemText primary="Layaways" />
-              {layawayOpen ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
-            </>
-          )}
-        </ListItem>
-
-        <Collapse in={layawayOpen && isOpen} timeout="auto" unmountOnExit>
-          <List component="div" disablePadding>
-            <StyledLink to="/layaways">
-              <StyledListItem active={isActive('/layaways')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="Layaways Overdue" />}
-              </StyledListItem>
-            </StyledLink>
-            <StyledLink to="/layaways/past-due">
-              <StyledListItem active={isActive('/layaways/past-due')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="Past Payment Due Date" />}
-              </StyledListItem>
-            </StyledLink>
-            <StyledLink to="/layaways/active">
-              <StyledListItem active={isActive('/layaways/active')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="All Active" />}
-              </StyledListItem>
-            </StyledLink>
-            <StyledLink to="/layaways/no-activity">
-              <StyledListItem active={isActive('/layaways/no-activity')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="Contacted But No Activity" />}
-              </StyledListItem>
-            </StyledLink>
-            <StyledLink to="/layaways/no-payment">
-              <StyledListItem active={isActive('/layaways/no-payment')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="No Payment in 30 days" />}
-              </StyledListItem>
-            </StyledLink>
-            <StyledLink to="/layaways/locate">
-              <StyledListItem active={isActive('/layaways/locate')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="Locate Layaways" />}
-              </StyledListItem>
-            </StyledLink>
-            <StyledLink to="/layaways/reporting">
-              <StyledListItem active={isActive('/layaways/reporting')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="Ad Hoc Reporting" />}
-              </StyledListItem>
-            </StyledLink>
-          </List>
-        </Collapse>
 
         <StyledLink to="/transactions">
           <StyledListItem active={isActive('/transactions')}>
