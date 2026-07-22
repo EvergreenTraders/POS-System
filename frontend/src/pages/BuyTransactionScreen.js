@@ -560,15 +560,23 @@ export default function BuyTransactionScreen({
     const cartItems = buyItems.flatMap(item => {
       const jewelryBase = item.jewelryData ? { ...item.jewelryData } : {};
       const itemPaid = (parseFloat(item.paid) || 0) * scale;
-      return Array.from({ length: parseInt(item.qty) || 1 }, () => ({
+      const qty = parseInt(item.qty) || 1;
+      // Scrap lots are weighed and valued as one whole group — keep them as a
+      // single inventory row carrying the piece count, rather than splitting
+      // into `qty` separate rows the way distinct unique items do.
+      const isScrapLot = item.jewelryData?.mode === 'scrap';
+      const copies = isScrapLot ? 1 : qty;
+      const rowPaid = isScrapLot ? itemPaid * qty : itemPaid;
+      return Array.from({ length: copies }, () => ({
         ...jewelryBase,
         ...item,
         id: `${ticketId}_${item._lineId}_${Date.now()}`,
         description: item.description || item.jewelryData?.short_desc || item.part_no,
         short_desc: item.description || item.jewelryData?.short_desc || '',
         long_desc: item.jewelryData?.long_desc || item.description || '',
-        price: itemPaid,
-        value: itemPaid,
+        price: rowPaid,
+        value: rowPaid,
+        pieces: isScrapLot ? qty : 1,
         transaction_type: 'buy',
         sourceEstimator: item.sourceEstimator || 'jewelry',
         category_id: item.category_id || item.jewelryData?.category_id || null,

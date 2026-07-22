@@ -7707,8 +7707,9 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           item_price,
           melt_value,
           total_weight,
-          inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)
+          inventory_type,
+          pieces
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
         RETURNING *`;
 
       const jewelryValues = [
@@ -7753,7 +7754,8 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
         (item.secondary_gems || []).reduce((sum, gem) =>
           sum + (parseFloat(gem.weight) || 0) * (parseInt(gem.quantity) || 0), 0),
-        'jewelry'
+        'jewelry',
+        parseInt(item.pieces) || 1
       ];
 
       // A savepoint around just this item's insert so a duplicate item_id/part_number
@@ -7940,8 +7942,9 @@ app.post('/api/jewelry', async (req, res) => {
           item_price,
           melt_value,
           total_weight,
-          inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)
+          inventory_type,
+          pieces
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
         RETURNING *`;
 
       const jewelryValues = [
@@ -7986,7 +7989,8 @@ app.post('/api/jewelry', async (req, res) => {
         (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
         (item.secondary_gems || []).reduce((sum, gem) =>
           sum + (parseFloat(gem.secondary_gem_weight) || 0) * (parseInt(gem.secondary_gem_quantity) || 1), 0),
-        'jewelry'                                             // 39
+        'jewelry',                                            // 39
+        parseInt(item.pieces) || 1                            // 40
       ];
 
       // A savepoint around just this item's insert so a duplicate item_id/part_number
