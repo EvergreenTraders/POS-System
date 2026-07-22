@@ -2669,10 +2669,15 @@ const handleBackToEstimation = () => {
                 {checkoutSource === 'trade-ticket' && tradeBreakdown && (
                   <Box sx={{ mb: 2, p: 1.5, borderRadius: 1, bgcolor: '#f0f9ff', border: '1px solid #b3e5fc' }}>
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}>
-                      Trade tax rule: tax is only charged on the amount the sale exceeds the trade-in allowance.
+                      {tradeBreakdown.taxBasis === 'full'
+                        ? 'Trade tax rule: tax is charged on the full sale amount.'
+                        : 'Trade tax rule: tax is only charged on the amount the sale exceeds the trade-in allowance.'}
                     </Typography>
                     {[
-                      { label: 'Taxable Difference (Sale − Trade-In)', value: tradeBreakdown.taxableDifference },
+                      {
+                        label: tradeBreakdown.taxBasis === 'full' ? 'Taxable Amount (Full Sale)' : 'Taxable Difference (Sale − Trade-In)',
+                        value: tradeBreakdown.taxBase,
+                      },
                       { label: `Tax (${(tradeBreakdown.taxRate * 100).toFixed(3)}%)`, value: tradeBreakdown.taxAmount },
                     ].map(row => (
                       <Box key={row.label} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>

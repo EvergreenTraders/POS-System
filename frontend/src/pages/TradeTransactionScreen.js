@@ -799,9 +799,10 @@ export default function TradeTransactionScreen({
     commitTradeTicketId();
     if (buyId)  commitBuyTicketId();
     if (saleId) commitSaleTicketId();
-    // Tax on a trade only applies to the amount the sale exceeds the trade-in
-    // allowance (taxableDifference above), so the net total can't be rebuilt by
-    // summing individual line items in Checkout — pass the ticket's own total.
+    // Tax on a trade is calculated on a configurable basis (full sale amount, or
+    // just the amount the sale exceeds the trade-in allowance — see taxBase
+    // above), so the net total can't be rebuilt by summing individual line
+    // items in Checkout — pass the ticket's own total.
     // Positive = customer owes the store; negative = store owes the customer
     // (matches the buy/pawn sign convention Checkout uses).
     navigate('/checkout', {
@@ -816,7 +817,8 @@ export default function TradeTransactionScreen({
         tradeBreakdown: {
           buyTotal: totalTradeAllowance,
           saleTotal: saleAfterDiscount,
-          taxableDifference,
+          taxBase,
+          taxBasis: tradeTaxBasis,
           taxRate,
           taxAmount,
           netTotal: -netDueToCustomer,
@@ -1406,7 +1408,7 @@ export default function TradeTransactionScreen({
             {[
               { label: 'Sale Subtotal',       value: fmt(saleSubtotal),      bold: false },
               { label: 'Discount',            value: fmt(saleDiscount),      bold: false },
-              { label: 'Taxable Difference',  value: fmt(taxableDifference), bold: false },
+              { label: tradeTaxBasis === 'full' ? 'Taxable Amount (Full Sale)' : 'Taxable Difference', value: fmt(taxBase), bold: false },
               { label: `Tax (${(taxRate * 100).toFixed(3)}%)`, value: fmt(taxAmount), bold: false },
             ].map(row => (
               <Box key={row.label} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
