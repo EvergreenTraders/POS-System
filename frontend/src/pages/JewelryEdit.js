@@ -50,8 +50,8 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useAuth } from '../context/AuthContext';
 import { useSnackbar } from 'notistack';
 import config from '../config';
-import MetalEstimator from './MetalEstimator';
 import GemEstimator from './GemEstimator';
+import JewelryIntakeScreen from './JewelryIntakeScreen';
 
 // Metal API utility functions
 const API_BASE_URL = config.apiUrl;
@@ -323,13 +323,6 @@ function JewelryEdit() {
     // Required by MetalEstimator
   };
   
-  // State to hold metal form data
-  const [metalFormState, setMetalFormState] = useState(null);
-  const [gemFormState, setGemFormState] = useState({
-    diamonds: [],
-    stones: [],
-    secondaryGems: []
-  });
 
   // Handler for saving changes from combined dialog
   const handleSaveAttributes = async () => {
@@ -590,36 +583,67 @@ function JewelryEdit() {
     }
   };
 
-  const handleCombinedSave = async () => {
+  // Maps the current DB item into the field names JewelryIntakeScreen's
+  // editItem prefill expects (see its editItem effect), so the modern intake
+  // form opens pre-filled with this item's existing metal/gem data.
+  const buildIntakeEditItem = () => ({
+    id: item.item_id,
+    item: item.short_desc || item.long_desc || '',
+    serial_number: item.serial_number || '',
+    metal_category: item.category || '',
+    jewelry_color: item.jewelry_color || '',
+    metal_weight: item.metal_weight || '',
+    metal_spot_price: item.metal_spot_price || '',
+    est_metal_value: item.est_metal_value || '',
+    mode: 'unique',
+    images: item.images || [],
+    precious_metal_type: item.precious_metal_type || '',
+    metal_purity: item.metal_purity || '',
+    purity_value: item.purity_value || 0,
+    primary_gem_category: item.primary_gem_category || null,
+    primary_gem_shape: item.primary_gem_shape || '',
+    primary_gem_type: item.primary_gem_type || '',
+    primary_gem_color: item.primary_gem_color || '',
+    primary_gem_exact_color: item.primary_gem_exact_color || '',
+    primary_gem_clarity: item.primary_gem_clarity || '',
+    primary_gem_cut: item.primary_gem_cut || '',
+    primary_gem_weight: item.primary_gem_weight || 0,
+    primary_gem_size: item.primary_gem_size || '',
+    primary_gem_quantity: item.primary_gem_quantity || 1,
+    primary_gem_lab_grown: item.primary_gem_lab_grown || false,
+    primary_gem_authentic: item.primary_gem_authentic || false,
+    primary_gem_value: item.primary_gem_value || 0,
+    secondary_gems: (item.secondaryGems || []).map(gem => ({ ...gem })),
+  });
+
+  // Save handler for the modern JewelryIntakeScreen replacing the old
+  // Metal/Gem estimator dialog. Preserves the exact same save behaviour as
+  // the previous handleCombinedSave (history logging + local state update,
+  // no direct persistence of metal/gem fields) — only the source of the
+  // form data changed, from metalFormState/gemFormState to the intake
+  // screen's built item.
+  const handleIntakeScreenSave = async (builtItem) => {
     try {
       setIsSaving(true);
-      
-      // Create a copy of the current item with updated fields
+
       const updatedItem = { ...item };
       const changes = {};
-      
-      // Helper function to track changes with proper number comparison
+
       const trackChange = (field, newValue) => {
-        // Compare against baselineItem (current state with history) instead of the original item
         const oldValue = baselineItem?.[field] !== undefined ? baselineItem[field] : updatedItem[field];
 
-        // Helper function to check if a value is "empty"
         const isEmpty = (value) => {
           return value === null || value === undefined || value === '' ||
                  (typeof value === 'string' && value.trim() === '');
         };
 
-        // Skip if both values are empty (no meaningful change)
         if (isEmpty(oldValue) && isEmpty(newValue)) {
           return newValue;
         }
 
-        // Function to normalize values for comparison (convert string numbers to numbers)
         const normalizeValue = (value) => {
           if (value === null || value === undefined) return value;
-          // If it's a string that can be converted to a number, return as number
           if (typeof value === 'string' && !isNaN(parseFloat(value)) && isFinite(value)) {
-            // Preserve decimal places for display but compare as number
             return parseFloat(value);
           }
           return value;
@@ -628,231 +652,105 @@ function JewelryEdit() {
         const normalizedOld = normalizeValue(oldValue);
         const normalizedNew = normalizeValue(newValue);
 
-        // Compare the normalized values
         if (JSON.stringify(normalizedOld) !== JSON.stringify(normalizedNew)) {
           changes[field] = {
-            from: oldValue, // Keep original values for display
+            from: oldValue,
             to: newValue
           };
         }
         return newValue;
       };
-      
-      // Update metal data if available
-      if (metalFormState) {
-        updatedItem.precious_metal_type = trackChange('precious_metal_type', metalFormState.preciousMetalType || '');
-        updatedItem.metal_weight = trackChange('metal_weight', metalFormState.weight || 0);
-        updatedItem.non_precious_metal_type = trackChange('non_precious_metal_type', metalFormState.nonPreciousMetalType || '');
-        updatedItem.metal_purity = trackChange('metal_purity', metalFormState.purity?.purity || '');
-        updatedItem.purity_value = trackChange('purity_value', metalFormState.purity?.value || 0);
-        updatedItem.metal_spot_price = trackChange('metal_spot_price', metalFormState.spotPrice || 0);
-        updatedItem.est_metal_value = trackChange('est_metal_value', metalFormState.metalValue || 0);
-        // Only track jewelry_color changes if the metal type is Gold
-        if (metalFormState.preciousMetalType === 'Gold') {
-          updatedItem.jewelry_color = trackChange('jewelry_color', metalFormState.jewelryColor || '');
-        }
-        updatedItem.category = trackChange('category', metalFormState.metalCategory || '');
+
+      // Metal
+      updatedItem.precious_metal_type = trackChange('precious_metal_type', builtItem.precious_metal_type || '');
+      updatedItem.metal_weight = trackChange('metal_weight', builtItem.metal_weight || 0);
+      updatedItem.metal_purity = trackChange('metal_purity', builtItem.metal_purity || '');
+      updatedItem.purity_value = trackChange('purity_value', builtItem.purity_value || 0);
+      updatedItem.metal_spot_price = trackChange('metal_spot_price', builtItem.metal_spot_price || 0);
+      updatedItem.est_metal_value = trackChange('est_metal_value', builtItem.est_metal_value || 0);
+      if (builtItem.precious_metal_type === 'Gold') {
+        updatedItem.jewelry_color = trackChange('jewelry_color', builtItem.jewelry_color || '');
+      }
+      updatedItem.category = trackChange('category', builtItem.category || builtItem.metal_category || '');
+      updatedItem.serial_number = trackChange('serial_number', builtItem.serial_number || '');
+
+      // Primary gem
+      updatedItem.primary_gem_category = trackChange('primary_gem_category', builtItem.primary_gem_category || null);
+      if (builtItem.primary_gem_category === 'diamond') {
+        updatedItem.primary_gem_shape = trackChange('primary_gem_shape', builtItem.primary_gem_shape || '');
+        updatedItem.primary_gem_weight = trackChange('primary_gem_weight', builtItem.primary_gem_weight || 0);
+        updatedItem.primary_gem_color = trackChange('primary_gem_color', builtItem.primary_gem_color || '');
+        updatedItem.primary_gem_clarity = trackChange('primary_gem_clarity', builtItem.primary_gem_clarity || '');
+        updatedItem.primary_gem_cut = trackChange('primary_gem_cut', builtItem.primary_gem_cut || '');
+        updatedItem.primary_gem_lab_grown = trackChange('primary_gem_lab_grown', builtItem.primary_gem_lab_grown || false);
+        updatedItem.primary_gem_quantity = trackChange('primary_gem_quantity', parseInt(builtItem.primary_gem_quantity) || 1);
+        updatedItem.primary_gem_size = trackChange('primary_gem_size', builtItem.primary_gem_size || '');
+        updatedItem.primary_gem_exact_color = trackChange('primary_gem_exact_color', builtItem.primary_gem_exact_color || 'D');
+        updatedItem.primary_gem_value = trackChange('primary_gem_value', builtItem.primary_gem_value || 0);
+        updatedItem.gemstone = 'Diamond';
+      } else if (builtItem.primary_gem_category === 'stone') {
+        updatedItem.primary_gem_type = trackChange('primary_gem_type', builtItem.primary_gem_type || '');
+        updatedItem.primary_gem_weight = trackChange('primary_gem_weight', builtItem.primary_gem_weight || 0);
+        updatedItem.primary_gem_shape = trackChange('primary_gem_shape', builtItem.primary_gem_shape || '');
+        updatedItem.primary_gem_color = trackChange('primary_gem_color', builtItem.primary_gem_color || '');
+        updatedItem.primary_gem_quantity = trackChange('primary_gem_quantity', parseInt(builtItem.primary_gem_quantity) || 1);
+        updatedItem.primary_gem_authentic = trackChange('primary_gem_authentic', builtItem.primary_gem_authentic || false);
+        updatedItem.primary_gem_value = trackChange('primary_gem_value', builtItem.primary_gem_value || 0);
+        updatedItem.gemstone = 'Stone';
       }
 
-      // Track gem changes
-      if (gemFormState) {
-        if (gemFormState.diamonds?.length > 0) {
-          const primaryDiamond = gemFormState.diamonds[0];
-          updatedItem.primary_gem_category = trackChange('primary_gem_category', 'diamond');
-          updatedItem.primary_gem_shape = trackChange('primary_gem_shape', primaryDiamond.shape || '');
-          updatedItem.primary_gem_weight = trackChange('primary_gem_weight', primaryDiamond.weight || 0);
-          updatedItem.primary_gem_color = trackChange('primary_gem_color', primaryDiamond.color || '');
-          updatedItem.primary_gem_clarity = trackChange('primary_gem_clarity', primaryDiamond.clarity || '');
-          updatedItem.primary_gem_cut = trackChange('primary_gem_cut', primaryDiamond.cut || '');
-          updatedItem.primary_gem_lab_grown = trackChange('primary_gem_lab_grown', primaryDiamond.labGrown || false);
-          updatedItem.primary_gem_quantity = trackChange('primary_gem_quantity', parseInt(primaryDiamond.quantity) || 1);
-          updatedItem.primary_gem_size = trackChange('primary_gem_size', primaryDiamond.size || '');
-          updatedItem.primary_gem_exact_color = trackChange('primary_gem_exact_color', primaryDiamond.exactColor || 'D');
-          updatedItem.primary_gem_value = trackChange('primary_gem_value', primaryDiamond.estimatedValue || 0);
-          updatedItem.gemstone = 'Diamond';
-        } 
-        else if (gemFormState.stones?.length > 0) {
-          const primaryStone = gemFormState.stones[0];
-          updatedItem.primary_gem_category = trackChange('primary_gem_category', 'stone');
-          updatedItem.primary_gem_type = trackChange('primary_gem_type', primaryStone.type || '');
-          updatedItem.primary_gem_weight = trackChange('primary_gem_weight', primaryStone.weight || 0);
-          updatedItem.primary_gem_shape = trackChange('primary_gem_shape', primaryStone.shape || '');
-          updatedItem.primary_gem_color = trackChange('primary_gem_color', primaryStone.color || '');
-          updatedItem.primary_gem_quantity = trackChange('primary_gem_quantity', parseInt(primaryStone.quantity) || 1);
-          updatedItem.primary_gem_authentic = trackChange('primary_gem_authentic', primaryStone.authentic || false);
-          updatedItem.primary_gem_value = trackChange('primary_gem_value', primaryStone.estimatedValue || 0);
-          updatedItem.gemstone = 'Stone';
-        }
-        // Track secondary gems changes
-        if (gemFormState.secondaryGems?.length > 0) {
-          // First, get the current values from the form state
-          const currentFormGems = gemFormState.secondaryGems || [];
-          // Use baselineItem for comparison instead of item
-          const oldSecondaryGems = baselineItem?.secondaryGems || item.secondaryGems || [];
-          const newSecondaryGems = currentFormGems.map((gem, index) => {
-            const oldGem = oldSecondaryGems[index] || {};
-            const updatedGem = { ...gem };
-            
-            // Create a function to safely track changes with proper type conversion
-            const trackGemChange = (field, newValue, oldValue = oldGem[field]) => {
-              // Convert numeric fields to numbers if they're strings
-              const numericFields = ['secondary_gem_weight', 'secondary_gem_quantity', 'secondary_gem_value'];
-              if (numericFields.includes(field) && typeof newValue === 'string') {
-                newValue = parseFloat(newValue) || 0;
-              }
-              return newValue;
-            };
-            
-            // Track changes for each field based on gem category
-            if (gem.secondary_gem_category === 'stone') {
-              // Stone-specific fields
-              updatedGem.secondary_gem_type = trackGemChange('secondary_gem_type', gem.secondary_gem_type);
-              updatedGem.secondary_gem_authentic = trackGemChange('secondary_gem_authentic', gem.secondary_gem_authentic);
-            } else if (gem.secondary_gem_category === 'diamond') {
-              // Diamond-specific fields
-              updatedGem.secondary_gem_clarity = trackGemChange('secondary_gem_clarity', gem.secondary_gem_clarity);
-              updatedGem.secondary_gem_cut = trackGemChange('secondary_gem_cut', gem.secondary_gem_cut);
-              updatedGem.secondary_gem_size = trackGemChange('secondary_gem_size', gem.secondary_gem_size);
-              updatedGem.secondary_gem_exact_color = trackGemChange('secondary_gem_exact_color', gem.secondary_gem_exact_color);
-              updatedGem.secondary_gem_lab_grown = trackGemChange('secondary_gem_lab_grown', gem.secondary_gem_lab_grown);
-            }
-            
-            // Common fields for both stone and diamond
-            updatedGem.secondary_gem_category = trackGemChange('secondary_gem_category', gem.secondary_gem_category);
-            updatedGem.secondary_gem_weight = trackGemChange('secondary_gem_weight', gem.secondary_gem_weight);
-            updatedGem.secondary_gem_shape = trackGemChange('secondary_gem_shape', gem.secondary_gem_shape);
-            updatedGem.secondary_gem_color = trackGemChange('secondary_gem_color', gem.secondary_gem_color);
-            updatedGem.secondary_gem_quantity = trackGemChange('secondary_gem_quantity', gem.secondary_gem_quantity);
-            updatedGem.secondary_gem_value = trackGemChange('secondary_gem_value', gem.secondary_gem_value);
-            
-            return updatedGem;
-          });
-          
-          // Add secondary gems to updatedItem for API submission
-          updatedItem.secondaryGems = newSecondaryGems;
-          
-          // Track changes for each secondary gem field in the specified format
-          newSecondaryGems.forEach((gem, index) => {
-            const oldGem = oldSecondaryGems[index] || {};
+      // Secondary gems
+      const newSecondaryGems = builtItem.secondary_gems || [];
+      const oldSecondaryGems = baselineItem?.secondaryGems || item.secondaryGems || [];
+      if (newSecondaryGems.length > 0 || oldSecondaryGems.length > 0) {
+        const normalizeValue = (value) => {
+          if (value === null || value === undefined) return value;
+          if (typeof value === 'string' && !isNaN(parseFloat(value)) && isFinite(value)) {
+            return parseFloat(value);
+          }
+          return value;
+        };
 
-            const gemChanges = {};
-            
-            const isDiamond = gem.secondary_gem_category === 'diamond';
+        const maxLength = Math.max(newSecondaryGems.length, oldSecondaryGems.length);
+        for (let index = 0; index < maxLength; index++) {
+          const oldGem = oldSecondaryGems[index] || {};
+          const newGem = newSecondaryGems[index] || {};
+          const gemChanges = {};
 
-            // Common fields for both diamond and stone
-            const commonMappings = {
-              secondary_gem_weight: 'secondary_gem_weight',
-              secondary_gem_shape: 'secondary_gem_shape',
-              secondary_gem_color: 'secondary_gem_color',
-              secondary_gem_quantity: 'secondary_gem_quantity',
-              secondary_gem_value: 'secondary_gem_value'
-            };
-
-            // Diamond specific fields
-            const diamondMappings = {
-              secondary_gem_clarity: 'secondary_gem_clarity',
-              secondary_gem_cut: 'secondary_gem_cut',
-              secondary_gem_size: 'secondary_gem_size',
-              secondary_gem_lab_grown: 'secondary_gem_lab_grown',
-              secondary_gem_exact_color: 'secondary_gem_exact_color'
-            };
-
-            // Stone specific fields
-            const stoneMappings = {
-              secondary_gem_type: 'secondary_gem_type',
-              secondary_gem_authentic: 'secondary_gem_authentic'
-            };
-
-            // Combine common fields with type-specific fields
-            const fieldMappings = {
-              ...commonMappings,
-              ...(isDiamond ? diamondMappings : stoneMappings)
-            };
-            
-            // Helper function to normalize values for comparison
-            const normalizeValue = (value) => {
-              if (value === null || value === undefined) return value;
-              // If it's a string that can be converted to a number, return as number
-              if (typeof value === 'string' && !isNaN(parseFloat(value)) && isFinite(value)) {
-                // Preserve decimal places for display but compare as number
-                return parseFloat(value);
-              }
-              return value;
-            };
-            // Check each field for changes
-            Object.entries(fieldMappings).forEach(([field, dbField]) => {
-              const newValue = normalizeValue(gem[field]);
-              const oldValue = normalizeValue(oldGem[field]);
-              if (newValue !== oldValue) {
-                gemChanges[dbField] = {
-                  from: oldGem[field],
-                  to: gem[field]
-                };
-              }
-            });
-            // If there are changes for this gem, add them to the changes object
-            if (Object.keys(gemChanges).length > 0) {
-              // Store without index suffix - just use secondary_gem_1, secondary_gem_2, etc.
-              // For first gem (index 0), use secondary_gem_1
-              changes[`secondary_gem_${index + 1}`] = gemChanges;
+          const gemFields = new Set([...Object.keys(oldGem), ...Object.keys(newGem)]);
+          gemFields.forEach(field => {
+            const oldValue = normalizeValue(oldGem[field]);
+            const newValue = normalizeValue(newGem[field]);
+            if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+              gemChanges[field] = { from: oldGem[field], to: newGem[field] };
             }
           });
+
+          if (Object.keys(gemChanges).length > 0) {
+            changes[`secondary_gem_${index + 1}`] = gemChanges;
+          }
         }
       }
+
       // Update local state immediately for instant UI update
-      const updatedItemWithGems = { 
+      const updatedItemWithGems = {
         ...updatedItem,
-        secondaryGems: gemFormState?.secondaryGems ? [...gemFormState.secondaryGems] : []
+        secondaryGems: newSecondaryGems
       };
-      
+
       setItem(updatedItemWithGems);
       setEditedItem(updatedItemWithGems);
 
-      // Track attribute changes - group all attributes together
-      const baselineAttributes = baselineAttributeValuesRef.current || {};
-      const currentAttributes = itemAttributeValues || {};
+      // Upload any newly-added image files (existing images are passed
+      // through as-is by JewelryIntakeScreen and need no re-upload)
+      const newImageFiles = (builtItem.images || [])
+        .filter(img => img.file instanceof File)
+        .map(img => img.file);
 
-      // Get all unique attribute names
-      const allAttributeNames = new Set([
-        ...Object.keys(baselineAttributes),
-        ...Object.keys(currentAttributes)
-      ]);
-
-      // Helper to check if values are same
-      const areSameValue = (val1, val2) => {
-        if (val1 === val2) return true;
-        if ((val1 === null || val1 === undefined || val1 === '') &&
-            (val2 === null || val2 === undefined || val2 === '')) return true;
-        return false;
-      };
-
-      const attributeChanges = {};
-      allAttributeNames.forEach(attrName => {
-        const baselineValue = baselineAttributes[attrName];
-        const currentValue = currentAttributes[attrName];
-
-        // Skip if values are the same
-        if (areSameValue(baselineValue, currentValue)) {
-          return;
-        }
-
-        // Track the attribute change in a grouped object
-        attributeChanges[attrName] = {
-          from: baselineValue || null,
-          to: currentValue || null
-        };
-      });
-
-      // If there are attribute changes, add them as a single grouped entry
-      if (Object.keys(attributeChanges).length > 0) {
-        changes['Item Attributes'] = attributeChanges;
-      }
-
-      // Upload pending images if any
-      if (pendingImages.length > 0) {
+      if (newImageFiles.length > 0) {
         try {
           const formData = new FormData();
-          pendingImages.forEach((file) => {
+          newImageFiles.forEach((file) => {
             formData.append('images', file);
           });
 
@@ -868,40 +766,25 @@ function JewelryEdit() {
           );
 
           if (imageResponse.data.success) {
-            // Update all item states with new images
             const updatedItemWithImages = imageResponse.data.item;
-            setItem(updatedItemWithImages);
+            setItem(prev => ({ ...prev, images: updatedItemWithImages.images }));
             setEditedItem(prev => ({ ...prev, images: updatedItemWithImages.images }));
             setBaselineItem(prev => ({ ...prev, images: updatedItemWithImages.images }));
 
-            // Log image update to history
-            await axios.post(`${API_BASE_URL}/jewelry/history`, {
-              item_id: item.item_id,
-              changed_fields: {
-                images: {
-                  from: `${(item.images?.length || 0)} image(s)`,
-                  to: `${(updatedItemWithImages.images?.length || 0)} image(s) - Added ${pendingImages.length} new image(s)`
-                }
-              },
-              changed_by: currentUser?.id || 1,
-              action: 'update',
-              notes: `Image(s) uploaded: ${pendingImages.map(f => f.name).join(', ')}`
-            });
-
-            // Clear pending images
-            setPendingImages([]);
+            changes.images = {
+              from: `${(item.images?.length || 0)} image(s)`,
+              to: `${(updatedItemWithImages.images?.length || 0)} image(s) - Added ${newImageFiles.length} new image(s)`
+            };
           }
         } catch (imageError) {
           console.error('Error uploading images:', imageError);
           enqueueSnackbar('Failed to upload images', { variant: 'error' });
-          // Don't throw - continue with other save operations
         }
       }
 
       // If there are changes, save them to item_history
       if (Object.keys(changes).length > 0) {
         try {
-          // Prepare the history data
           await axios.post(`${API_BASE_URL}/jewelry/history`, {
             item_id: item.item_id,
             changed_fields: changes,
@@ -910,15 +793,7 @@ function JewelryEdit() {
             notes: 'Item details updated via combined editor'
           });
 
-          // Save item attributes
-          if (Object.keys(itemAttributeValues).length > 0) {
-            await axios.post(`${API_BASE_URL}/item-attributes/${item.item_id}`, itemAttributeValues);
-          }
-
-          // Update baseline to reflect the new current state after successful save
           setBaselineItem(JSON.parse(JSON.stringify(updatedItemWithGems)));
-          // Update baseline attribute values after successful save
-          baselineAttributeValuesRef.current = JSON.parse(JSON.stringify(itemAttributeValues));
 
           setSnackbar({
             open: true,
@@ -927,29 +802,20 @@ function JewelryEdit() {
           });
         } catch (error) {
           console.error('Error saving to item history:', error);
-          // Still show success for the main save, but log the history error
           setSnackbar({
             open: true,
             message: 'Changes saved, but there was an issue updating the history',
             severity: 'warning'
           });
         }
-      } else if (pendingImages.length === 0) {
-        // Only show "no changes" if there were no images either
+      } else {
         setSnackbar({
           open: true,
           message: 'No changes to save',
           severity: 'info'
         });
-      } else {
-        // Images were saved
-        setSnackbar({
-          open: true,
-          message: 'Images uploaded successfully!',
-          severity: 'success'
-        });
       }
-      
+
       setCombinedDialogOpen(false);
     } catch (error) {
       console.error('Error saving changes:', error);
@@ -2309,6 +2175,23 @@ function JewelryEdit() {
     );
   }
 
+  // Full-page swap: editing metal/gem details now uses the same modern
+  // intake screen used by Buy/Trade/Pawn tickets, pre-filled with this
+  // item's data. Saving still goes through handleIntakeScreenSave, which
+  // preserves the exact same save behaviour as the old combined dialog.
+  if (combinedDialogOpen) {
+    return (
+      <JewelryIntakeScreen
+        ticketId={item.item_id}
+        ticketLabel="Editing Item"
+        editItem={buildIntakeEditItem()}
+        initialMode="unique"
+        onBack={handleCombinedCancel}
+        onUpdateItem={handleIntakeScreenSave}
+      />
+    );
+  }
+
   return (
     <Box>
     {location.state?.returnTo === 'sale-ticket' && (
@@ -2361,72 +2244,6 @@ function JewelryEdit() {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleMetalCancel}>Cancel</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Combined Jewelry Item Dialog */}
-      <Dialog
-        open={combinedDialogOpen}
-        onClose={handleCombinedCancel}
-        maxWidth="lg"
-        fullWidth
-        PaperProps={{ sx: { maxHeight: '90vh' } }}
-      >
-        <DialogTitle>Edit Jewelry Item</DialogTitle>
-        <DialogContent dividers>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={5} md={4}>
-              {combinedDialogOpen && (
-                <MetalEstimator 
-                  key={`metal-${combinedDialogOpen}`}
-                  initialData={metalFormState && Object.keys(metalFormState).length > 0 ? metalFormState : {
-                    precious_metal_type: item?.precious_metal_type || '',
-                    metal_weight: item?.metal_weight || 0,
-                    non_precious_metal_type: item?.non_precious_metal_type || '',
-                    metal_purity: item?.metal_purity || '',
-                    purity_value: item?.purity_value || 0,
-                    metal_spot_price: item?.metal_spot_price || 0,
-                    estimated_value: item?.est_metal_value || 0,
-                    color: item?.jewelry_color || '',
-                    metal_category: item?.category || ''
-                  }}
-                  hideButtons={true}
-                  setMetalFormState={setMetalFormState}
-                />
-              )}
-            </Grid>
-            <Grid item xs={12} sm={7} md={8}>
-              {combinedDialogOpen && (
-                <GemEstimator
-                  key={`gem-${combinedDialogOpen}`}
-                  initialData={{
-                    ...item,
-                    secondaryGems: (item.secondaryGems || []).map(gem => ({
-                      ...gem,
-                      secondary_gem_value: gem.secondary_gem_value !== null ? gem.secondary_gem_value : 0
-                    }))
-                  }}
-                  hideButtons={true}
-                  editMode={true}
-                  setGemFormState={setGemFormState}
-                  onSecondaryGemsChange={(secondaryGems) => {
-                    setGemFormState(prev => ({
-                      ...prev,
-                      secondaryGems
-                    }));
-                    setItem(prev => ({
-                      ...prev,
-                      secondaryGems
-                    }));
-                  }}
-                />
-              )}
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCombinedCancel} startIcon={<CancelIcon />}>Cancel</Button>
-          <Button onClick={handleCombinedSave} variant="contained" color="primary" startIcon={<SaveIcon />}>Save Changes</Button>
         </DialogActions>
       </Dialog>
 
