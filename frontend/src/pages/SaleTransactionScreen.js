@@ -8,6 +8,7 @@ import {
   CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions,
   Tooltip, Snackbar, Alert, Stack, Menu, MenuItem,
   TableContainer, Table, TableHead, TableBody, TableRow, TableCell,
+  List, ListItemButton, ListItemText,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
@@ -39,6 +40,15 @@ function generateSaleTicketId() {
 
 function commitSaleTicketId() {
   localStorage.removeItem(ST_PENDING_KEY);
+}
+
+function voidSaleTicketId(id) {
+  const voided = JSON.parse(localStorage.getItem('voidedSaleTickets') || '[]');
+  if (!voided.includes(id)) {
+    voided.push(id);
+    localStorage.setItem('voidedSaleTickets', JSON.stringify(voided));
+  }
+  if (localStorage.getItem(ST_PENDING_KEY) === id) localStorage.removeItem(ST_PENDING_KEY);
 }
 
 // Sync the local counter with the DB so it never goes backward after a
@@ -140,6 +150,8 @@ export default function SaleTransactionScreen({
   onRemoveFromWorkspace,
   onSelectCustomer,
   existingSaleData,
+  onConvertTo,
+  workspaceTradeTickets = [],
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -192,6 +204,33 @@ export default function SaleTransactionScreen({
   const [convertRow,    setConvertRow]    = useState(null);
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [quickSaleMaxAmount, setQuickSaleMaxAmount] = useState(100);
+
+  // Convert-to-Trade: same pattern as BuyTransactionScreen/PawnTransactionScreen
+  const [tradePickerOpen, setTradePickerOpen] = useState(false);
+  const [selectedTradeId, setSelectedTradeId] = useState(null);
+  const [emptyTicketDialogOpen, setEmptyTicketDialogOpen] = useState(false);
+  const [pendingConvert, setPendingConvert] = useState(null); // { item, targetTicketId }
+  const prevSaleItemCountRef = useRef(0);
+
+  useEffect(() => {
+    if (prevSaleItemCountRef.current > 0 && saleItems.length === 0) {
+      setEmptyTicketDialogOpen(true);
+    }
+    prevSaleItemCountRef.current = saleItems.length;
+  }, [saleItems.length]);
+
+  const handleRemoveSaleItem = (_lineId) => setSaleItems(prev => prev.filter(i => i._lineId !== _lineId));
+
+  const handleConvertToTrade = (item, targetTicketId) => {
+    const isLast = saleItems.length === 1;
+    handleRemoveSaleItem(item._lineId);
+    if (isLast) {
+      setPendingConvert({ item, targetTicketId });
+      // onConvertTo deferred — committed only if user confirms Void in the empty-ticket dialog
+    } else {
+      onConvertTo?.({ type: 'trade', item, targetTicketId });
+    }
+  };
 
   // Sync counter with DB on first open (skip for restored workspace tickets
   // which already have a committed ID).
@@ -1243,7 +1282,16 @@ export default function SaleTransactionScreen({
                 <LayawayIcon sx={{ fontSize: 16, mr: 1.5, color: layaway.color ?? '#e65100' }} />
                 <Typography variant="body2">Layaway</Typography>
               </MenuItem>
-              <MenuItem onClick={() => { showSnackbar('Trade ticket coming soon', 'info'); setConvertAnchor(null); setConvertRow(null); }}>
+              <MenuItem onClick={() => {
+                setConvertAnchor(null);
+                if (workspaceTradeTickets.length > 0) {
+                  setSelectedTradeId(null);
+                  setTradePickerOpen(true);
+                } else {
+                  handleConvertToTrade(convertRow, null);
+                  setConvertRow(null);
+                }
+              }}>
                 <TradeIcon sx={{ fontSize: 16, mr: 1.5, color: trade.color ?? '#388e3c' }} />
                 <Typography variant="body2">Trade Ticket</Typography>
               </MenuItem>
@@ -1251,6 +1299,81 @@ export default function SaleTransactionScreen({
           );
         })()}
       </Menu>
+
+      {/* Trade ticket picker */}
+      <Dialog open={tradePickerOpen} onClose={() => { setTradePickerOpen(false); setConvertRow(null); }} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ pb: 1 }}>Move to Trade Ticket</DialogTitle>
+        <DialogContent sx={{ pt: 0 }}>
+          <Typography variant="body2" color="text.secondary" mb={1}>
+            Choose a trade ticket to move this item into as the sale item, or create a new one.
+          </Typography>
+          <List dense disablePadding>
+            {workspaceTradeTickets.map(t => (
+              <ListItemButton key={t.ticketId} selected={selectedTradeId === t.ticketId}
+                onClick={() => setSelectedTradeId(t.ticketId)}
+                sx={{ borderRadius: 1, mb: 0.5, border: '1px solid', borderColor: selectedTradeId === t.ticketId ? '#0891b2' : 'transparent' }}>
+                <ListItemText
+                  primary={<Typography fontWeight={700} fontSize={13}>{t.ticketId}</Typography>}
+                  secondary={`${t.saleItems?.length || 0} sale item${(t.saleItems?.length || 0) !== 1 ? 's' : ''}`}
+                />
+              </ListItemButton>
+            ))}
+            <ListItemButton selected={selectedTradeId === '__new__'} onClick={() => setSelectedTradeId('__new__')}
+              sx={{ borderRadius: 1, border: '1px solid', borderColor: selectedTradeId === '__new__' ? '#0891b2' : 'transparent' }}>
+              <MuiIcons.AddCircleOutline sx={{ mr: 1.5, fontSize: 18, color: '#0891b2' }} />
+              <ListItemText primary={<Typography fontSize={13}>Create new Trade Ticket</Typography>} />
+            </ListItemButton>
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setTradePickerOpen(false); setConvertRow(null); }}>Cancel</Button>
+          <Button variant="contained" disabled={!selectedTradeId}
+            sx={{ bgcolor: '#0891b2', '&:hover': { bgcolor: '#0e7490' } }}
+            onClick={() => {
+              handleConvertToTrade(convertRow, selectedTradeId === '__new__' ? null : selectedTradeId);
+              setTradePickerOpen(false);
+              setConvertRow(null);
+              setSelectedTradeId(null);
+            }}>
+            Move Item
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Empty ticket dialog */}
+      <Dialog open={emptyTicketDialogOpen} onClose={() => setEmptyTicketDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Sale Ticket is Empty</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            {pendingConvert
+              ? 'This item was about to be moved to a trade ticket. Void to confirm the move, or Cancel to keep the item here.'
+              : 'All items have been removed. Void to remove this ticket from the workspace, or Cancel to keep it open.'}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            if (pendingConvert) {
+              setSaleItems([pendingConvert.item]);
+              setPendingConvert(null);
+            }
+            setEmptyTicketDialogOpen(false);
+          }}>
+            Cancel
+          </Button>
+          <Button variant="contained" color="error"
+            onClick={() => {
+              if (pendingConvert) {
+                onConvertTo?.({ type: 'trade', item: pendingConvert.item, targetTicketId: pendingConvert.targetTicketId });
+                setPendingConvert(null);
+              }
+              voidSaleTicketId(ticketId);
+              onRemoveFromWorkspace?.(ticketId);
+              setEmptyTicketDialogOpen(false);
+            }}>
+            Void Ticket
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar open={snackbar.open} autoHideDuration={3000}
         onClose={() => setSnackbar(s => ({ ...s, open: false }))}
