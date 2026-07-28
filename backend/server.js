@@ -7247,7 +7247,7 @@ app.put('/api/jewelry/:id/processing', async (req, res) => {
   const autoSellable = ['ON_RETAIL_FLOOR', 'READY_HOLDING'].includes(processing_status);
   const finalSellable = autoSellable ? 'SELLABLE' : (sellable_status || 'NOT_SELLABLE');
 
-  await db.query(
+  await pool.query(
     `UPDATE jewelry SET
        processing_status = $1, processing_queue = $2,
        current_location_id = $3, sellable_status = $4,
@@ -7258,7 +7258,7 @@ app.put('/api/jewelry/:id/processing', async (req, res) => {
   );
 
   // Write processing_events audit record (when Phase 1.12 table exists)
-  // await db.query(`INSERT INTO processing_events ...`, [...]);
+  // await pool.query(`INSERT INTO processing_events ...`, [...]);
 
   res.json({ success: true });
 });
@@ -8161,17 +8161,17 @@ app.get('/api/inventory-status/:id', async (req, res) => {
   }
 });
 
-// Endpoint to update expired HOLD items to ON_PROCESS status
+// Endpoint to update expired HOLD items to IN_PROCESS status
 app.get('/api/inventory/update-hold-status', async (req, res) => {
   try {
     // Call the database function to update expired hold items
     await pool.query('SELECT update_expired_hold_items()');
 
-    // Get count of items now in ON_PROCESS status
+    // Get count of items now in IN_PROCESS status
     const countResult = await pool.query(
       `SELECT COUNT(*) as updated_count
        FROM jewelry
-       WHERE status = 'ON_PROCESS'
+       WHERE status = 'IN_PROCESS'
        AND updated_at > CURRENT_TIMESTAMP - INTERVAL '1 minute'`
     );
 
@@ -8179,7 +8179,7 @@ app.get('/api/inventory/update-hold-status', async (req, res) => {
 
     res.json({
       success: true,
-      message: `Successfully updated ${updatedCount} item(s) from HOLD to ON_PROCESS`,
+      message: `Successfully updated ${updatedCount} item(s) from HOLD to IN_PROCESS`,
       updatedCount
     });
   } catch (error) {
@@ -14958,6 +14958,22 @@ setInterval(checkPawnForfeitures, 21600000);
 
 // Run forfeiture check on startup
 checkPawnForfeitures();
+
+// Sweep HOLD items past their configured hold period into IN_PROCESS.
+// Runs on a server-side timer so it fires regardless of which frontend page
+// (if any) is loaded — previously this only ran when the Jewelry inventory
+// page happened to mount, which stopped happening once Transactions became
+// the app's home screen.
+async function checkExpiredHoldItems() {
+  try {
+    await pool.query('SELECT update_expired_hold_items()');
+  } catch (error) {
+    console.error('❌ Error updating expired hold items:', error.message);
+  }
+}
+
+setInterval(checkExpiredHoldItems, 21600000);
+checkExpiredHoldItems();
 
 // ==================== STORE SESSIONS ====================
 

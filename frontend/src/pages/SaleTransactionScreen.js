@@ -70,6 +70,15 @@ async function syncSaleTicketCounter() {
 // as a standalone sale ticket.
 export { generateSaleTicketId, commitSaleTicketId };
 
+// Relative paths like /uploads/jewelry/foo.jpg are served by the backend,
+// not the frontend origin — must be made absolute or the <img> 404s.
+function makeAbsoluteUrl(url) {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
+  if (url.startsWith('/uploads')) return `${config.apiUrl.replace('/api', '')}${url}`;
+  return url;
+}
+
 function resolveImageValue(img) {
   if (!img) return null;
   if (typeof img === 'object' && img.type === 'Buffer' && img.data) {
@@ -78,7 +87,7 @@ function resolveImageValue(img) {
     );
     return `data:image/jpeg;base64,${base64}`;
   }
-  if (typeof img === 'string') return img;
+  if (typeof img === 'string') return makeAbsoluteUrl(img);
   if (img instanceof File || img instanceof Blob) return URL.createObjectURL(img);
   return null;
 }
@@ -92,7 +101,7 @@ function getItemImage(item) {
   const imgs = Array.isArray(item.images)
     ? item.images
     : (typeof item.images === 'string' ? (() => { try { return JSON.parse(item.images); } catch { return []; } })() : []);
-  return imgs.find(i => i.is_primary || i.isPrimary)?.url || imgs[0]?.url || null;
+  return makeAbsoluteUrl(imgs.find(i => i.is_primary || i.isPrimary)?.url || imgs[0]?.url || null);
 }
 
 function QtyCell({ value, onChange, disabled }) {
