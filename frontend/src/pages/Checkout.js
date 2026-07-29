@@ -115,6 +115,7 @@ function Checkout() {
 
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentMethods, setPaymentMethods] = useState([]);
+  const [customerStoreCredit, setCustomerStoreCredit] = useState(0);
   const [paymentDetails, setPaymentDetails] = useState({
     cashAmount: ''
   });
@@ -474,6 +475,37 @@ function Checkout() {
     refreshCustomerData();
   }, [selectedCustomer, setCustomer]);
 
+  // Store credit can only be used as a payment method if the customer
+  // actually has a balance — fetch it whenever the selected customer changes.
+  useEffect(() => {
+    const fetchStoreCredit = async () => {
+      if (!selectedCustomer?.id) {
+        setCustomerStoreCredit(0);
+        return;
+      }
+      try {
+        const response = await axios.get(`${config.apiUrl}/customers/${selectedCustomer.id}/stats`);
+        setCustomerStoreCredit(parseFloat(response.data?.store_credit) || 0);
+      } catch (error) {
+        console.error('Error fetching customer store credit:', error);
+        setCustomerStoreCredit(0);
+      }
+    };
+
+    fetchStoreCredit();
+  }, [selectedCustomer?.id]);
+
+  // If store credit is currently selected to redeem toward what the customer
+  // owes, but they no longer qualify (switched customer, or balance is zero),
+  // fall back to cash. Doesn't apply when paying the customer out (that's how
+  // credit gets issued, not redeemed).
+  useEffect(() => {
+    if (paymentMethod === 'store_credit' && remainingAmount >= 0 && customerStoreCredit <= 0) {
+      const cashMethod = paymentMethods.find(m => m.is_default_cash);
+      setPaymentMethod(cashMethod ? cashMethod.method_value : (paymentMethods[0]?.method_value || 'cash'));
+    }
+  }, [customerStoreCredit, paymentMethod, paymentMethods, remainingAmount]);
+
   const calculateSubtotal = useCallback(() => {
     // A trade ticket's total can't be rebuilt by summing its trade_in/trade_sale
     // line items here — tax only applies to the portion of the sale that exceeds
@@ -808,6 +840,17 @@ function Checkout() {
         setSnackbar({
           open: true,
           message: paymentAmount <= 0 ? 'Invalid payment amount' : 'Payment amount exceeds remaining balance',
+          severity: 'error'
+        });
+        return;
+      }
+
+      // Redeeming store credit (customer owes the store) can't exceed their
+      // actual balance — issuing it (store owes the customer) has no such cap.
+      if (paymentMethod === 'store_credit' && remainingAmount >= 0 && paymentAmount > customerStoreCredit) {
+        setSnackbar({
+          open: true,
+          message: `Payment amount exceeds available store credit ($${customerStoreCredit.toFixed(2)})`,
           severity: 'error'
         });
         return;
@@ -2733,7 +2776,15 @@ const handleBackToEstimation = () => {
                   label="Payment Method"
                   onChange={handlePaymentMethodChange}
                 >
-                  {paymentMethods.map((pm) => (
+                  {paymentMethods
+                    .filter(pm => pm.method_value !== 'store_credit'
+                      // Paying the customer (store owes them) is how credit gets
+                      // issued in the first place, so it's always available there.
+                      // Only redeeming it toward what the customer owes requires
+                      // an existing balance.
+                      || remainingAmount < 0
+                      || customerStoreCredit > 0)
+                    .map((pm) => (
                     <MenuItem key={pm.id} value={pm.method_value}>
                       {pm.method_name}
                     </MenuItem>

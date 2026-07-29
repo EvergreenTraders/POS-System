@@ -1027,16 +1027,19 @@ export default function ModernTransactions() {
     if (!customerId) return;
     (async () => {
       try {
-        const [custRes, statsRes] = await Promise.all([
+        const [custRes, statsRes, creditRes] = await Promise.all([
           axios.get(`${config.apiUrl}/customers/${customerId}`, {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }),
           axios.get(`${config.apiUrl}/customers/${customerId}/pawn/stats`, {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }),
+          axios.get(`${config.apiUrl}/customers/${customerId}/stats`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          }),
         ]);
         setCustomer(custRes.data);
-        setCustomerStats(statsRes.data);
+        setCustomerStats({ ...statsRes.data, store_credit: creditRes.data?.store_credit ?? 0 });
         setRestoredPawnData({ ticketId, pawnItems, totalPawnAmount, ticketNote, showOnReceipt });
         setPawnOpen(true);
       } catch (err) {
@@ -1114,16 +1117,19 @@ export default function ModernTransactions() {
     if (!customerId) return;
     (async () => {
       try {
-        const [custRes, statsRes] = await Promise.all([
+        const [custRes, statsRes, creditRes] = await Promise.all([
           axios.get(`${config.apiUrl}/customers/${customerId}`, {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }),
           axios.get(`${config.apiUrl}/customers/${customerId}/pawn/stats`, {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }),
+          axios.get(`${config.apiUrl}/customers/${customerId}/stats`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          }),
         ]);
         setCustomer(custRes.data);
-        setCustomerStats(statsRes.data);
+        setCustomerStats({ ...statsRes.data, store_credit: creditRes.data?.store_credit ?? 0 });
         setRestoredPawnData({ ticketId, pawnItems, totalPawnOverride });
         setPawnOpen(true);
       } catch (err) {
@@ -1309,16 +1315,19 @@ export default function ModernTransactions() {
     // Show name immediately while full record loads
     setCustomer({ id: c.id, first_name: c.first_name, last_name: c.last_name });
     try {
-      const [fullRes, statsRes] = await Promise.all([
+      const [fullRes, statsRes, creditRes] = await Promise.all([
         axios.get(`${config.apiUrl}/customers/${c.id}`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         }),
         axios.get(`${config.apiUrl}/customers/${c.id}/pawn/stats`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         }),
+        axios.get(`${config.apiUrl}/customers/${c.id}/stats`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        }),
       ]);
       setCustomer(fullRes.data);
-      setCustomerStats(statsRes.data);
+      setCustomerStats({ ...statsRes.data, store_credit: creditRes.data?.store_credit ?? 0 });
     } catch (err) {
       console.error('Failed to fetch customer data:', err);
       setCustomerStats(null);

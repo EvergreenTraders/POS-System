@@ -10451,12 +10451,7 @@ app.get('/api/customers/:id/stats', async (req, res) => {
           JOIN transactions t ON pt.transaction_id = t.transaction_id
           WHERE t.customer_id = $1 AND pt.status = 'ACTIVE'
         ) AS active_pawns,
-        COALESCE((
-          SELECT SUM(p.amount * CASE WHEN t.total_amount < 0 THEN 1 ELSE -1 END)
-          FROM payments p
-          JOIN transactions t ON p.transaction_id = t.transaction_id
-          WHERE t.customer_id = $1 AND p.payment_method = 'store_credit'
-        ), 0) AS store_credit
+        (SELECT store_credit FROM customers WHERE id = $1) AS store_credit
     `, [id]);
 
     const row = result.rows[0];
@@ -10519,12 +10514,7 @@ app.get('/api/customers/:id/sales/stats', async (req, res) => {
       SELECT
         COUNT(DISTINCT st.sale_ticket_id) AS total_sales_count,
         COALESCE(SUM(t.total_amount), 0) AS total_sales_amount,
-        COALESCE((
-          SELECT SUM(p.amount * CASE WHEN t2.total_amount < 0 THEN 1 ELSE -1 END)
-          FROM payments p
-          JOIN transactions t2 ON p.transaction_id = t2.transaction_id
-          WHERE t2.customer_id = $1 AND p.payment_method = 'store_credit'
-        ), 0) AS store_credit
+        (SELECT store_credit FROM customers WHERE id = $1) AS store_credit
       FROM (
         SELECT DISTINCT sale_ticket_id, transaction_id FROM sale_ticket
       ) st
