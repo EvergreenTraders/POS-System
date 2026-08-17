@@ -10326,16 +10326,27 @@ app.get('/api/customers/search', async (req, res) => {
     const isSameSearchTerm = first_name === last_name && last_name === phone && phone === email;
 
     if (isSameSearchTerm && first_name) {
-      // General search - search across all fields with OR
+      // General search - search across all fields with OR. id_number is
+      // included and phone is matched digit-only (stripping formatting like
+      // dashes/parens on both sides) so "5551234567" finds a customer stored
+      // as "(555) 123-4567" — a plain LIKE on the raw phone column can't do that.
       const searchTerm = first_name.toLowerCase();
+      const digitsOnly = first_name.replace(/\D/g, '');
+      const params = [`%${searchTerm}%`, searchTerm, limit];
+      let phoneClause = '';
+      if (digitsOnly) {
+        phoneClause = ` OR regexp_replace(phone, '[^0-9]', '', 'g') LIKE $${params.length + 1}`;
+        params.push(`%${digitsOnly}%`);
+      }
       const query = `
         SELECT id, first_name, last_name, email, phone, status, tax_exempt, created_at, id_number
         FROM customers
         WHERE LOWER(first_name) LIKE $1
            OR LOWER(last_name) LIKE $1
            OR LOWER(email) LIKE $1
-           OR LOWER(phone) LIKE $1
            OR LOWER(first_name || ' ' || last_name) LIKE $1
+           OR CAST(id_number AS TEXT) ILIKE $1
+           ${phoneClause}
         ORDER BY
           CASE
             WHEN LOWER(first_name) = $2 THEN 1
@@ -10346,7 +10357,7 @@ app.get('/api/customers/search', async (req, res) => {
           created_at DESC
         LIMIT $3
       `;
-      const result = await client.query(query, [`%${searchTerm}%`, searchTerm, limit]);
+      const result = await client.query(query, params);
       res.json(result.rows);
       return;
     }

@@ -7,7 +7,7 @@ import {
   Divider, TextField, InputAdornment, Badge, Tooltip, Stack, Snackbar, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions,
   List, ListItem, ListItemText, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Menu, FormControlLabel, Checkbox,
+  Menu, FormControlLabel, Checkbox, Popper,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
@@ -22,6 +22,15 @@ import { useAuth } from '../context/AuthContext';
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 const BUY_BLUE = '#0284c7';
+
+// Converts a Buffer-like object (from backend) to a base64 data URL for image preview
+function bufferToDataUrl(bufferObj) {
+  if (!bufferObj || !bufferObj.data) return null;
+  const base64 = btoa(
+    new Uint8Array(bufferObj.data).reduce((data, byte) => data + String.fromCharCode(byte), '')
+  );
+  return `data:image/jpeg;base64,${base64}`;
+}
 
 // ── "scrap" search-bar shortcut parsing ──────────────────────────────────────
 // Recognizes a weight + purity (in any order, e.g. "5.6g 14k" or "14k 5.6g")
@@ -918,6 +927,45 @@ export default function ModernTransactions() {
   const [customerResults, setCustomerResults] = useState([]);
   const [searchingCustomer, setSearchingCustomer] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  // Anchors the results Popper — rendered via portal so it isn't clipped or
+  // scrolled by the Customer panel's own overflowY:auto container.
+  const customerSearchBoxRef = useRef(null);
+
+  // Full search-results dialog (opened on Enter), copied from the old Home
+  // page customer lookup's layout. Uses the same /api/customers/search general
+  // search as the inline dropdown below (all four fields set to the same
+  // query), which now searches id_number and normalizes phone digits too —
+  // see the isSameSearchTerm branch in server.js.
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+  const [dialogSearchResults, setDialogSearchResults] = useState([]);
+  const [selectedDialogIdx, setSelectedDialogIdx] = useState(-1);
+  const [searchingDialog, setSearchingDialog] = useState(false);
+
+  const handleOpenSearchDialog = async () => {
+    const query = customerSearch.trim();
+    if (!query) return;
+    setShowResults(false);
+    setSearchingDialog(true);
+    try {
+      const res = await axios.get(`${config.apiUrl}/customers/search`, {
+        params: { first_name: query, last_name: query, phone: query, email: query },
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setDialogSearchResults(res.data);
+      setSelectedDialogIdx(res.data.length > 0 ? 0 : -1);
+      setSearchDialogOpen(true);
+    } catch (err) {
+      console.error('Customer search failed:', err);
+    } finally {
+      setSearchingDialog(false);
+    }
+  };
+
+  const handleCloseSearchDialog = () => {
+    setSearchDialogOpen(false);
+    setDialogSearchResults([]);
+    setSelectedDialogIdx(-1);
+  };
 
   useEffect(() => {
     axios.get(`${config.apiUrl}/transaction-types`)
@@ -1291,7 +1339,7 @@ export default function ModernTransactions() {
     setSearchingCustomer(true);
     try {
       const res = await axios.get(`${config.apiUrl}/customers/search`, {
-        params: { first_name: query, last_name: query, phone: query, email: query },
+        params: { first_name: query, last_name: query, phone: query, email: query, limit: 5 },
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
       setCustomerResults(res.data);
@@ -2455,7 +2503,7 @@ export default function ModernTransactions() {
               /* ── No customer selected ── */
               <>
                 {/* Search box */}
-                <Box sx={{ position: 'relative', mb: 1.5 }}>
+                <Box ref={customerSearchBoxRef} sx={{ position: 'relative', mb: 1.5 }}>
                   <TextField
                     fullWidth size="small"
                     placeholder="Search by name, phone, email..."
@@ -2463,10 +2511,11 @@ export default function ModernTransactions() {
                     onChange={e => handleCustomerSearch(e.target.value)}
                     onBlur={() => setTimeout(() => setShowResults(false), 200)}
                     onFocus={() => customerResults.length > 0 && setShowResults(true)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleOpenSearchDialog(); } }}
                     InputProps={{
                       startAdornment: (
                         <InputAdornment position="start">
-                          {searchingCustomer
+                          {(searchingCustomer || searchingDialog)
                             ? <MuiIcons.HourglassEmpty fontSize="small" sx={{ color: 'text.secondary' }} />
                             : <MuiIcons.Search fontSize="small" sx={{ color: 'text.secondary' }} />}
                         </InputAdornment>
@@ -2474,26 +2523,37 @@ export default function ModernTransactions() {
                     }}
                     sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
                   />
-                  {showResults && customerResults.length > 0 && (
-                    <Paper elevation={4} sx={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, maxHeight: 200, overflowY: 'auto', borderRadius: 1, mt: 0.5 }}>
-                      {customerResults.map(c => (
-                        <Box
-                          key={c.id}
-                          onMouseDown={() => handleSelectCustomer(c)}
-                          sx={{ px: 1.5, py: 1, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' }, borderBottom: '1px solid #f0f0f0' }}
-                        >
-                          <Typography fontSize={12} fontWeight={600}>{c.first_name} {c.last_name}</Typography>
-                          {c.phone && <Typography fontSize={11} color="text.secondary">{c.phone}</Typography>}
-                          {c.email && <Typography fontSize={11} color="text.secondary" noWrap>{c.email}</Typography>}
-                        </Box>
-                      ))}
-                    </Paper>
-                  )}
-                  {showResults && customerResults.length === 0 && !searchingCustomer && customerSearch && (
-                    <Paper elevation={4} sx={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, borderRadius: 1, mt: 0.5, px: 1.5, py: 1 }}>
-                      <Typography fontSize={12} color="text.secondary">No customers found</Typography>
-                    </Paper>
-                  )}
+                  {/* Rendered via Popper (portaled to <body>) so the results
+                      list floats above the page instead of being clipped or
+                      forcing the Customer panel's own scroll container to
+                      scroll — the panel stays a fixed size, the list doesn't. */}
+                  <Popper
+                    open={showResults && !!customerSearch}
+                    anchorEl={customerSearchBoxRef.current}
+                    placement="bottom-start"
+                    style={{ zIndex: 1300, width: customerSearchBoxRef.current?.clientWidth }}
+                    modifiers={[{ name: 'offset', options: { offset: [0, 4] } }]}
+                  >
+                    {customerResults.length > 0 ? (
+                      <Paper elevation={4} sx={{ borderRadius: 1, maxHeight: 200, overflowY: 'auto' }}>
+                        {customerResults.map(c => (
+                          <Box
+                            key={c.id}
+                            onMouseDown={() => handleSelectCustomer(c)}
+                            sx={{ px: 1.5, py: 1, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' }, borderBottom: '1px solid #f0f0f0' }}
+                          >
+                            <Typography fontSize={12} fontWeight={600}>{c.first_name} {c.last_name}</Typography>
+                            {c.phone && <Typography fontSize={11} color="text.secondary">{c.phone}</Typography>}
+                            {c.email && <Typography fontSize={11} color="text.secondary" noWrap>{c.email}</Typography>}
+                          </Box>
+                        ))}
+                      </Paper>
+                    ) : !searchingCustomer && (
+                      <Paper elevation={4} sx={{ borderRadius: 1, px: 1.5, py: 1 }}>
+                        <Typography fontSize={12} color="text.secondary">No customers found</Typography>
+                      </Paper>
+                    )}
+                  </Popper>
                 </Box>
 
               </>
@@ -2839,6 +2899,166 @@ export default function ModernTransactions() {
           Please select a customer before opening a {noCustomerWarning}.
         </Alert>
       </Snackbar>
+
+      {/* ── Customer search-results dialog (Enter in the lookup box) — same
+          layout/behavior as the old Home page's Customer Lookup search ── */}
+      <Dialog
+        open={searchDialogOpen}
+        onClose={handleCloseSearchDialog}
+        aria-labelledby="workspace-customer-search-dialog-title"
+        maxWidth={false}
+        fullWidth
+        onKeyDown={e => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (dialogSearchResults.length > 0) {
+              setSelectedDialogIdx(Math.min(selectedDialogIdx + 1, dialogSearchResults.length - 1));
+            }
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (dialogSearchResults.length > 0 && selectedDialogIdx > 0) {
+              setSelectedDialogIdx(selectedDialogIdx - 1);
+            }
+          } else if (e.key === 'Enter' && selectedDialogIdx >= 0 && dialogSearchResults[selectedDialogIdx]) {
+            handleSelectCustomer(dialogSearchResults[selectedDialogIdx]);
+            handleCloseSearchDialog();
+          }
+        }}
+        PaperProps={{ sx: { width: 800, height: 420, maxWidth: '100vw', maxHeight: '100vh', overflow: 'visible', position: 'relative' } }}
+      >
+        {dialogSearchResults.length > 0 && (
+          <Box sx={{ position: 'absolute', top: 12, right: 20, zIndex: 10, display: 'flex', gap: 1 }}>
+            <Button variant="outlined" color="primary" size="small" onClick={handleOpenSearchDialog}
+              sx={{ minWidth: 100, px: 2, fontWeight: 600, borderRadius: 2, fontSize: 14 }}>
+              Search Again
+            </Button>
+            <Button variant="outlined" color="secondary" size="small" onClick={handleCloseSearchDialog}
+              sx={{ minWidth: 44, px: 1, ml: 1, fontWeight: 700, borderRadius: 2, fontSize: 18, lineHeight: 1, minHeight: 36 }}>
+              ×
+            </Button>
+          </Box>
+        )}
+        <DialogTitle>{dialogSearchResults.length > 0 ? 'Search Results' : 'No Customers Found'}</DialogTitle>
+        <DialogContent sx={{ overflow: 'visible' }}>
+          {dialogSearchResults.length > 0 ? (
+            <>
+              <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', minWidth: 700, gap: 0 }}>
+                <Box sx={{ minWidth: 140, maxWidth: 180, mr: 0, pl: 0, ml: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', pt: 1, gap: 2 }}>
+                  {dialogSearchResults[selectedDialogIdx]?.image && (
+                    <img
+                      src={
+                        typeof dialogSearchResults[selectedDialogIdx].image === 'string'
+                          ? dialogSearchResults[selectedDialogIdx].image
+                          : dialogSearchResults[selectedDialogIdx].image?.data
+                          ? bufferToDataUrl(dialogSearchResults[selectedDialogIdx].image)
+                          : undefined
+                      }
+                      alt="Customer"
+                      style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 8, margin: '0 auto', border: `2px solid ${GREEN}`, background: '#fafafa', boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)', display: 'block' }}
+                    />
+                  )}
+                  {dialogSearchResults[selectedDialogIdx]?.id_image_front && (
+                    <img
+                      src={
+                        typeof dialogSearchResults[selectedDialogIdx].id_image_front === 'string'
+                          ? dialogSearchResults[selectedDialogIdx].id_image_front
+                          : dialogSearchResults[selectedDialogIdx].id_image_front?.data
+                          ? bufferToDataUrl(dialogSearchResults[selectedDialogIdx].id_image_front)
+                          : undefined
+                      }
+                      alt="ID Front"
+                      style={{ width: 120, height: 100, objectFit: 'cover', borderRadius: 8, margin: '0 auto', border: '2px solid #ff9800', background: '#fafafa', boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)', display: 'block' }}
+                    />
+                  )}
+                </Box>
+                <Box sx={{ flex: 1, position: 'relative', display: 'flex' }}>
+                  <TableContainer component={Paper} sx={{ mb: 0, maxHeight: 300, overflowY: 'auto', p: 0, m: 0, flex: '1 1 auto' }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Name</TableCell>
+                          <TableCell>DOB</TableCell>
+                          <TableCell>Phone</TableCell>
+                          <TableCell>ID</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {dialogSearchResults.map((c, index) => (
+                          <TableRow key={c.id} hover selected={selectedDialogIdx === index} sx={{ cursor: 'pointer' }}
+                            onClick={() => setSelectedDialogIdx(index)}
+                            onDoubleClick={() => { handleSelectCustomer(c); handleCloseSearchDialog(); }}>
+                            <TableCell sx={{ width: 140, maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.first_name} {c.last_name}</TableCell>
+                            <TableCell>{c.date_of_birth ? c.date_of_birth.substring(0, 10) : ''}</TableCell>
+                            <TableCell>{c.phone || ''}</TableCell>
+                            <TableCell>{c.id_number || ''}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Box>
+              </Box>
+
+              {selectedDialogIdx >= 0 && dialogSearchResults[selectedDialogIdx] && (
+                <Box sx={{ position: 'relative', mt: 2, mb: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, width: '100%' }}>
+                    <Button variant="outlined" size="small" sx={{ minWidth: 70 }}
+                      onClick={e => {
+                        e.stopPropagation();
+                        const c = dialogSearchResults[selectedDialogIdx];
+                        navigate('/customer-editor', {
+                          state: {
+                            customer: {
+                              ...c,
+                              id_expiry_date: c.id_expiry_date ? new Date(c.id_expiry_date).toISOString().substring(0, 10) : '',
+                              date_of_birth:  c.date_of_birth  ? new Date(c.date_of_birth).toISOString().substring(0, 10)  : '',
+                            },
+                            mode: 'edit',
+                            returnTo: location.pathname,
+                          },
+                        });
+                      }}>
+                      Edit
+                    </Button>
+                    <Button variant="contained" size="small" sx={{ minWidth: 70, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT } }}
+                      onClick={e => { e.stopPropagation(); handleSelectCustomer(dialogSearchResults[selectedDialogIdx]); handleCloseSearchDialog(); }}>
+                      Select
+                    </Button>
+                  </Box>
+                  <Box sx={{ position: 'absolute', right: 0, top: 0 }}>
+                    <Button variant="contained" color="primary" size="small" sx={{ minWidth: 160 }}
+                      onClick={e => {
+                        e.stopPropagation();
+                        handleCloseSearchDialog();
+                        navigate('/customer-editor', { state: { mode: 'create', returnTo: location.pathname } });
+                      }}>
+                      Add New Customer
+                    </Button>
+                  </Box>
+                </Box>
+              )}
+            </>
+          ) : (
+            <Box sx={{ p: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+                <Typography variant="body1" color="text.secondary">No customers found matching your search.</Typography>
+              </Box>
+              <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
+                <Button variant="contained" sx={{ height: 48, flex: 1, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT } }}
+                  onClick={() => {
+                    handleCloseSearchDialog();
+                    navigate('/customer-editor', { state: { mode: 'create', returnTo: location.pathname } });
+                  }}>
+                  Add New Customer
+                </Button>
+                <Button variant="outlined" sx={{ height: 48, flex: 1 }} onClick={handleCloseSearchDialog}>
+                  Search Again
+                </Button>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!voidConfirm} onClose={() => setVoidConfirm(null)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>Void Pawn Ticket?</DialogTitle>
