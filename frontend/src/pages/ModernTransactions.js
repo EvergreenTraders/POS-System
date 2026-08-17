@@ -1027,16 +1027,19 @@ export default function ModernTransactions() {
     if (!customerId) return;
     (async () => {
       try {
-        const [custRes, statsRes] = await Promise.all([
+        const [custRes, statsRes, creditRes] = await Promise.all([
           axios.get(`${config.apiUrl}/customers/${customerId}`, {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }),
           axios.get(`${config.apiUrl}/customers/${customerId}/pawn/stats`, {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }),
+          axios.get(`${config.apiUrl}/customers/${customerId}/stats`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          }),
         ]);
         setCustomer(custRes.data);
-        setCustomerStats(statsRes.data);
+        setCustomerStats({ ...statsRes.data, store_credit: creditRes.data?.store_credit ?? 0 });
         setRestoredPawnData({ ticketId, pawnItems, totalPawnAmount, ticketNote, showOnReceipt });
         setPawnOpen(true);
       } catch (err) {
@@ -1114,16 +1117,19 @@ export default function ModernTransactions() {
     if (!customerId) return;
     (async () => {
       try {
-        const [custRes, statsRes] = await Promise.all([
+        const [custRes, statsRes, creditRes] = await Promise.all([
           axios.get(`${config.apiUrl}/customers/${customerId}`, {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }),
           axios.get(`${config.apiUrl}/customers/${customerId}/pawn/stats`, {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }),
+          axios.get(`${config.apiUrl}/customers/${customerId}/stats`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          }),
         ]);
         setCustomer(custRes.data);
-        setCustomerStats(statsRes.data);
+        setCustomerStats({ ...statsRes.data, store_credit: creditRes.data?.store_credit ?? 0 });
         setRestoredPawnData({ ticketId, pawnItems, totalPawnOverride });
         setPawnOpen(true);
       } catch (err) {
@@ -1309,16 +1315,19 @@ export default function ModernTransactions() {
     // Show name immediately while full record loads
     setCustomer({ id: c.id, first_name: c.first_name, last_name: c.last_name });
     try {
-      const [fullRes, statsRes] = await Promise.all([
+      const [fullRes, statsRes, creditRes] = await Promise.all([
         axios.get(`${config.apiUrl}/customers/${c.id}`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         }),
         axios.get(`${config.apiUrl}/customers/${c.id}/pawn/stats`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         }),
+        axios.get(`${config.apiUrl}/customers/${c.id}/stats`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        }),
       ]);
       setCustomer(fullRes.data);
-      setCustomerStats(statsRes.data);
+      setCustomerStats({ ...statsRes.data, store_credit: creditRes.data?.store_credit ?? 0 });
     } catch (err) {
       console.error('Failed to fetch customer data:', err);
       setCustomerStats(null);
@@ -1904,10 +1913,32 @@ export default function ModernTransactions() {
             images: item.images || [],
             sourceEstimator: 'jewelry',
           };
+      const buyTicketId = existingBuyData?.ticketId;
+      setWorkspaceTransactions(prev => {
+        // Remove converted item from the buy ticket in workspace
+        const withBuyUpdated = prev.map(t => {
+          if (!(t.type === 'BUY' && t.ticketId === buyTicketId)) return t;
+          return { ...t, buyItems: (t.buyItems || []).filter(i => i._lineId !== item._lineId) };
+        });
+        if (targetTicketId) {
+          return withBuyUpdated.map(t => {
+            if (!(t.type === 'PAWN' && t.ticketId === targetTicketId)) return t;
+            const newPawnItems = [...(t.pawnItems || []), pawnItem];
+            const newTotal = newPawnItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+            return { ...t, pawnItems: newPawnItems, totalPawnAmount: newTotal };
+          });
+        }
+        return withBuyUpdated;
+      });
       setBuyOpen(false);
       setExistingBuyData(null);
-      setRestoredPawnData({ pawnItems: [pawnItem], ticketNote: '', showOnReceipt: false });
-      setPawnOpen(true);
+      if (targetTicketId) {
+        // Merged silently into an existing pawn ticket already in the workspace
+        // (matches how merging into an existing trade/buy ticket behaves elsewhere)
+      } else {
+        setRestoredPawnData({ pawnItems: [pawnItem], ticketNote: '', showOnReceipt: false });
+        setPawnOpen(true);
+      }
     }
     if (type === 'trade') {
       const tradeAllowance = parseFloat(item.paid) || 0;
@@ -1959,6 +1990,57 @@ export default function ModernTransactions() {
         }
       });
     }
+  };
+
+  const handleSaleConvertTo = ({ type, item, targetTicketId }) => {
+    if (type !== 'trade') return;
+    const saleTradeItem = {
+      _lineId: item._lineId,
+      part_no: item.sku || item.item_id || '',
+      item_id: item.item_id,
+      sku: item.sku || item.item_id,
+      inventory_type: item.inventory_type,
+      name: item.name || '',
+      category_name: item.category_name || '',
+      price: parseFloat(item.price) || 0,
+      quantity: parseInt(item.quantity) || 1,
+      discount: item.discount || 0,
+      discountType: item.discountType || 'amount',
+      images: item.images || [],
+    };
+    const saleTicketId = existingSaleData?.ticketId;
+    setWorkspaceTransactions(prev => {
+      // Remove converted item from the sale ticket in workspace
+      const withSaleUpdated = prev.map(t => {
+        if (!(t.type === 'SALE' && t.ticketId === saleTicketId)) return t;
+        return { ...t, saleItems: (t.saleItems || []).filter(i => i._lineId !== item._lineId) };
+      });
+      if (targetTicketId) {
+        return withSaleUpdated.map(t => {
+          if (!(t.type === 'TRADE' && t.ticketId === targetTicketId)) return t;
+          const newSaleItems = [...(t.saleItems || []), saleTradeItem];
+          const newSaleTotal = newSaleItems.reduce((s, i) => s + (parseFloat(i.price) || 0) * (parseInt(i.quantity) || 1), 0);
+          return { ...t, saleItems: newSaleItems, totalSaleAfterTax: newSaleTotal, netDueToCustomer: (t.totalTradeAllowance || 0) - newSaleTotal };
+        });
+      } else {
+        const last = parseInt(localStorage.getItem('lastTTTicketNumber') || '100000') + 1;
+        localStorage.setItem('lastTTTicketNumber', last.toString());
+        const newTicketId = `TT-${last}`;
+        const saleTotal = saleTradeItem.price * saleTradeItem.quantity;
+        return [
+          ...withSaleUpdated,
+          {
+            id: Date.now(), type: 'TRADE', ticketId: newTicketId,
+            tradeItems: [], saleItems: [saleTradeItem],
+            totalTradeAllowance: 0,
+            totalSaleAfterTax: saleTotal,
+            netDueToCustomer: -saleTotal,
+            taxAmount: 0, taxRate: 0.07,
+            customer,
+          },
+        ];
+      }
+    });
   };
 
   const handlePawnConvertTo = ({ type, item, targetTicketId, sourceTicketId }) => {
@@ -2060,6 +2142,7 @@ export default function ModernTransactions() {
       ? workspaceTransactions.find(t => t.id === openingTxId)
       : restoredPawnData;
     const workspaceBuyTickets = workspaceTransactions.filter(t => t.type === 'BUY');
+    const workspaceTradeTickets = workspaceTransactions.filter(t => t.type === 'TRADE');
     return (
       <PawnTransactionScreen
         customer={customer}
@@ -2075,11 +2158,13 @@ export default function ModernTransactions() {
         }}
         existingPawnData={existingPawnData}
         workspaceBuyTickets={workspaceBuyTickets}
+        workspaceTradeTickets={workspaceTradeTickets}
       />
     );
   }
 
   if (saleOpen) {
+    const workspaceTradeTickets = workspaceTransactions.filter(t => t.type === 'TRADE');
     return (
       <SaleTransactionScreen
         customer={customer}
@@ -2093,12 +2178,15 @@ export default function ModernTransactions() {
         }}
         onSelectCustomer={handleSelectCustomer}
         existingSaleData={existingSaleData}
+        onConvertTo={handleSaleConvertTo}
+        workspaceTradeTickets={workspaceTradeTickets}
       />
     );
   }
 
   if (buyOpen) {
     const workspaceTradeTickets = workspaceTransactions.filter(t => t.type === 'TRADE');
+    const workspacePawnTickets = workspaceTransactions.filter(t => t.type === 'PAWN');
     return (
       <BuyTransactionScreen
         customer={customer}
@@ -2121,6 +2209,7 @@ export default function ModernTransactions() {
         onConvertTo={handleBuyConvertTo}
         existingBuyData={existingBuyData}
         workspaceTradeTickets={workspaceTradeTickets}
+        workspacePawnTickets={workspacePawnTickets}
         autoOpenScrap={buyAutoScrap}
         scrapPrefill={scrapPrefill}
         autoOpenUnique={buyAutoUnique}

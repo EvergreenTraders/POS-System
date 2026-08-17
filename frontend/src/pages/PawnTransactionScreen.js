@@ -93,6 +93,29 @@ function commitPawnTicketId() {
   localStorage.removeItem(PENDING_KEY);
 }
 
+// Sync the local counter with the DB so it never goes backward after a
+// localStorage wipe or when using a different browser/machine (e.g. a fresh
+// deployment where localStorage has never been populated for this origin).
+// Returns true if the counter was bumped (caller should regenerate the ID).
+async function syncPawnTicketCounter() {
+  try {
+    const res = await axios.get(`${config.apiUrl}/pawn-ticket/last-id`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    });
+    const dbNum    = res.data.last_number || 0;
+    const localNum = parseInt(localStorage.getItem(COUNTER_KEY) || '0');
+    if (dbNum > localNum) {
+      localStorage.setItem(COUNTER_KEY, dbNum.toString());
+      localStorage.removeItem(PENDING_KEY);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.warn('Could not sync pawn ticket counter with DB:', e.message);
+    return false;
+  }
+}
+
 function voidPawnTicketId(id) {
   const voided = JSON.parse(localStorage.getItem('voidedPawnTickets') || '[]');
   if (!voided.includes(id)) {
@@ -105,11 +128,12 @@ function voidPawnTicketId(id) {
 export default function PawnTransactionScreen({
   customer, customerStats: initialStats, onClose, onConvertTo, onAddToWorkspace,
   onRemoveFromWorkspace, existingPawnData, workspaceBuyTickets = [],
+  workspaceTradeTickets = [],
 }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user: currentUser } = useAuth();
-  const [ticketId]                        = useState(() => existingPawnData?.ticketId || generatePawnTicketId());
+  const [ticketId, setTicketId]           = useState(() => existingPawnData?.ticketId || generatePawnTicketId());
   const [itemSearch, setItemSearch]       = useState('');
   const [ticketNote, setTicketNote]       = useState(existingPawnData?.ticketNote || '');
   const [showOnReceipt, setShowOnReceipt] = useState(existingPawnData?.showOnReceipt || false);
@@ -129,6 +153,8 @@ export default function PawnTransactionScreen({
   const [convertRow,       setConvertRow]       = useState(null);
   const [buyPickerOpen,    setBuyPickerOpen]    = useState(false);
   const [selectedBuyId,    setSelectedBuyId]    = useState(null);
+  const [tradePickerOpen,  setTradePickerOpen]  = useState(false);
+  const [selectedTradeId,  setSelectedTradeId]  = useState(null);
   const [pendingConvert,   setPendingConvert]   = useState(null); // { type, item, targetTicketId }
   const [emptyTicketDialogOpen, setEmptyTicketDialogOpen] = useState(false);
   const [transactionTypes, setTransactionTypes] = useState([]);
@@ -162,6 +188,14 @@ export default function PawnTransactionScreen({
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
   const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
+
+  // Sync counter with DB on first open (skip for restored workspace tickets
+  // which already have a committed ID).
+  useEffect(() => {
+    if (existingPawnData?.ticketId) return;
+    syncPawnTicketCounter().then(bumped => { if (bumped) setTicketId(generatePawnTicketId()); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     axios.get(`${config.apiUrl}/transaction-types`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
@@ -1382,7 +1416,16 @@ export default function PawnTransactionScreen({
                 <BuyIcon sx={{ fontSize: 16, mr: 1.5, color: buy.color ?? PURPLE }} />
                 <Typography variant="body2">Buy Ticket</Typography>
               </MenuItem>
-              <MenuItem onClick={() => { handleConvertItem('trade', convertRow, null); setConvertAnchor(null); setConvertRow(null); }}>
+              <MenuItem onClick={() => {
+                setConvertAnchor(null);
+                if (workspaceTradeTickets.length > 0) {
+                  setSelectedTradeId(null);
+                  setTradePickerOpen(true);
+                } else {
+                  handleConvertItem('trade', convertRow, null);
+                  setConvertRow(null);
+                }
+              }}>
                 <TradeIcon sx={{ fontSize: 16, mr: 1.5, color: trade.color ?? '#388e3c' }} />
                 <Typography variant="body2">Trade Ticket</Typography>
               </MenuItem>
@@ -1428,6 +1471,46 @@ export default function PawnTransactionScreen({
               setBuyPickerOpen(false);
               setConvertRow(null);
               setSelectedBuyId(null);
+            }}>
+            Move Item
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Trade ticket picker */}
+      <Dialog open={tradePickerOpen} onClose={() => { setTradePickerOpen(false); setConvertRow(null); }} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ pb: 1 }}>Move to Trade Ticket</DialogTitle>
+        <DialogContent sx={{ pt: 0 }}>
+          <Typography variant="body2" color="text.secondary" mb={1}>
+            Choose a trade ticket to move this item into as a trade-in item, or create a new one.
+          </Typography>
+          <List dense disablePadding>
+            {workspaceTradeTickets.map(t => (
+              <ListItemButton key={t.ticketId} selected={selectedTradeId === t.ticketId}
+                onClick={() => setSelectedTradeId(t.ticketId)}
+                sx={{ borderRadius: 1, mb: 0.5, border: '1px solid', borderColor: selectedTradeId === t.ticketId ? '#0891b2' : 'transparent' }}>
+                <ListItemText
+                  primary={<Typography fontWeight={700} fontSize={13}>{t.ticketId}</Typography>}
+                  secondary={`${t.tradeItems?.length || 0} trade-in item${(t.tradeItems?.length || 0) !== 1 ? 's' : ''}`}
+                />
+              </ListItemButton>
+            ))}
+            <ListItemButton selected={selectedTradeId === '__new__'} onClick={() => setSelectedTradeId('__new__')}
+              sx={{ borderRadius: 1, border: '1px solid', borderColor: selectedTradeId === '__new__' ? '#0891b2' : 'transparent' }}>
+              <MuiIcons.AddCircleOutline sx={{ mr: 1.5, fontSize: 18, color: '#0891b2' }} />
+              <ListItemText primary={<Typography fontSize={13}>Create new Trade Ticket</Typography>} />
+            </ListItemButton>
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setTradePickerOpen(false); setConvertRow(null); }}>Cancel</Button>
+          <Button variant="contained" disabled={!selectedTradeId}
+            sx={{ bgcolor: '#0891b2', '&:hover': { bgcolor: '#0e7490' } }}
+            onClick={() => {
+              handleConvertItem('trade', convertRow, selectedTradeId === '__new__' ? null : selectedTradeId);
+              setTradePickerOpen(false);
+              setConvertRow(null);
+              setSelectedTradeId(null);
             }}>
             Move Item
           </Button>

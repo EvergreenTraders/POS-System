@@ -304,7 +304,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to automatically transition items from HOLD to ON_PROCESS after hold period expires
+-- Function to automatically transition items from HOLD to IN_PROCESS after hold period expires
 CREATE OR REPLACE FUNCTION update_expired_hold_items()
 RETURNS void AS $$
 DECLARE
@@ -318,9 +318,9 @@ BEGIN
         5  -- Default to 5 days if not configured
     ) INTO hold_period_days;
 
-    -- Update items from HOLD to ON_PROCESS if hold period has expired
+    -- Update items from HOLD to IN_PROCESS if hold period has expired
     UPDATE jewelry
-    SET status = 'ON_PROCESS',
+    SET status = 'IN_PROCESS',
         updated_at = CURRENT_TIMESTAMP
     WHERE status = 'HOLD'
       AND created_at <= (CURRENT_TIMESTAMP - (hold_period_days || ' days')::INTERVAL);
@@ -330,8 +330,9 @@ $$ LANGUAGE plpgsql;
 
 -- NOTE: The automatic trigger caused infinite recursion and has been removed.
 -- Instead, call update_expired_hold_items() via:
--- 1. Manual API endpoint: GET /api/inventory/update-hold-status
--- 2. Scheduled job (cron/task scheduler)
+-- 1. Scheduled job in server.js (runs every 6 hours, see checkExpiredHoldItems)
+-- 2. Manual API endpoint: GET /api/inventory/update-hold-status
+-- 3. On-demand via: SELECT update_expired_hold_items();
 -- 3. On-demand via: SELECT update_expired_hold_items();
 
 -- Create trigger for storage_location updated_at

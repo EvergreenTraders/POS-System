@@ -109,6 +109,7 @@ export default function BuyTransactionScreen({
   onConvertTo,
   existingBuyData,
   workspaceTradeTickets = [],
+  workspacePawnTickets = [],
   autoOpenScrap = false,
   scrapPrefill = null,
   autoOpenUnique = false,
@@ -146,8 +147,10 @@ export default function BuyTransactionScreen({
   const [convertRow,    setConvertRow]    = useState(null);
   const [tradePickerOpen,  setTradePickerOpen]  = useState(false);
   const [selectedTradeId,  setSelectedTradeId]  = useState(null);
+  const [pawnPickerOpen,   setPawnPickerOpen]   = useState(false);
+  const [selectedPawnId,   setSelectedPawnId]   = useState(null);
   const [emptyTicketDialogOpen, setEmptyTicketDialogOpen] = useState(false);
-  const [pendingConvert,   setPendingConvert]   = useState(null); // { item, targetTicketId }
+  const [pendingConvert,   setPendingConvert]   = useState(null); // { type, item, targetTicketId }
   const prevItemCountRef = useRef(buyItems.length);
   const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
   const [cameraStream,     setCameraStream]     = useState(null);
@@ -308,14 +311,14 @@ export default function BuyTransactionScreen({
 
   const handleRemoveItem = (_lineId) => setBuyItems(prev => prev.filter(i => i._lineId !== _lineId));
 
-  const handleConvertToTrade = (item, targetTicketId) => {
+  const handleConvertItem = (type, item, targetTicketId) => {
     const isLast = buyItems.length === 1;
     handleRemoveItem(item._lineId);
     if (isLast) {
-      setPendingConvert({ item, targetTicketId });
+      setPendingConvert({ type, item, targetTicketId });
       // onConvertTo deferred — committed only if user confirms Void in the empty-ticket dialog
     } else {
-      onConvertTo?.({ type: 'trade', item, targetTicketId });
+      onConvertTo?.({ type, item, targetTicketId });
     }
   };
 
@@ -1081,7 +1084,16 @@ export default function BuyTransactionScreen({
           const TradeIcon = MuiIcons[trade.icon] ?? MuiIcons.CompareArrows;
           return (
             <>
-              <MenuItem onClick={() => { onConvertTo?.({ type: 'pawn', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
+              <MenuItem onClick={() => {
+                setConvertAnchor(null);
+                if (workspacePawnTickets.length > 0) {
+                  setSelectedPawnId(null);
+                  setPawnPickerOpen(true);
+                } else {
+                  handleConvertItem('pawn', convertRow, null);
+                  setConvertRow(null);
+                }
+              }}>
                 <PawnIcon sx={{ fontSize: 16, mr: 1.5, color: pawn.color ?? '#7b1fa2' }} />
                 <Typography variant="body2">Pawn Ticket</Typography>
               </MenuItem>
@@ -1091,7 +1103,7 @@ export default function BuyTransactionScreen({
                   setSelectedTradeId(null);
                   setTradePickerOpen(true);
                 } else {
-                  handleConvertToTrade(convertRow, null);
+                  handleConvertItem('trade', convertRow, null);
                   setConvertRow(null);
                 }
               }}>
@@ -1133,10 +1145,50 @@ export default function BuyTransactionScreen({
           <Button variant="contained" disabled={!selectedTradeId}
             sx={{ bgcolor: '#0891b2', '&:hover': { bgcolor: '#0e7490' } }}
             onClick={() => {
-              handleConvertToTrade(convertRow, selectedTradeId === '__new__' ? null : selectedTradeId);
+              handleConvertItem('trade', convertRow, selectedTradeId === '__new__' ? null : selectedTradeId);
               setTradePickerOpen(false);
               setConvertRow(null);
               setSelectedTradeId(null);
+            }}>
+            Move Item
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Pawn ticket picker */}
+      <Dialog open={pawnPickerOpen} onClose={() => { setPawnPickerOpen(false); setConvertRow(null); }} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ pb: 1 }}>Move to Pawn Ticket</DialogTitle>
+        <DialogContent sx={{ pt: 0 }}>
+          <Typography variant="body2" color="text.secondary" mb={1}>
+            Choose a pawn ticket to move this item into, or create a new one.
+          </Typography>
+          <List dense disablePadding>
+            {workspacePawnTickets.map(t => (
+              <ListItemButton key={t.ticketId} selected={selectedPawnId === t.ticketId}
+                onClick={() => setSelectedPawnId(t.ticketId)}
+                sx={{ borderRadius: 1, mb: 0.5, border: '1px solid', borderColor: selectedPawnId === t.ticketId ? '#7b1fa2' : 'transparent' }}>
+                <ListItemText
+                  primary={<Typography fontWeight={700} fontSize={13}>{t.ticketId}</Typography>}
+                  secondary={`${t.pawnItems?.length || 0} item${(t.pawnItems?.length || 0) !== 1 ? 's' : ''}`}
+                />
+              </ListItemButton>
+            ))}
+            <ListItemButton selected={selectedPawnId === '__new__'} onClick={() => setSelectedPawnId('__new__')}
+              sx={{ borderRadius: 1, border: '1px solid', borderColor: selectedPawnId === '__new__' ? '#7b1fa2' : 'transparent' }}>
+              <MuiIcons.AddCircleOutline sx={{ mr: 1.5, fontSize: 18, color: '#7b1fa2' }} />
+              <ListItemText primary={<Typography fontSize={13}>Create new Pawn Ticket</Typography>} />
+            </ListItemButton>
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setPawnPickerOpen(false); setConvertRow(null); }}>Cancel</Button>
+          <Button variant="contained" disabled={!selectedPawnId}
+            sx={{ bgcolor: '#7b1fa2', '&:hover': { bgcolor: '#6a1b9a' } }}
+            onClick={() => {
+              handleConvertItem('pawn', convertRow, selectedPawnId === '__new__' ? null : selectedPawnId);
+              setPawnPickerOpen(false);
+              setConvertRow(null);
+              setSelectedPawnId(null);
             }}>
             Move Item
           </Button>
@@ -1149,7 +1201,7 @@ export default function BuyTransactionScreen({
         <DialogContent>
           <Typography variant="body2">
             {pendingConvert
-              ? 'This item was about to be moved to a trade ticket. Void to confirm the move, or Cancel to keep the item here.'
+              ? 'This item was about to be moved to another ticket. Void to confirm the move, or Cancel to keep the item here.'
               : 'All items have been removed. Void to remove this ticket from the workspace, or Cancel to keep it open.'}
           </Typography>
         </DialogContent>
@@ -1166,7 +1218,7 @@ export default function BuyTransactionScreen({
           <Button variant="contained" color="error"
             onClick={() => {
               if (pendingConvert) {
-                onConvertTo?.({ type: 'trade', item: pendingConvert.item, targetTicketId: pendingConvert.targetTicketId });
+                onConvertTo?.({ type: pendingConvert.type, item: pendingConvert.item, targetTicketId: pendingConvert.targetTicketId });
                 setPendingConvert(null);
               }
               voidBuyTicketId(ticketId);

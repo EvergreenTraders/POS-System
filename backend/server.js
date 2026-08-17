@@ -7247,7 +7247,7 @@ app.put('/api/jewelry/:id/processing', async (req, res) => {
   const autoSellable = ['ON_RETAIL_FLOOR', 'READY_HOLDING'].includes(processing_status);
   const finalSellable = autoSellable ? 'SELLABLE' : (sellable_status || 'NOT_SELLABLE');
 
-  await db.query(
+  await pool.query(
     `UPDATE jewelry SET
        processing_status = $1, processing_queue = $2,
        current_location_id = $3, sellable_status = $4,
@@ -7258,7 +7258,7 @@ app.put('/api/jewelry/:id/processing', async (req, res) => {
   );
 
   // Write processing_events audit record (when Phase 1.12 table exists)
-  // await db.query(`INSERT INTO processing_events ...`, [...]);
+  // await pool.query(`INSERT INTO processing_events ...`, [...]);
 
   res.json({ success: true });
 });
@@ -8161,17 +8161,17 @@ app.get('/api/inventory-status/:id', async (req, res) => {
   }
 });
 
-// Endpoint to update expired HOLD items to ON_PROCESS status
+// Endpoint to update expired HOLD items to IN_PROCESS status
 app.get('/api/inventory/update-hold-status', async (req, res) => {
   try {
     // Call the database function to update expired hold items
     await pool.query('SELECT update_expired_hold_items()');
 
-    // Get count of items now in ON_PROCESS status
+    // Get count of items now in IN_PROCESS status
     const countResult = await pool.query(
       `SELECT COUNT(*) as updated_count
        FROM jewelry
-       WHERE status = 'ON_PROCESS'
+       WHERE status = 'IN_PROCESS'
        AND updated_at > CURRENT_TIMESTAMP - INTERVAL '1 minute'`
     );
 
@@ -8179,7 +8179,7 @@ app.get('/api/inventory/update-hold-status', async (req, res) => {
 
     res.json({
       success: true,
-      message: `Successfully updated ${updatedCount} item(s) from HOLD to ON_PROCESS`,
+      message: `Successfully updated ${updatedCount} item(s) from HOLD to IN_PROCESS`,
       updatedCount
     });
   } catch (error) {
@@ -9077,6 +9077,25 @@ app.get('/api/customers/:id/trade/stats', async (req, res) => {
   } catch (err) {
     console.error('Error fetching customer trade stats:', err);
     res.status(500).json({ error: 'Failed to fetch customer trade stats' });
+  }
+});
+
+// GET /api/pawn-ticket/last-id — for syncing the local counter with DB
+app.get('/api/pawn-ticket/last-id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT pawn_ticket_id FROM pawn_ticket
+      WHERE pawn_ticket_id ~ '^PT-[0-9]+$'
+      ORDER BY CAST(SUBSTRING(pawn_ticket_id FROM 4) AS INTEGER) DESC
+      LIMIT 1
+    `);
+    if (result.rows.length === 0) return res.json({ last_number: 0, last_id: null });
+    const lastId = result.rows[0].pawn_ticket_id;
+    const num    = parseInt(lastId.replace('PT-', ''), 10);
+    res.json({ last_number: num, last_id: lastId });
+  } catch (err) {
+    console.error('Error fetching last pawn ticket id:', err);
+    res.status(500).json({ error: 'Failed to fetch last pawn ticket id' });
   }
 });
 
@@ -10451,12 +10470,7 @@ app.get('/api/customers/:id/stats', async (req, res) => {
           JOIN transactions t ON pt.transaction_id = t.transaction_id
           WHERE t.customer_id = $1 AND pt.status = 'ACTIVE'
         ) AS active_pawns,
-        COALESCE((
-          SELECT SUM(p.amount * CASE WHEN t.total_amount < 0 THEN 1 ELSE -1 END)
-          FROM payments p
-          JOIN transactions t ON p.transaction_id = t.transaction_id
-          WHERE t.customer_id = $1 AND p.payment_method = 'store_credit'
-        ), 0) AS store_credit
+        (SELECT store_credit FROM customers WHERE id = $1) AS store_credit
     `, [id]);
 
     const row = result.rows[0];
@@ -10519,12 +10533,7 @@ app.get('/api/customers/:id/sales/stats', async (req, res) => {
       SELECT
         COUNT(DISTINCT st.sale_ticket_id) AS total_sales_count,
         COALESCE(SUM(t.total_amount), 0) AS total_sales_amount,
-        COALESCE((
-          SELECT SUM(p.amount * CASE WHEN t2.total_amount < 0 THEN 1 ELSE -1 END)
-          FROM payments p
-          JOIN transactions t2 ON p.transaction_id = t2.transaction_id
-          WHERE t2.customer_id = $1 AND p.payment_method = 'store_credit'
-        ), 0) AS store_credit
+        (SELECT store_credit FROM customers WHERE id = $1) AS store_credit
       FROM (
         SELECT DISTINCT sale_ticket_id, transaction_id FROM sale_ticket
       ) st
@@ -14958,6 +14967,22 @@ setInterval(checkPawnForfeitures, 21600000);
 
 // Run forfeiture check on startup
 checkPawnForfeitures();
+
+// Sweep HOLD items past their configured hold period into IN_PROCESS.
+// Runs on a server-side timer so it fires regardless of which frontend page
+// (if any) is loaded — previously this only ran when the Jewelry inventory
+// page happened to mount, which stopped happening once Transactions became
+// the app's home screen.
+async function checkExpiredHoldItems() {
+  try {
+    await pool.query('SELECT update_expired_hold_items()');
+  } catch (error) {
+    console.error('❌ Error updating expired hold items:', error.message);
+  }
+}
+
+setInterval(checkExpiredHoldItems, 21600000);
+checkExpiredHoldItems();
 
 // ==================== STORE SESSIONS ====================
 

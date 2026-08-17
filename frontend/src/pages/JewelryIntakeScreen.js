@@ -2334,7 +2334,7 @@ export default function JewelryIntakeScreen({
             </Button>
             <Button size="small" variant="contained" onClick={handleSave}
               sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN } }}>
-              Save Item to Ticket
+              {editItem ? 'Update Item' : 'Save Item to Ticket'}
             </Button>
           </>
         )}
