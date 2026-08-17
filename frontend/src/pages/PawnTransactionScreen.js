@@ -93,6 +93,29 @@ function commitPawnTicketId() {
   localStorage.removeItem(PENDING_KEY);
 }
 
+// Sync the local counter with the DB so it never goes backward after a
+// localStorage wipe or when using a different browser/machine (e.g. a fresh
+// deployment where localStorage has never been populated for this origin).
+// Returns true if the counter was bumped (caller should regenerate the ID).
+async function syncPawnTicketCounter() {
+  try {
+    const res = await axios.get(`${config.apiUrl}/pawn-ticket/last-id`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    });
+    const dbNum    = res.data.last_number || 0;
+    const localNum = parseInt(localStorage.getItem(COUNTER_KEY) || '0');
+    if (dbNum > localNum) {
+      localStorage.setItem(COUNTER_KEY, dbNum.toString());
+      localStorage.removeItem(PENDING_KEY);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.warn('Could not sync pawn ticket counter with DB:', e.message);
+    return false;
+  }
+}
+
 function voidPawnTicketId(id) {
   const voided = JSON.parse(localStorage.getItem('voidedPawnTickets') || '[]');
   if (!voided.includes(id)) {
@@ -110,7 +133,7 @@ export default function PawnTransactionScreen({
   const navigate = useNavigate();
   const location = useLocation();
   const { user: currentUser } = useAuth();
-  const [ticketId]                        = useState(() => existingPawnData?.ticketId || generatePawnTicketId());
+  const [ticketId, setTicketId]           = useState(() => existingPawnData?.ticketId || generatePawnTicketId());
   const [itemSearch, setItemSearch]       = useState('');
   const [ticketNote, setTicketNote]       = useState(existingPawnData?.ticketNote || '');
   const [showOnReceipt, setShowOnReceipt] = useState(existingPawnData?.showOnReceipt || false);
@@ -165,6 +188,14 @@ export default function PawnTransactionScreen({
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
   const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
+
+  // Sync counter with DB on first open (skip for restored workspace tickets
+  // which already have a committed ID).
+  useEffect(() => {
+    if (existingPawnData?.ticketId) return;
+    syncPawnTicketCounter().then(bumped => { if (bumped) setTicketId(generatePawnTicketId()); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     axios.get(`${config.apiUrl}/transaction-types`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })

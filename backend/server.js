@@ -9080,6 +9080,25 @@ app.get('/api/customers/:id/trade/stats', async (req, res) => {
   }
 });
 
+// GET /api/pawn-ticket/last-id — for syncing the local counter with DB
+app.get('/api/pawn-ticket/last-id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT pawn_ticket_id FROM pawn_ticket
+      WHERE pawn_ticket_id ~ '^PT-[0-9]+$'
+      ORDER BY CAST(SUBSTRING(pawn_ticket_id FROM 4) AS INTEGER) DESC
+      LIMIT 1
+    `);
+    if (result.rows.length === 0) return res.json({ last_number: 0, last_id: null });
+    const lastId = result.rows[0].pawn_ticket_id;
+    const num    = parseInt(lastId.replace('PT-', ''), 10);
+    res.json({ last_number: num, last_id: lastId });
+  } catch (err) {
+    console.error('Error fetching last pawn ticket id:', err);
+    res.status(500).json({ error: 'Failed to fetch last pawn ticket id' });
+  }
+});
+
 // Pawn Ticket API Endpoints
 app.get('/api/pawn-ticket', async (req, res) => {
   try {
