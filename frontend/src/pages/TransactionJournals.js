@@ -30,7 +30,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useWorkingDate } from '../context/WorkingDateContext';
 import { Avatar } from '@mui/material';
-import { openPawnReceiptPDF } from '../utils/pawnReceiptUtils';
+import { openPawnReceiptPDF } from '../utils/ticketReceiptUtils';
 import config from '../config';
 import { injectPDFScript } from '../utils/printUtils';
 

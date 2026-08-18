@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
-import { openPawnReceiptPDF } from '../utils/pawnReceiptUtils';
+import { openPawnReceiptPDF } from '../utils/ticketReceiptUtils';
 import {
   Box, Typography, Paper, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,

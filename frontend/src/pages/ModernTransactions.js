@@ -18,6 +18,7 @@ import PaymentTransactionScreen from './PaymentTransactionScreen';
 import RedeemTransactionScreen from './RedeemTransactionScreen';
 import { useWorkspaceGuard } from '../context/WorkspaceGuardContext';
 import { useAuth } from '../context/AuthContext';
+import { openBuySaleReceiptPDF } from '../utils/ticketReceiptUtils';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
@@ -536,23 +537,25 @@ function RedeemTransactionCard({ tx, redeemIcon, redeemColor, onOpen, onVoid }) 
   );
 }
 
-function TransactionTypeButton({ label, icon, color, onClick, count }) {
+function TransactionTypeButton({ label, icon, color, onClick, count, disabled = false }) {
+  const effectiveColor = disabled ? '#bdbdbd' : color;
   return (
     <Badge badgeContent={count || 0} color="primary" overlap="rectangular"
       sx={{ '& .MuiBadge-badge': { fontSize: 9, minWidth: 16, height: 16, top: 4, right: 4 } }}>
       <Paper
         variant="outlined"
-        onClick={onClick}
+        onClick={disabled ? undefined : onClick}
         sx={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          p: { md: 1, xl: 0.75 }, cursor: 'pointer', borderRadius: 2, borderColor: '#e0e0e0',
+          p: { md: 1, xl: 0.75 }, cursor: disabled ? 'default' : 'pointer', borderRadius: 2, borderColor: '#e0e0e0',
           minWidth: { md: 70, xl: 60 },
-          '&:hover': { bgcolor: '#f5f5f5', borderColor: color },
+          opacity: disabled ? 0.4 : 1,
+          ...(disabled ? {} : { '&:hover': { bgcolor: '#f5f5f5', borderColor: color } }),
           transition: 'all 0.15s',
         }}
       >
-        <Box sx={{ color, mb: 0.25, '& svg': { fontSize: { md: 24, xl: 20 } } }}>{icon}</Box>
-        <Typography align="center" fontWeight={500} sx={{ fontSize: { md: 10, xl: 9 }, color }}>{label}</Typography>
+        <Box sx={{ color: effectiveColor, mb: 0.25, '& svg': { fontSize: { md: 24, xl: 20 } } }}>{icon}</Box>
+        <Typography align="center" fontWeight={500} sx={{ fontSize: { md: 10, xl: 9 }, color: effectiveColor }}>{label}</Typography>
       </Paper>
     </Badge>
   );
@@ -926,6 +929,12 @@ export default function ModernTransactions() {
   // adaptLookupGroupToCardTx) which opens the real screen read-only.
   const [ticketLookupLoading, setTicketLookupLoading] = useState(false);
   const [ticketLookupError, setTicketLookupError] = useState('');
+  // Which ADD TRANSACTION footer buttons a ticket lookup narrows down to:
+  // a looked-up pawn only makes sense to Payment or Redeem next; a looked-up
+  // sale only makes sense to Pawn or Refund next; a looked-up buy only makes
+  // sense to Print (its receipt) next. null = no restriction.
+  const [lookupContext, setLookupContext] = useState(null);
+  const [lastLookupGroups, setLastLookupGroups] = useState([]); // groups from the most recent lookup, for Print
 
   const customerIdRef = useRef(undefined);
   const pendingResumeWorkspaceRef = useRef(null); // workspace to load on next customer change (from Park resume)
@@ -1366,6 +1375,8 @@ export default function ModernTransactions() {
     const proceed = await confirmLeaveWorkspace();
     if (!proceed) return;
 
+    setLookupContext(null);
+    setLastLookupGroups([]);
     setCustomerStats(null);
     setCustomerSearch('');
     setCustomerResults([]);
@@ -1400,6 +1411,8 @@ export default function ModernTransactions() {
     if (!proceed) return;
     setCustomer(null);
     setCustomerStats(null);
+    setLookupContext(null);
+    setLastLookupGroups([]);
   };
 
   // Adapts one /api/tickets/lookup "group" into the exact tx shape the real
@@ -1474,6 +1487,20 @@ export default function ModernTransactions() {
       await handleSelectCustomer(res.data.customer);
       const newCards = res.data.groups.map(g => adaptLookupGroupToCardTx(g, res.data.groups, res.data.customer));
       setWorkspaceTransactions(prev => [...prev, ...newCards]);
+      setLastLookupGroups(res.data.groups);
+      // Narrow the ADD TRANSACTION footer to the sensible next actions for
+      // what was just found: a pawn only leads to Payment or Redeem next;
+      // a sale only leads to Pawn or Refund next; a standalone buy only
+      // leads to printing its receipt.
+      if (res.data.groups.some(g => g.type === 'PAWN')) {
+        setLookupContext('PAWN');
+      } else if (res.data.groups.some(g => g.type === 'SALE')) {
+        setLookupContext('SALE');
+      } else if (res.data.groups.some(g => g.type === 'BUY')) {
+        setLookupContext('BUY');
+      } else {
+        setLookupContext(null);
+      }
     } catch (err) {
       setTicketLookupError(
         err.response?.status === 404
@@ -1482,6 +1509,21 @@ export default function ModernTransactions() {
       );
     } finally {
       setTicketLookupLoading(false);
+    }
+  };
+
+  // ACTIONS → Print, for a looked-up buy or sale ticket. Same receipt
+  // template/fields as the existing buy/sale receipt in TransactionJournals.js
+  // (handleBuyTicketClick) — buy tickets print as a buy receipt, sale tickets
+  // print as a sale receipt, kept inline here rather than as a separate module.
+  const handlePrintTicketReceipt = async () => {
+    const group = lastLookupGroups.find(g => g.type === 'BUY') || lastLookupGroups.find(g => g.type === 'SALE');
+    if (!group) return;
+    try {
+      await openBuySaleReceiptPDF(group.ticketId);
+    } catch (err) {
+      console.error('Failed to print ticket receipt:', err);
+      setParkSnackbar({ severity: 'error', message: 'Failed to generate receipt' });
     }
   };
 
@@ -3002,6 +3044,10 @@ export default function ModernTransactions() {
             {transactionTypes.map(t => {
               const IconComponent = MuiIcons[t.icon] ?? MuiIcons.Add;
               const count = workspaceTransactions.filter(tx => tx.type === t.type.toUpperCase()).length;
+              const allowedTypes = lookupContext === 'PAWN' ? ['payment', 'redeem']
+                : lookupContext === 'SALE' ? ['pawn', 'refund']
+                : lookupContext === 'BUY' ? []
+                : null;
               return (
                 <TransactionTypeButton
                   key={t.id}
@@ -3010,6 +3056,7 @@ export default function ModernTransactions() {
                   color={t.color ?? '#607d8b'}
                   onClick={() => handleTransactionTypeClick(t.type)}
                   count={count}
+                  disabled={allowedTypes ? !allowedTypes.includes(t.type) : false}
                 />
               );
             })}
@@ -3029,11 +3076,14 @@ export default function ModernTransactions() {
               { label: 'Notes',    icon: 'Assignment' },
               { label: 'Discount', icon: 'Percent'    },
               { label: 'Void',     icon: 'Block'      },
-              { label: 'Print',    icon: 'Print'      },
+              { label: 'Print',    icon: 'Print', onClick: handlePrintTicketReceipt },
             ].map(a => {
               const Icon = MuiIcons[a.icon];
               return (
-                <TransactionTypeButton key={a.label} label={a.label} icon={<Icon />} color="#607d8b" />
+                <TransactionTypeButton key={a.label} label={a.label} icon={<Icon />} color="#607d8b"
+                  onClick={a.onClick}
+                  disabled={lookupContext === 'BUY' && a.label !== 'Print'}
+                />
               );
             })}
           </Box>

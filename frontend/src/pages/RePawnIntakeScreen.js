@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
 import config from '../config';
-import { openPawnReceiptPDF } from '../utils/pawnReceiptUtils';
+import { openPawnReceiptPDF } from '../utils/ticketReceiptUtils';
 import {
   Box, Typography, Paper, CircularProgress, Button, Chip,
   TextField, FormControl, InputLabel, Select, MenuItem,
