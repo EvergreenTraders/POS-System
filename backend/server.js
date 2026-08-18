@@ -8336,6 +8336,204 @@ app.delete('/api/inventory-status/:id', async (req, res) => {
   }
 });
 
+// GET /api/tickets/lookup/:query — read-only lookup of a completed transaction
+// or ticket by any of its IDs (transaction_id, buy/sale/pawn/trade/payment
+// ticket id). Used by the ModernTransactions workspace search bar to pull up
+// "everything from that visit" for reference without touching live data.
+app.get('/api/tickets/lookup/:query', async (req, res) => {
+  const q = (req.params.query || '').trim();
+  if (!q) return res.status(400).json({ error: 'Search query is required' });
+
+  try {
+    const matchOne = async (table, idCol) => {
+      const r = await pool.query(`SELECT DISTINCT ${idCol} AS id FROM ${table} WHERE UPPER(${idCol}) = UPPER($1) LIMIT 1`, [q]);
+      return r.rows[0]?.id || null;
+    };
+
+    let tradeTicketId   = await matchOne('trade_ticket', 'trade_ticket_id');
+    let buyTicketId     = await matchOne('buy_ticket', 'buy_ticket_id');
+    let saleTicketId    = await matchOne('sale_ticket', 'sale_ticket_id');
+    let pawnTicketId    = await matchOne('pawn_ticket', 'pawn_ticket_id');
+    let paymentTicketId = await matchOne('payment_ticket', 'payment_ticket_id');
+
+    // No direct ticket-id hit — maybe they searched a bare transaction_id.
+    // Find whichever ticket table(s) reference it.
+    if (!tradeTicketId && !buyTicketId && !saleTicketId && !pawnTicketId && !paymentTicketId) {
+      const tCheck = await pool.query('SELECT transaction_id FROM transactions WHERE UPPER(transaction_id) = UPPER($1)', [q]);
+      if (tCheck.rows.length > 0) {
+        const txId = tCheck.rows[0].transaction_id;
+        const [bt, st, pt, tt, pmt] = await Promise.all([
+          pool.query('SELECT DISTINCT buy_ticket_id FROM buy_ticket WHERE transaction_id = $1 LIMIT 1', [txId]),
+          pool.query('SELECT DISTINCT sale_ticket_id FROM sale_ticket WHERE transaction_id = $1 LIMIT 1', [txId]),
+          pool.query('SELECT DISTINCT pawn_ticket_id FROM pawn_ticket WHERE transaction_id = $1 LIMIT 1', [txId]),
+          pool.query('SELECT DISTINCT trade_ticket_id FROM trade_ticket WHERE transaction_id = $1 LIMIT 1', [txId]),
+          pool.query('SELECT DISTINCT payment_ticket_id FROM payment_ticket WHERE transaction_id = $1 LIMIT 1', [txId]),
+        ]);
+        buyTicketId     = bt.rows[0]?.buy_ticket_id || null;
+        saleTicketId    = st.rows[0]?.sale_ticket_id || null;
+        pawnTicketId    = pt.rows[0]?.pawn_ticket_id || null;
+        tradeTicketId   = tt.rows[0]?.trade_ticket_id || null;
+        paymentTicketId = pmt.rows[0]?.payment_ticket_id || null;
+      }
+    }
+
+    if (!tradeTicketId && !buyTicketId && !saleTicketId && !pawnTicketId && !paymentTicketId) {
+      return res.status(404).json({ error: 'No transaction or ticket found for that ID' });
+    }
+
+    // A trade bundles a buy_ticket (trade-in) and a sale_ticket (sale-out) —
+    // pull both sides in even though only the trade_ticket_id was searched.
+    let tradeNote = null, tradeShowOnReceipt = false, tradeTransactionId = null;
+    if (tradeTicketId) {
+      const tr = await pool.query(
+        'SELECT buy_ticket_id, sale_ticket_id, transaction_id, ticket_note, show_on_receipt FROM trade_ticket WHERE trade_ticket_id = $1',
+        [tradeTicketId]
+      );
+      if (tr.rows.length > 0) {
+        buyTicketId  = buyTicketId  || tr.rows[0].buy_ticket_id;
+        saleTicketId = saleTicketId || tr.rows[0].sale_ticket_id;
+        tradeTransactionId = tr.rows[0].transaction_id;
+        tradeNote = tr.rows[0].ticket_note;
+        tradeShowOnReceipt = tr.rows[0].show_on_receipt;
+      }
+    }
+
+    const ITEM_JOIN = `
+      LEFT JOIN jewelry j ON x.item_id = j.item_id
+      LEFT JOIN hardgoods h ON x.item_id = h.item_id
+    `;
+    const ITEM_FIELDS = `
+      COALESCE(j.short_desc, j.long_desc, h.short_desc, h.long_desc, x.item_id) AS description,
+      ABS(COALESCE(j.item_price, h.item_price)) AS price,
+      COALESCE(j.images, '[]'::jsonb) AS images
+    `;
+
+    let customer = null;
+    const fetchCustomerFor = async (transactionId) => {
+      if (customer || !transactionId) return;
+      const r = await pool.query(
+        `SELECT c.id, c.first_name, c.last_name, c.phone, c.email,
+                t.transaction_id, t.total_amount, t.transaction_date
+         FROM transactions t JOIN customers c ON t.customer_id = c.id
+         WHERE t.transaction_id = $1`,
+        [transactionId]
+      );
+      if (r.rows.length > 0) {
+        const row = r.rows[0];
+        customer = { id: row.id, first_name: row.first_name, last_name: row.last_name, phone: row.phone, email: row.email };
+      }
+    };
+
+    const groups = [];
+
+    if (buyTicketId) {
+      const rows = await pool.query(`
+        SELECT x.buy_ticket_id AS ticket_id, x.transaction_id, x.ticket_note, x.show_on_receipt, x.created_at,
+               x.item_id, ${ITEM_FIELDS}
+        FROM buy_ticket x ${ITEM_JOIN}
+        WHERE x.buy_ticket_id = $1
+        ORDER BY x.id
+      `, [buyTicketId]);
+      if (rows.rows.length > 0) {
+        await fetchCustomerFor(rows.rows[0].transaction_id);
+        const txMeta = await pool.query('SELECT total_amount, transaction_date FROM transactions WHERE transaction_id = $1', [rows.rows[0].transaction_id]);
+        groups.push({
+          type: 'BUY', ticketId: buyTicketId, transactionId: rows.rows[0].transaction_id,
+          ticketNote: rows.rows[0].ticket_note, createdAt: rows.rows[0].created_at,
+          totalAmount: txMeta.rows[0] ? Math.abs(parseFloat(txMeta.rows[0].total_amount)) : null,
+          isTradeIn: !!tradeTicketId,
+          items: rows.rows.map(r => ({ itemId: r.item_id, description: r.description, price: r.price, images: r.images })),
+        });
+      }
+    }
+
+    if (saleTicketId) {
+      const rows = await pool.query(`
+        SELECT x.sale_ticket_id AS ticket_id, x.transaction_id, x.ticket_note, x.show_on_receipt, x.created_at,
+               x.quantity, x.item_id, ${ITEM_FIELDS}
+        FROM sale_ticket x ${ITEM_JOIN}
+        WHERE x.sale_ticket_id = $1
+        ORDER BY x.id
+      `, [saleTicketId]);
+      if (rows.rows.length > 0) {
+        await fetchCustomerFor(rows.rows[0].transaction_id);
+        const txMeta = await pool.query('SELECT total_amount, transaction_date FROM transactions WHERE transaction_id = $1', [rows.rows[0].transaction_id]);
+        groups.push({
+          type: 'SALE', ticketId: saleTicketId, transactionId: rows.rows[0].transaction_id,
+          ticketNote: rows.rows[0].ticket_note, createdAt: rows.rows[0].created_at,
+          totalAmount: txMeta.rows[0] ? Math.abs(parseFloat(txMeta.rows[0].total_amount)) : null,
+          isTradeSale: !!tradeTicketId,
+          items: rows.rows.map(r => ({ itemId: r.item_id, description: r.description, price: r.price, quantity: r.quantity, images: r.images })),
+        });
+      }
+    }
+
+    if (pawnTicketId) {
+      const rows = await pool.query(`
+        SELECT x.pawn_ticket_id AS ticket_id, x.transaction_id, x.ticket_note, x.show_on_receipt, x.created_at,
+               x.status, x.due_date, x.interest_rate, x.term_days, x.storage_fee,
+               x.item_id, ${ITEM_FIELDS}
+        FROM pawn_ticket x ${ITEM_JOIN}
+        WHERE x.pawn_ticket_id = $1
+        ORDER BY x.id
+      `, [pawnTicketId]);
+      if (rows.rows.length > 0) {
+        await fetchCustomerFor(rows.rows[0].transaction_id);
+        const txMeta = await pool.query('SELECT total_amount, transaction_date FROM transactions WHERE transaction_id = $1', [rows.rows[0].transaction_id]);
+        groups.push({
+          type: 'PAWN', ticketId: pawnTicketId, transactionId: rows.rows[0].transaction_id,
+          ticketNote: rows.rows[0].ticket_note, createdAt: rows.rows[0].created_at,
+          status: rows.rows[0].status, dueDate: rows.rows[0].due_date,
+          totalAmount: txMeta.rows[0] ? Math.abs(parseFloat(txMeta.rows[0].total_amount)) : null,
+          items: rows.rows.map(r => ({
+            itemId: r.item_id, description: r.description, price: r.price, images: r.images,
+            interestRate: r.interest_rate, termDays: r.term_days, storageFee: r.storage_fee,
+          })),
+        });
+      }
+    }
+
+    if (tradeTicketId) {
+      await fetchCustomerFor(tradeTransactionId);
+      const txMeta = tradeTransactionId
+        ? await pool.query('SELECT total_amount, transaction_date FROM transactions WHERE transaction_id = $1', [tradeTransactionId])
+        : { rows: [] };
+      groups.push({
+        type: 'TRADE', ticketId: tradeTicketId, transactionId: tradeTransactionId,
+        ticketNote: tradeNote, showOnReceipt: tradeShowOnReceipt,
+        netAmount: txMeta.rows[0] ? parseFloat(txMeta.rows[0].total_amount) : null,
+        buyTicketId, saleTicketId,
+      });
+    }
+
+    if (paymentTicketId) {
+      const rows = await pool.query(`
+        SELECT payment_ticket_id AS ticket_id, transaction_id, ticket_note, show_on_receipt, created_at, pawn_ticket_id
+        FROM payment_ticket WHERE payment_ticket_id = $1 ORDER BY id
+      `, [paymentTicketId]);
+      if (rows.rows.length > 0) {
+        await fetchCustomerFor(rows.rows[0].transaction_id);
+        const txMeta = await pool.query('SELECT total_amount, transaction_date FROM transactions WHERE transaction_id = $1', [rows.rows[0].transaction_id]);
+        groups.push({
+          type: 'PAYMENT', ticketId: paymentTicketId, transactionId: rows.rows[0].transaction_id,
+          ticketNote: rows.rows[0].ticket_note, createdAt: rows.rows[0].created_at,
+          totalAmount: txMeta.rows[0] ? Math.abs(parseFloat(txMeta.rows[0].total_amount)) : null,
+          pawnTicketIds: rows.rows.map(r => r.pawn_ticket_id),
+        });
+      }
+    }
+
+    if (!customer) {
+      return res.status(404).json({ error: 'Ticket found but has no linked customer record' });
+    }
+
+    res.json({ customer, groups });
+  } catch (err) {
+    console.error('Error looking up ticket:', err);
+    res.status(500).json({ error: 'Failed to look up ticket' });
+  }
+});
+
 // Buy Ticket API Endpoints
 // GET /api/buy-ticket/last-id — for syncing the local counter with DB
 app.get('/api/buy-ticket/last-id', async (req, res) => {

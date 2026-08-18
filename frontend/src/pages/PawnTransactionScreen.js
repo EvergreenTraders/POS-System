@@ -129,6 +129,7 @@ export default function PawnTransactionScreen({
   customer, customerStats: initialStats, onClose, onConvertTo, onAddToWorkspace,
   onRemoveFromWorkspace, existingPawnData, workspaceBuyTickets = [],
   workspaceTradeTickets = [],
+  readOnly = false,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -764,7 +765,7 @@ export default function PawnTransactionScreen({
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', ...(readOnly && { pointerEvents: 'none', userSelect: 'none' }) }}>
 
       {/* Breadcrumb */}
       <Box sx={{ bgcolor: PURPLE, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -1274,104 +1275,120 @@ export default function PawnTransactionScreen({
       </Box>
 
       {/* ── Bottom action bar — sticky ── */}
-      <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-          <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-            Ticket Note
-          </Typography>
-          <TextField
-            fullWidth size="small"
-            placeholder="Add a note for this ticket (optional)"
-            value={ticketNote}
-            onChange={e => setTicketNote(e.target.value)}
-            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-          />
-        </Box>
-        <FormControlLabel
-          control={<Checkbox size="small" checked={showOnReceipt} onChange={e => setShowOnReceipt(e.target.checked)} />}
-          label={<Typography variant="caption">Show on receipt</Typography>}
-          sx={{ whiteSpace: 'nowrap', mr: 0 }}
-        />
-        <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-        <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
-          <span>
-            <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
-              disabled={customerValidationErrors.length > 0}
-              onClick={handleSaveAsQuote}
-              sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-              Save as Quote
+      <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10, pointerEvents: 'auto', userSelect: 'auto' }}>
+        {readOnly ? (
+          <>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 1.5, py: 0.5, bgcolor: '#f3e8ff', border: '1px solid #d8b4fe', borderRadius: 1.5 }}>
+              <MuiIcons.Visibility sx={{ fontSize: 14, color: '#7c3aed' }} />
+              <Typography variant="caption" color="#7c3aed" fontWeight={600}>View Only — this ticket is already completed</Typography>
+            </Box>
+            <Box sx={{ flex: 1 }} />
+            <Button size="small" variant="outlined" color="inherit" onClick={onClose}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Close
             </Button>
-          </span>
-        </Tooltip>
-        <Button size="small" variant="outlined" color="error" onClick={onClose}
-          sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-          Cancel
-        </Button>
-        <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
-          <span>
-            <Button size="small" variant="outlined"
-              disabled={pawnItems.length === 0 || customerValidationErrors.length > 0}
-              onClick={() => {
-                if (pawnItems.length === 0) {
-                  setSnackbar({ open: true, message: 'Add at least one item before adding to workspace', severity: 'warning' });
-                  return;
-                }
-                commitPawnTicketId();
-                onAddToWorkspace?.({
-                  ticketId,
-                  customer,
-                  pawnItems,
-                  totalPawnAmount,
-                  dueDate,
-                  costToRedeem: totalToRedeem,
-                  overduePawnCount,
-                });
-                onClose();
-              }}
-              sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-              Add to Workspace
+          </>
+        ) : (
+          <>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+              <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                Ticket Note
+              </Typography>
+              <TextField
+                fullWidth size="small"
+                placeholder="Add a note for this ticket (optional)"
+                value={ticketNote}
+                onChange={e => setTicketNote(e.target.value)}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+              />
+            </Box>
+            <FormControlLabel
+              control={<Checkbox size="small" checked={showOnReceipt} onChange={e => setShowOnReceipt(e.target.checked)} />}
+              label={<Typography variant="caption">Show on receipt</Typography>}
+              sx={{ whiteSpace: 'nowrap', mr: 0 }}
+            />
+            <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+            <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
+              <span>
+                <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
+                  disabled={customerValidationErrors.length > 0}
+                  onClick={handleSaveAsQuote}
+                  sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+                  Save as Quote
+                </Button>
+              </span>
+            </Tooltip>
+            <Button size="small" variant="outlined" color="error" onClick={onClose}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Cancel
             </Button>
-          </span>
-        </Tooltip>
-        <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
-          <span>
-        <Button size="small" variant="contained" endIcon={<MuiIcons.ArrowForward />}
-          disabled={pawnItems.length === 0 || customerValidationErrors.length > 0}
-          onClick={() => {
-            if (pawnItems.length === 0) return;
-            commitPawnTicketId();
-            const customerObj = customer ? {
-              id: customer.id,
-              first_name: customer.first_name,
-              last_name: customer.last_name,
-              name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-              email: customer.email,
-              phone: customer.phone,
-              tax_exempt: customer.tax_exempt
-            } : null;
-            const scale = autoTotalPawnAmount > 0 ? totalPawnAmount / autoTotalPawnAmount : 1;
-            const checkoutItems = pawnItems.map(item => ({
-              ...item,
-              transaction_type: 'pawn',
-              pawnTicketId: ticketId,
-              buyTicketId: ticketId,
-              price: item.amount * scale,
-              value: item.amount * scale,
-              customer: customerObj,
-              ticket_note: ticketNote || null,
-              show_on_receipt: showOnReceipt,
-            }));
-            sessionStorage.setItem('checkoutItems', JSON.stringify(checkoutItems));
-            if (customerObj) sessionStorage.setItem('selectedCustomer', JSON.stringify(customerObj));
-            navigate('/checkout', {
-              state: { items: checkoutItems, allCartItems: checkoutItems, customer: customerObj, from: 'cart' }
-            });
-          }}
-          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}>
-          Checkout Now
-        </Button>
-          </span>
-        </Tooltip>
+            <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
+              <span>
+                <Button size="small" variant="outlined"
+                  disabled={pawnItems.length === 0 || customerValidationErrors.length > 0}
+                  onClick={() => {
+                    if (pawnItems.length === 0) {
+                      setSnackbar({ open: true, message: 'Add at least one item before adding to workspace', severity: 'warning' });
+                      return;
+                    }
+                    commitPawnTicketId();
+                    onAddToWorkspace?.({
+                      ticketId,
+                      customer,
+                      pawnItems,
+                      totalPawnAmount,
+                      dueDate,
+                      costToRedeem: totalToRedeem,
+                      overduePawnCount,
+                    });
+                    onClose();
+                  }}
+                  sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+                  Add to Workspace
+                </Button>
+              </span>
+            </Tooltip>
+            <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
+              <span>
+                <Button size="small" variant="contained" endIcon={<MuiIcons.ArrowForward />}
+                  disabled={pawnItems.length === 0 || customerValidationErrors.length > 0}
+                  onClick={() => {
+                    if (pawnItems.length === 0) return;
+                    commitPawnTicketId();
+                    const customerObj = customer ? {
+                      id: customer.id,
+                      first_name: customer.first_name,
+                      last_name: customer.last_name,
+                      name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+                      email: customer.email,
+                      phone: customer.phone,
+                      tax_exempt: customer.tax_exempt
+                    } : null;
+                    const scale = autoTotalPawnAmount > 0 ? totalPawnAmount / autoTotalPawnAmount : 1;
+                    const checkoutItems = pawnItems.map(item => ({
+                      ...item,
+                      transaction_type: 'pawn',
+                      pawnTicketId: ticketId,
+                      buyTicketId: ticketId,
+                      price: item.amount * scale,
+                      value: item.amount * scale,
+                      customer: customerObj,
+                      ticket_note: ticketNote || null,
+                      show_on_receipt: showOnReceipt,
+                    }));
+                    sessionStorage.setItem('checkoutItems', JSON.stringify(checkoutItems));
+                    if (customerObj) sessionStorage.setItem('selectedCustomer', JSON.stringify(customerObj));
+                    navigate('/checkout', {
+                      state: { items: checkoutItems, allCartItems: checkoutItems, customer: customerObj, from: 'cart' }
+                    });
+                  }}
+                  sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}>
+                  Checkout Now
+                </Button>
+              </span>
+            </Tooltip>
+          </>
+        )}
       </Paper>
 
       {/* Camera dialog for item photos */}

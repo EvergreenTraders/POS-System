@@ -809,6 +809,10 @@ export default function ModernTransactions() {
   });
   const [openingTxId, setOpeningTxId]     = useState(null);
   const [restoredPawnData, setRestoredPawnData] = useState(null);
+  // True while the currently-open Buy/Sale/Pawn/Trade/Payment screen is
+  // showing a looked-up historical ticket (see HISTORICAL cards) rather than
+  // a real in-progress one — makes that screen non-interactive.
+  const [openReadOnly, setOpenReadOnly] = useState(false);
   const [existingSaleData, setExistingSaleData] = useState(() => {
     if (location.state?.returnToSale) {
       const raw = sessionStorage.getItem('pendingSaleReturn');
@@ -915,6 +919,13 @@ export default function ModernTransactions() {
   const [noCustomerWarning, setNoCustomerWarning] = useState('');
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
   const [parkSnackbar, setParkSnackbar]   = useState(null); // { severity, message }
+
+  // Top search bar: look up a completed transaction/ticket by any of its IDs
+  // (transaction_id, buy/sale/pawn/trade/payment ticket id) — each ticket
+  // found is added to the workspace as a HISTORICAL card (see
+  // adaptLookupGroupToCardTx) which opens the real screen read-only.
+  const [ticketLookupLoading, setTicketLookupLoading] = useState(false);
+  const [ticketLookupError, setTicketLookupError] = useState('');
 
   const customerIdRef = useRef(undefined);
   const pendingResumeWorkspaceRef = useRef(null); // workspace to load on next customer change (from Park resume)
@@ -1389,6 +1400,89 @@ export default function ModernTransactions() {
     if (!proceed) return;
     setCustomer(null);
     setCustomerStats(null);
+  };
+
+  // Adapts one /api/tickets/lookup "group" into the exact tx shape the real
+  // BuyTransactionCard/SaleTransactionCard/PawnTransactionCard/TradeTransactionCard/
+  // PaymentTransactionCard already expect, so a looked-up ticket renders with
+  // the same component — not a bespoke card. type stays 'HISTORICAL' so it's
+  // still invisible to summaryLines/netDue/checkoutItems (all of which only
+  // match the live BUY/SALE/PAWN/TRADE/PAYMENT types); historicalType carries
+  // the real ticket type so the render switch below picks the right card.
+  const adaptLookupGroupToCardTx = (g, allGroups, customer) => {
+    const absImg = (imgs) => (imgs || []).map(im => ({
+      ...im, url: im.url?.startsWith('/uploads') ? `${config.apiUrl.replace('/api', '')}${im.url}` : im.url,
+    }));
+    // Postgres NUMERIC columns come back from the lookup API as strings
+    // (e.g. "270.00"); the real screens call .toFixed() directly on item
+    // prices in a few places, which throws on a string — always hand them
+    // real numbers.
+    const num = (v) => parseFloat(v) || 0;
+    const base = { id: `${g.type}-${g.ticketId}-${Date.now()}`, type: 'HISTORICAL', historicalType: g.type, ticketId: g.ticketId, customer, groups: allGroups };
+
+    if (g.type === 'BUY') {
+      return { ...base, buyItems: g.items.map(it => ({ description: it.description, paid: num(it.price), images: absImg(it.images) })), totalPaid: num(g.totalAmount) };
+    }
+    if (g.type === 'SALE') {
+      return { ...base, saleItems: g.items.map(it => ({ name: it.description, price: num(it.price), quantity: it.quantity || 1, images: absImg(it.images) })), total: num(g.totalAmount) };
+    }
+    if (g.type === 'PAWN') {
+      return {
+        ...base,
+        pawnItems: g.items.map(it => ({ item: it.description, amount: num(it.price), images: absImg(it.images) })),
+        totalPawnAmount: num(g.totalAmount), costToRedeem: num(g.totalAmount),
+        dueDate: g.dueDate ? new Date(g.dueDate).toLocaleDateString() : '—',
+        overduePawnCount: 0,
+      };
+    }
+    if (g.type === 'TRADE') {
+      const buyGroup  = allGroups.find(x => x.type === 'BUY'  && x.ticketId === g.buyTicketId);
+      const saleGroup = allGroups.find(x => x.type === 'SALE' && x.ticketId === g.saleTicketId);
+      const tradeItems = (buyGroup?.items || []).map(it => ({ description: it.description, tradeAllowance: num(it.price), qty: 1, images: absImg(it.images) }));
+      const saleItems  = (saleGroup?.items || []).map(it => ({ name: it.description, price: num(it.price), quantity: it.quantity || 1, discount: 0, images: absImg(it.images) }));
+      return {
+        ...base,
+        tradeItems, saleItems,
+        totalTradeAllowance: num(buyGroup?.totalAmount), totalSaleAfterTax: num(saleGroup?.totalAmount),
+        netDueToCustomer: num(buyGroup?.totalAmount) - num(saleGroup?.totalAmount),
+        taxRate: 0, taxAmount: 0,
+      };
+    }
+    if (g.type === 'PAYMENT') {
+      return {
+        ...base,
+        selectedPayments: (g.pawnTicketIds || []).map(id => ({ type: 'pawn_extension', ref: id })),
+        pawnTotal: num(g.totalAmount), layawayTotal: 0, totalPayment: num(g.totalAmount),
+      };
+    }
+    return base;
+  };
+
+  // Top search bar: resolve any transaction/ticket ID and drop each ticket it
+  // contains into the workspace using the same cards as a live transaction —
+  // auto-selects the customer, but View/Void on these cards are rewired to a
+  // read-only summary and a plain local removal (see the render switch),
+  // never the real edit screen or a real void.
+  const handleTicketLookup = async (query) => {
+    setTicketLookupLoading(true);
+    setTicketLookupError('');
+    try {
+      const res = await axios.get(`${config.apiUrl}/tickets/lookup/${encodeURIComponent(query)}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setSearch('');
+      await handleSelectCustomer(res.data.customer);
+      const newCards = res.data.groups.map(g => adaptLookupGroupToCardTx(g, res.data.groups, res.data.customer));
+      setWorkspaceTransactions(prev => [...prev, ...newCards]);
+    } catch (err) {
+      setTicketLookupError(
+        err.response?.status === 404
+          ? `No transaction or ticket found for "${query}"`
+          : 'Failed to look up that ticket'
+      );
+    } finally {
+      setTicketLookupLoading(false);
+    }
   };
 
   const handleAddPawnToWorkspace = (pawnData) => {
@@ -2195,7 +2289,7 @@ export default function ModernTransactions() {
       <PawnTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => { setPawnOpen(false); setOpeningTxId(null); setRestoredPawnData(null); }}
+        onClose={() => { setPawnOpen(false); setOpeningTxId(null); setRestoredPawnData(null); setOpenReadOnly(false); }}
         onAddToWorkspace={(data) => { handleAddPawnToWorkspace(data); setRestoredPawnData(null); }}
         onConvertTo={handlePawnConvertTo}
         onRemoveFromWorkspace={(ticketId) => {
@@ -2203,10 +2297,12 @@ export default function ModernTransactions() {
           setPawnOpen(false);
           setOpeningTxId(null);
           setRestoredPawnData(null);
+          setOpenReadOnly(false);
         }}
         existingPawnData={existingPawnData}
         workspaceBuyTickets={workspaceBuyTickets}
         workspaceTradeTickets={workspaceTradeTickets}
+        readOnly={openReadOnly}
       />
     );
   }
@@ -2217,17 +2313,19 @@ export default function ModernTransactions() {
       <SaleTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => { setSaleOpen(false); setExistingSaleData(null); }}
+        onClose={() => { setSaleOpen(false); setExistingSaleData(null); setOpenReadOnly(false); }}
         onAddToWorkspace={handleAddSaleToWorkspace}
         onRemoveFromWorkspace={(ticketId) => {
           setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'SALE' && t.ticketId === ticketId)));
           setSaleOpen(false);
           setExistingSaleData(null);
+          setOpenReadOnly(false);
         }}
         onSelectCustomer={handleSelectCustomer}
         existingSaleData={existingSaleData}
         onConvertTo={handleSaleConvertTo}
         workspaceTradeTickets={workspaceTradeTickets}
+        readOnly={openReadOnly}
       />
     );
   }
@@ -2243,6 +2341,7 @@ export default function ModernTransactions() {
           setBuyOpen(false); setExistingBuyData(null);
           setBuyAutoScrap(false); setScrapPrefill(null);
           setBuyAutoUnique(false); setUniquePrefill(null);
+          setOpenReadOnly(false);
         }}
         onAddToWorkspace={handleAddBuyToWorkspace}
         onRemoveFromWorkspace={(ticketId) => {
@@ -2253,6 +2352,7 @@ export default function ModernTransactions() {
           setScrapPrefill(null);
           setBuyAutoUnique(false);
           setUniquePrefill(null);
+          setOpenReadOnly(false);
         }}
         onConvertTo={handleBuyConvertTo}
         existingBuyData={existingBuyData}
@@ -2262,6 +2362,7 @@ export default function ModernTransactions() {
         scrapPrefill={scrapPrefill}
         autoOpenUnique={buyAutoUnique}
         uniqueParsedValues={uniquePrefill}
+        readOnly={openReadOnly}
       />
     );
   }
@@ -2273,13 +2374,14 @@ export default function ModernTransactions() {
       <TradeTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => { setTradeOpen(false); setExistingTradeData(null); }}
+        onClose={() => { setTradeOpen(false); setExistingTradeData(null); setOpenReadOnly(false); }}
         onAddToWorkspace={handleAddTradeToWorkspace}
         onConvertToBuy={handleConvertTradeItemToBuy}
         onRemoveFromWorkspace={(ticketId) => {
           setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'TRADE' && t.ticketId === ticketId)));
           setTradeOpen(false);
           setExistingTradeData(null);
+          setOpenReadOnly(false);
         }}
         existingTradeData={existingTradeData}
         workspaceBuyTickets={workspaceBuyTickets}
@@ -2292,6 +2394,7 @@ export default function ModernTransactions() {
         }
         onSwitchToBuy={handleSwitchToBuy}
         onSwitchToSale={handleSwitchToSale}
+        readOnly={openReadOnly}
       />
     );
   }
@@ -2301,9 +2404,10 @@ export default function ModernTransactions() {
       <PaymentTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => { setPaymentOpen(false); setExistingPaymentData(null); }}
+        onClose={() => { setPaymentOpen(false); setExistingPaymentData(null); setOpenReadOnly(false); }}
         onAddToWorkspace={handleAddPaymentToWorkspace}
         existingPaymentData={existingPaymentData}
+        readOnly={openReadOnly}
       />
     );
   }
@@ -2331,7 +2435,12 @@ export default function ModernTransactions() {
           onKeyDown={e => {
             if (e.key !== 'Enter') return;
             const parsed = parseQuickScrapEntry(search);
-            if (!parsed.isBulkScrap && !parsed.isUniqueWithPrefill) return;
+            if (!parsed.isBulkScrap && !parsed.isUniqueWithPrefill) {
+              // Not a scrap shortcut — try resolving it as a transaction/ticket ID.
+              const q = search.trim();
+              if (q) handleTicketLookup(q);
+              return;
+            }
             if (!customer) { setNoCustomerWarning('buy ticket'); return; }
             if (parsed.isBulkScrap) {
               setSearch('');
@@ -2768,6 +2877,50 @@ export default function ModernTransactions() {
                         onOpen={() => { setExistingRedeemData(tx); setRedeemOpen(true); }}
                         onVoid={() => setVoidConfirm(tx)}
                       />
+                    ) : tx.type === 'HISTORICAL' ? (
+                      // Looked-up ticket — same card component as the live one of
+                      // that type. View opens the real transaction screen for that
+                      // type in read-only mode (see readOnly prop below); Void just
+                      // drops the card from the workspace instead of touching data.
+                      (() => {
+                        const removeHistorical = () => setWorkspaceTransactions(prev => prev.filter(t => t.id !== tx.id));
+                        const viewHistorical = () => {
+                          setOpenReadOnly(true);
+                          if (tx.historicalType === 'PAWN')  { setRestoredPawnData(tx); setOpeningTxId(null); setPawnOpen(true); }
+                          if (tx.historicalType === 'SALE')  { setExistingSaleData(tx); setSaleOpen(true); }
+                          if (tx.historicalType === 'BUY')   { setExistingBuyData(tx); setBuyOpen(true); }
+                          if (tx.historicalType === 'TRADE') { setExistingTradeData(tx); setTradeOpen(true); }
+                          if (tx.historicalType === 'PAYMENT') { setExistingPaymentData(tx); setPaymentOpen(true); }
+                        };
+                        if (tx.historicalType === 'PAWN') {
+                          return <PawnTransactionCard tx={tx}
+                            pawnIcon={transactionTypes.find(t => t.type === 'pawn')?.icon}
+                            pawnColor={transactionTypes.find(t => t.type === 'pawn')?.color}
+                            onOpen={viewHistorical} onVoid={removeHistorical} />;
+                        }
+                        if (tx.historicalType === 'SALE') {
+                          return <SaleTransactionCard tx={tx}
+                            saleIcon={transactionTypes.find(t => t.type === 'sale')?.icon}
+                            saleColor={transactionTypes.find(t => t.type === 'sale')?.color}
+                            onOpen={viewHistorical} onVoid={removeHistorical} />;
+                        }
+                        if (tx.historicalType === 'BUY') {
+                          return <BuyTransactionCard tx={tx}
+                            buyIcon={transactionTypes.find(t => t.type === 'buy')?.icon}
+                            buyColor={transactionTypes.find(t => t.type === 'buy')?.color}
+                            onOpen={viewHistorical} onVoid={removeHistorical} />;
+                        }
+                        if (tx.historicalType === 'TRADE') {
+                          return <TradeTransactionCard tx={tx}
+                            tradeIcon={transactionTypes.find(t => t.type === 'trade')?.icon}
+                            tradeColor={transactionTypes.find(t => t.type === 'trade')?.color}
+                            onOpen={viewHistorical} onVoid={removeHistorical} />;
+                        }
+                        if (tx.historicalType === 'PAYMENT') {
+                          return <PaymentTransactionCard tx={tx} onOpen={viewHistorical} onVoid={removeHistorical} />;
+                        }
+                        return null;
+                      })()
                     ) : null}
                   </Grid>
                 ))}
@@ -3059,6 +3212,13 @@ export default function ModernTransactions() {
           )}
         </DialogContent>
       </Dialog>
+
+      <Snackbar open={!!ticketLookupError} autoHideDuration={4000} onClose={() => setTicketLookupError('')}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert severity="warning" onClose={() => setTicketLookupError('')} sx={{ fontWeight: 600 }}>
+          {ticketLookupError}
+        </Alert>
+      </Snackbar>
 
       <Dialog open={!!voidConfirm} onClose={() => setVoidConfirm(null)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>Void Pawn Ticket?</DialogTitle>
