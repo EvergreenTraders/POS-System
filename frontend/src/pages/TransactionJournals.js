@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
   Box,
@@ -35,6 +36,7 @@ import config from '../config';
 import { injectPDFScript } from '../utils/printUtils';
 
 function TransactionJournals() {
+  const navigate = useNavigate();
   const { getCurrentDateObject } = useWorkingDate();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [transactionToDelete, setTransactionToDelete] = useState(null);
@@ -1918,6 +1920,16 @@ function TransactionJournals() {
                 variant="outlined"
               >
                 Edit Transaction
+              </Button>
+              <Button
+                onClick={() => navigate('/modern-transactions', {
+                  state: { openTicketLookup: selectedTransaction?.transaction_id },
+                })}
+                color="secondary"
+                variant="outlined"
+                disabled={!selectedTransaction?.transaction_id}
+              >
+                View Workspace
               </Button>
               <Button
                 onClick={handlePrintTransaction}

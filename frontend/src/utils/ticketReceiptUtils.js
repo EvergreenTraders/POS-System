@@ -217,3 +217,157 @@ export async function openBuySaleReceiptPDF(ticketId) {
   printWindow.document.write(pdfReadyHTML);
   printWindow.document.close();
 }
+
+/**
+ * Whole-transaction receipt — every ticket under one transaction_id, grouped
+ * by ticket, plus the payment breakdown. Same template as
+ * TransactionJournals.js's "Reprint" button (handlePrintTransaction), ported
+ * here as a self-fetching function. Used whenever more than one ticket is
+ * involved (e.g. a trade's buy-in + sale-out, or a bare transaction_id that
+ * covers several tickets) — a single ticket instead uses the type-specific
+ * receipt (openPawnReceiptPDF / openBuySaleReceiptPDF).
+ * @param {string} transactionId
+ * @returns {Promise<void>}
+ */
+export async function openTransactionReceiptPDF(transactionId) {
+  const token = localStorage.getItem('token');
+  const headers = { Authorization: `Bearer ${token}` };
+
+  const [itemsRes, paymentsRes, txListRes, bizRes, receiptConfigRes] = await Promise.all([
+    axios.get(`${config.apiUrl}/transactions/${transactionId}/items`, { headers }),
+    axios.get(`${config.apiUrl}/transactions/${transactionId}/payments`, { headers }),
+    axios.get(`${config.apiUrl}/transactions`, { headers }),
+    axios.get(`${config.apiUrl}/business-info`, { headers }),
+    axios.get(`${config.apiUrl}/receipt-config`, { headers }),
+  ]);
+
+  const transactionItems = itemsRes.data || [];
+  const paymentDetails = paymentsRes.data || { payments: [], total_paid: 0 };
+  const tx = (txListRes.data || []).find(t => t.transaction_id === transactionId) || {};
+  const biz = bizRes.data || {};
+  const receiptConfig = receiptConfigRes.data || {};
+
+  // Group items by their own ticket_id (the /items endpoint already tags
+  // each row with the ticket it belongs to — no separate buy/sale/pawn
+  // ticket cross-referencing needed).
+  const allTicketGroups = {};
+  transactionItems.forEach(item => {
+    const key = item.ticket_id || 'no-ticket';
+    if (!allTicketGroups[key]) allTicketGroups[key] = [];
+    allTicketGroups[key].push(item);
+  });
+
+  const formatTransactionTime = (dateString) => new Date(dateString).toLocaleString('en-US', {
+    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true,
+  });
+
+  const receiptHTML = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Transaction #${transactionId}</title>
+      <style>
+        body { font-family: 'Courier New', monospace; max-width: 400px; margin: 10px auto; padding: 15px; font-size: 12px; }
+        .header { position: relative; margin-bottom: 15px; border-bottom: 2px dashed #333; padding-bottom: 15px; min-height: 75px; }
+        .header-content { padding-right: 80px; }
+        .header h1 { margin: 0 0 5px 0; color: #333; font-size: 18px; font-weight: bold; }
+        .header p { margin: 3px 0; font-size: 11px; }
+        .header img { position: absolute; top: 0; right: 0; max-width: 70px; max-height: 70px; object-fit: contain; }
+        .transaction-info { margin-bottom: 15px; }
+        .info-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 11px; }
+        .info-label { font-weight: bold; }
+        .items-table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 11px; }
+        .items-table td { padding: 6px 4px; border-bottom: 1px dotted #ccc; }
+        .items-table tr:last-child td { border-bottom: none; }
+        .payment-section { border-top: 1px dashed #333; padding-top: 10px; margin-top: 10px; font-size: 11px; }
+        .payment-row { display: flex; justify-content: space-between; padding: 3px 0; }
+        .footer { margin-top: 20px; text-align: center; font-size: 10px; border-top: 1px dashed #333; padding-top: 10px; }
+        @media print { body { margin: 0; padding: 10px; } .no-print { display: none; } }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        ${biz.logo ? `<img src="data:${biz.logo_mimetype};base64,${biz.logo}" alt="Business Logo" />` : ''}
+        <div class="header-content">
+          <h1>${biz.business_name || 'POS Pro System'}</h1>
+          ${biz.address ? `<p>${biz.address}</p>` : ''}
+          ${biz.phone ? `<p>${biz.phone}</p>` : ''}
+        </div>
+      </div>
+
+      <div class="transaction-info">
+        <div class="info-row"><span class="info-label">Transaction #:</span><span>${transactionId}</span></div>
+        <div class="info-row"><span class="info-label">Date &amp; Time:</span><span>${formatTransactionTime(tx.created_at)}</span></div>
+        <div class="info-row"><span class="info-label">Customer:</span><span>${tx.customer_name || 'N/A'}</span></div>
+        ${tx.customer_phone ? `<div class="info-row"><span class="info-label">Phone:</span><span>${tx.customer_phone}</span></div>` : ''}
+        ${tx.customer_address ? `<div class="info-row"><span class="info-label">Address:</span><span>${tx.customer_address}</span></div>` : ''}
+        <div class="info-row"><span class="info-label">${tx.parked_by_employee_name ? 'Completed By:' : 'Employee:'}</span><span>${tx.employee_name || 'N/A'}</span></div>
+        ${tx.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Parked By:</span><span>${tx.parked_by_employee_name}</span></div>` : ''}
+      </div>
+
+      ${Object.entries(allTicketGroups).map(([groupTicketId, items]) => `
+        ${groupTicketId !== 'no-ticket' ? `
+          <div style="margin-top: 15px; padding: 5px; background-color: #e3f2fd; font-weight: bold; font-size: 11px;">
+            ${groupTicketId}
+          </div>
+        ` : ''}
+        <table class="items-table">
+          <tbody>
+            ${items.map((item, index) => {
+              const price = parseFloat(item.item_price || 0);
+              return `
+                <tr>
+                  <td>
+                    ${item.item_details?.description || `Item ${index + 1}`}
+                    ${item.description ? `<br><small style="color: #666;">${item.description}</small>` : ''}
+                  </td>
+                  <td style="text-align: right;">
+                    $${price.toFixed(2)}
+                    ${item.quantity > 1 ? `<br><small style="color: #666;">${item.quantity} @ $${(price / item.quantity).toFixed(2)} each</small>` : ''}
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      `).join('')}
+
+      ${paymentDetails.payments.length > 0 ? `
+        <div class="payment-section">
+          <h3 style="margin-top: 0;">Payment Methods:</h3>
+          ${paymentDetails.payments.map(payment => `
+            <div class="payment-row">
+              <span>${payment.payment_method.replace(/_/g, ' ').toUpperCase()}:</span>
+              <span>$${Math.abs(parseFloat(payment.amount)).toFixed(2)}</span>
+            </div>
+          `).join('')}
+          ${paymentDetails.change_given > 0 ? `
+            <div class="payment-row" style="border-top: 1px solid #ddd; margin-top: 10px; padding-top: 10px;">
+              <span>Change Given:</span>
+              <span>$${parseFloat(paymentDetails.change_given).toFixed(2)}</span>
+            </div>
+          ` : ''}
+          <div class="payment-row" style="font-weight: bold; border-top: 2px solid #333; margin-top: 10px; padding-top: 10px; font-size: 1.1em;">
+            <span>Total Paid:</span>
+            <span>$${parseFloat(paymentDetails.total_paid).toFixed(2)}</span>
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="footer">
+        <p style="white-space: pre-wrap;">${receiptConfig.transaction_receipt}</p>
+      </div>
+
+      <div class="no-print" style="text-align: center; margin-top: 30px;">
+        <button onclick="window.print()" style="padding: 10px 30px; font-size: 16px; cursor: pointer;">Print</button>
+        <button onclick="window.close()" style="padding: 10px 30px; font-size: 16px; margin-left: 10px; cursor: pointer;">Close</button>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const printWindow = window.open('', '_blank');
+  const pdfReadyHTML = injectPDFScript(receiptHTML, `transaction_${transactionId}`);
+  printWindow.document.write(pdfReadyHTML);
+  printWindow.document.close();
+}

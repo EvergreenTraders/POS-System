@@ -18,7 +18,7 @@ import PaymentTransactionScreen from './PaymentTransactionScreen';
 import RedeemTransactionScreen from './RedeemTransactionScreen';
 import { useWorkspaceGuard } from '../context/WorkspaceGuardContext';
 import { useAuth } from '../context/AuthContext';
-import { openBuySaleReceiptPDF } from '../utils/ticketReceiptUtils';
+import { openPawnReceiptPDF, openBuySaleReceiptPDF, openTransactionReceiptPDF } from '../utils/ticketReceiptUtils';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
@@ -938,6 +938,7 @@ export default function ModernTransactions() {
 
   const customerIdRef = useRef(undefined);
   const pendingResumeWorkspaceRef = useRef(null); // workspace to load on next customer change (from Park resume)
+  const handledTicketLookupRef = useRef(null); // last location.state.openTicketLookup value already handled — guards StrictMode's double effect-invoke
 
   // Customer state
   const [customer, setCustomer] = useState(null);
@@ -1082,6 +1083,17 @@ export default function ModernTransactions() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state?.resumedWorkspace]);
+
+  // "View Workspace" from the Transaction Details popup on the Transactions
+  // page — same lookup the search bar runs for a typed ticket/transaction ID,
+  // just triggered by navigation instead of Enter.
+  useEffect(() => {
+    const query = location.state?.openTicketLookup;
+    if (!query || handledTicketLookupRef.current === query) return;
+    handledTicketLookupRef.current = query;
+    handleTicketLookup(query);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state?.openTicketLookup]);
 
   // Restore pawn screen after returning from Checkout (user pressed Cancel/Back)
   useEffect(() => {
@@ -1512,15 +1524,29 @@ export default function ModernTransactions() {
     }
   };
 
-  // ACTIONS → Print, for a looked-up buy or sale ticket. Same receipt
-  // template/fields as the existing buy/sale receipt in TransactionJournals.js
-  // (handleBuyTicketClick) — buy tickets print as a buy receipt, sale tickets
-  // print as a sale receipt, kept inline here rather than as a separate module.
+  // ACTIONS → Print, for a looked-up ticket. One ticket in the workspace
+  // prints its own type-specific receipt (pawn/buy/sale); more than one
+  // (e.g. a trade's buy-in + sale-out, or a transaction_id covering several
+  // tickets) prints the whole-transaction receipt instead — same split
+  // TransactionJournals.js uses between a single ticket's receipt and its
+  // "Reprint" button.
   const handlePrintTicketReceipt = async () => {
-    const group = lastLookupGroups.find(g => g.type === 'BUY') || lastLookupGroups.find(g => g.type === 'SALE');
-    if (!group) return;
+    if (lastLookupGroups.length === 0) return;
     try {
-      await openBuySaleReceiptPDF(group.ticketId);
+      if (lastLookupGroups.length > 1) {
+        await openTransactionReceiptPDF(lastLookupGroups[0].transactionId);
+        return;
+      }
+      const [group] = lastLookupGroups;
+      if (group.type === 'PAWN') {
+        await openPawnReceiptPDF(group.ticketId);
+      } else if (group.type === 'BUY' || group.type === 'SALE') {
+        await openBuySaleReceiptPDF(group.ticketId);
+      } else {
+        // Lone trade/payment ticket — no dedicated single-ticket template,
+        // fall back to the whole-transaction receipt.
+        await openTransactionReceiptPDF(group.transactionId);
+      }
     } catch (err) {
       console.error('Failed to print ticket receipt:', err);
       setParkSnackbar({ severity: 'error', message: 'Failed to generate receipt' });
@@ -2622,10 +2648,6 @@ export default function ModernTransactions() {
                 <Divider sx={{ mb: 1 }} />
 
                 <Stack spacing={0.75}>
-                  <Button fullWidth variant="contained" size="small"
-                    sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, borderRadius: 2, fontSize: 11, fontWeight: 700 }}>
-                    Select Customer
-                  </Button>
                   <Button fullWidth variant="outlined" size="small"
                     startIcon={<MuiIcons.Edit fontSize="small" />}
                     onClick={() => navigate('/customer-editor', {
