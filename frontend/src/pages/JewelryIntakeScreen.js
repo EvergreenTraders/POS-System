@@ -531,9 +531,7 @@ export default function JewelryIntakeScreen({
   const [grossWeight,       setGrossWeight]       = useState('');
   const [spotPrice,         setSpotPrice]         = useState('');
   const [metalSpotPrices,   setMetalSpotPrices]   = useState({ CADXAU: 0, CADXAG: 0, CADXPT: 0, CADXPD: 0 });
-  const [isPerTransaction,  setIsPerTransaction]  = useState(false);
   const [lastFetched,       setLastFetched]       = useState(null);
-  const [cachedRates,       setCachedRates]       = useState({});
   const [estMetalValue,        setEstMetalValue]        = useState('');
   const [isMetalValueManual,   setIsMetalValueManual]   = useState(false);
   const [primaryGemDialogOpen, setPrimaryGemDialogOpen] = useState(false);
@@ -630,41 +628,19 @@ export default function JewelryIntakeScreen({
         console.error('Error fetching metal data:', err);
       }
     };
+    // Live spot price is fetched and cached server-side (once daily when the
+    // store opens, or on demand via "Refresh Spot") — always read whatever's
+    // currently stored in live_spot_prices on open, same table "Refresh
+    // Spot" writes to, so the screen shows the same number either way
+    // instead of only updating after an explicit manual refresh.
     const fetchSpotPricing = async () => {
       try {
-        const lpRes = await axios.get(`${config.apiUrl}/live_pricing`);
-        const lp = lpRes.data[0] || {};
-        setIsPerTransaction(lp.per_transaction);
-        if (lp.islivepricing) {
-          if (lp.per_transaction) {
-            const res = await axios.get(`${config.apiUrl}/live_spot_prices`);
-            const row = res.data[0] || {};
-            const mapped = { CADXAU: row.cadxau || 0, CADXAG: row.cadxag || 0, CADXPT: row.cadxpt || 0, CADXPD: row.cadxpd || 0 };
-            setMetalSpotPrices(mapped);
-            setSpotPrice(String(mapped.CADXAU || ''));
-            setLastFetched(row.last_fetched ? new Date(row.last_fetched) : new Date());
-          } else {
-            const apiRes = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=CAD&currencies=XPD,XAU,XAG,XPT');
-            const rates = apiRes.data.rates;
-            const mapped = {
-              CADXAU: (rates.CADXAU / 31).toFixed(2),
-              CADXAG: (rates.CADXAG / 31).toFixed(2),
-              CADXPT: (rates.CADXPT / 31).toFixed(2),
-              CADXPD: (rates.CADXPD / 31).toFixed(2),
-            };
-            setCachedRates(mapped);
-            setLastFetched(new Date());
-            setMetalSpotPrices(mapped);
-            setSpotPrice(String(mapped.CADXAU || ''));
-          }
-        } else {
-          const res = await axios.get(`${config.apiUrl}/spot_prices`);
-          const prices = {};
-          (res.data || []).forEach(item => { prices[item.precious_metal_type_id] = item.spot_price; });
-          const mapped = { CADXAU: prices[1] || 0, CADXAG: prices[3] || 0, CADXPT: prices[2] || 0, CADXPD: prices[4] || 0 };
-          setMetalSpotPrices(mapped);
-          setSpotPrice(String(mapped.CADXAU || ''));
-        }
+        const res = await axios.get(`${config.apiUrl}/live_spot_prices`);
+        const row = res.data[0] || {};
+        const mapped = { CADXAU: row.cadxau || 0, CADXAG: row.cadxag || 0, CADXPT: row.cadxpt || 0, CADXPD: row.cadxpd || 0 };
+        setMetalSpotPrices(mapped);
+        setSpotPrice(String(mapped.CADXAU || ''));
+        setLastFetched(row.last_fetched ? new Date(row.last_fetched) : null);
       } catch (err) {
         console.error('Error fetching spot prices:', err);
       }
@@ -730,38 +706,19 @@ export default function JewelryIntakeScreen({
     setIsMetalValueManual(false);
   }, [metal]);
 
+  // "Refresh Spot" — always fetches the latest price (server-side, via the
+  // external API) and saves it, regardless of when it was last fetched.
   const fetchLiveSpotPrice = useCallback(async (currentMetal) => {
     try {
-      if (isPerTransaction) {
-        const res = await axios.get(`${config.apiUrl}/live_spot_prices`);
-        const row = res.data[0] || {};
-        const mapped = { CADXAU: row.cadxau, CADXAG: row.cadxag, CADXPT: row.cadxpt, CADXPD: row.cadxpd };
-        setLastFetched(row.last_fetched ? new Date(row.last_fetched) : new Date());
-        applyRates(mapped, currentMetal);
-      } else {
-        const now = new Date();
-        const hoursDiff = Math.abs(now - lastFetched) / 36e5;
-        if (hoursDiff >= 24) {
-          const apiRes = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=CAD&currencies=XPD,XAU,XAG,XPT');
-          const rates = apiRes.data.rates;
-          const mapped = {
-            CADXAU: (rates.CADXAU / 31).toFixed(2),
-            CADXAG: (rates.CADXAG / 31).toFixed(2),
-            CADXPT: (rates.CADXPT / 31).toFixed(2),
-            CADXPD: (rates.CADXPD / 31).toFixed(2),
-          };
-          setCachedRates(mapped);
-          setLastFetched(now);
-          await axios.put(`${config.apiUrl}/live_spot_prices`, { ...mapped, last_fetched: now.toISOString() });
-          applyRates(mapped, currentMetal);
-        } else {
-          applyRates(cachedRates, currentMetal);
-        }
-      }
+      const res = await axios.post(`${config.apiUrl}/live_spot_prices/refresh`);
+      const row = res.data || {};
+      const mapped = { CADXAU: row.CADXAU, CADXAG: row.CADXAG, CADXPT: row.CADXPT, CADXPD: row.CADXPD };
+      setLastFetched(row.last_fetched ? new Date(row.last_fetched) : new Date());
+      applyRates(mapped, currentMetal);
     } catch (err) {
-      console.error('Error fetching live spot prices:', err);
+      console.error('Error refreshing live spot prices:', err);
     }
-  }, [isPerTransaction, lastFetched, cachedRates, applyRates]);
+  }, [applyRates]);
 
   const handlePurityChange = (selectedId) => {
     const found = metalPurities.find(p => String(p.id) === String(selectedId));
@@ -2179,7 +2136,7 @@ export default function JewelryIntakeScreen({
                 <TableCell colSpan={10} sx={{ borderBottom: 'none', pt: 0.5 }}>
                   <Button size="small" startIcon={<MuiIcons.Add sx={{ fontSize: 14 }} />} onClick={addScrapCustomRow}
                     sx={{ textTransform: 'none', fontSize: 12, color: GREEN }}>
-                    Add Custom Row
+                    Add Metal/ Purity
                   </Button>
                 </TableCell>
               </TableRow>}

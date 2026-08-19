@@ -5983,6 +5983,43 @@ app.put('/api/live_pricing', async (req, res) => {
   }
 });
 
+// Fetches current metal prices from the external API and saves them to
+// live_spot_prices with a fresh last_fetched timestamp. Single source of
+// truth for spot price data — the frontend never calls the external API
+// directly anymore, it only reads/triggers this. Used both by the manual
+// "Refresh Spot" button (POST /api/live_spot_prices/refresh) and by the
+// once-daily auto-refresh on store open.
+async function refreshLiveSpotPrices() {
+  const apiRes = await fetch('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=CAD&currencies=XPD,XAU,XAG,XPT');
+  if (!apiRes.ok) throw new Error(`metalpriceapi request failed: ${apiRes.status}`);
+  const data = await apiRes.json();
+  const rates = data.rates;
+  const mapped = {
+    CADXAU: (rates.CADXAU / 31).toFixed(2),
+    CADXAG: (rates.CADXAG / 31).toFixed(2),
+    CADXPT: (rates.CADXPT / 31).toFixed(2),
+    CADXPD: (rates.CADXPD / 31).toFixed(2),
+  };
+  const lastFetched = new Date();
+  await pool.query(
+    'UPDATE live_spot_prices SET CADXAG = $1, CADXAU = $2, CADXPD = $3, CADXPT = $4, last_fetched = $5',
+    [mapped.CADXAG, mapped.CADXAU, mapped.CADXPD, mapped.CADXPT, lastFetched]
+  );
+  return { ...mapped, last_fetched: lastFetched };
+}
+
+// POST /api/live_spot_prices/refresh — manual "Refresh Spot" trigger.
+// Always hits the external API, regardless of when it was last fetched.
+app.post('/api/live_spot_prices/refresh', async (req, res) => {
+  try {
+    const result = await refreshLiveSpotPrices();
+    res.json(result);
+  } catch (error) {
+    console.error('Error refreshing live spot prices:', error);
+    res.status(500).json({ error: 'Failed to refresh live spot prices' });
+  }
+});
+
 // Live Spot Prices API Endpoint
 app.get('/api/live_spot_prices', async (req, res) => {
   try {
@@ -15342,6 +15379,20 @@ app.post('/api/store-sessions/open', async (req, res) => {
 
     // Invalidate store status cache
     storeStatusCache = { isOpen: null, lastChecked: 0 };
+
+    // Daily spot price refresh: if today's price hasn't been fetched yet,
+    // fetch it now that the store is open. Best-effort — a pricing API
+    // hiccup should never block the store from opening.
+    try {
+      const lastRow = (await pool.query('SELECT last_fetched FROM live_spot_prices LIMIT 1')).rows[0];
+      const alreadyFetchedToday = lastRow?.last_fetched &&
+        new Date(lastRow.last_fetched).toDateString() === new Date().toDateString();
+      if (!alreadyFetchedToday) {
+        await refreshLiveSpotPrices();
+      }
+    } catch (spotErr) {
+      console.error('Error auto-refreshing spot prices on store open:', spotErr);
+    }
 
     res.status(201).json({
       message: 'Store opened successfully',
