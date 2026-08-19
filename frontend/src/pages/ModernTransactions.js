@@ -36,17 +36,18 @@ function bufferToDataUrl(bufferObj) {
 // ── "scrap" search-bar shortcut parsing ──────────────────────────────────────
 // Recognizes a weight + purity (in any order, e.g. "5.6g 14k" or "14k 5.6g")
 // typed into the transactions search bar. rowKey matches one of
-// JewelryIntakeScreen's SCRAP_FIXED_ROWS keys (one row per metal); the actual
-// purity option within that row is resolved there once its dropdown loads.
+// JewelryIntakeScreen's SCRAP_FIXED_ROWS keys — one row per common
+// karat/fineness, purity baked in. Platinum/palladium and uncommon purities
+// have no fixed row (Custom Rows only), so they resolve to no rowKey and the
+// text falls through to the unique-item-prefill path instead of bulk scrap.
 const SCRAP_PURITY_BY_DECIMAL = [
-  { rowKey: 'gold',   value: 0.417, metal: 'Gold',   karat: 10 },
-  { rowKey: 'gold',   value: 0.585, metal: 'Gold',   karat: 14 },
-  { rowKey: 'gold',   value: 0.750, metal: 'Gold',   karat: 18 },
-  { rowKey: 'gold',   value: 0.917, metal: 'Gold',   karat: 22 },
-  { rowKey: 'silver', value: 0.925, metal: 'Silver', karat: null },
+  { rowKey: 'gold10k',   value: 0.417, metal: 'Gold',   karat: 10 },
+  { rowKey: 'gold14k',   value: 0.585, metal: 'Gold',   karat: 14 },
+  { rowKey: 'gold18k',   value: 0.750, metal: 'Gold',   karat: 18 },
+  { rowKey: 'gold22k',   value: 0.917, metal: 'Gold',   karat: 22 },
+  { rowKey: 'silver925', value: 0.925, metal: 'Silver', karat: null },
 ];
 const SCRAP_METAL_WORDS = { gold: 'Gold', silver: 'Silver', platinum: 'Platinum', palladium: 'Palladium' };
-const SCRAP_ROW_KEY_BY_METAL = { Gold: 'gold', Silver: 'silver', Platinum: 'platinum', Palladium: 'palladium' };
 
 function parseQuickScrapEntry(text) {
   const tokens = text.trim().split(/\s+/).filter(Boolean);
@@ -90,7 +91,12 @@ function parseQuickScrapEntry(text) {
     leftover.push(tok);
   }
 
-  const rowKey = metal ? SCRAP_ROW_KEY_BY_METAL[metal] : null;
+  // rowKey only resolves for a known common karat/fineness with a fixed row —
+  // platinum, palladium, and uncommon purities have none.
+  const rowMatch = purityValue != null
+    ? SCRAP_PURITY_BY_DECIMAL.find(c => Math.abs(c.value - purityValue) <= 0.01 && (!metal || c.metal === metal))
+    : null;
+  const rowKey = rowMatch?.rowKey ?? null;
   const hasWeightAndPurity = weightG != null && purityValue != null;
   const isBulkScrap = hasScrapWord || (hasWeightAndPurity && leftover.length === 0);
   const isUniqueWithPrefill = !isBulkScrap && hasWeightAndPurity;
