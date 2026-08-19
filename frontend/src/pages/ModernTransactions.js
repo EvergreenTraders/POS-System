@@ -204,7 +204,7 @@ function PawnTransactionCard({ tx, pawnIcon, pawnColor, onOpen, onVoid }) {
   const PawnIconComponent = pawnIcon ? (MuiIcons[pawnIcon] ?? MuiIcons.Casino) : MuiIcons.Casino;
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: accent }}>
       {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -312,7 +312,7 @@ function SaleTransactionCard({ tx, saleIcon, saleColor, onOpen, onVoid }) {
   const moreCount = itemCount - SHOW;
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: accent }}>
       {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -434,7 +434,7 @@ function PaymentTransactionCard({ tx, onOpen, onVoid }) {
   const layawayCount = (tx.selectedPayments || []).filter(p => p.type === 'layaway').length;
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: PAYMENT_AMBER }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${PAYMENT_AMBER}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <MuiIcons.Payment sx={{ fontSize: 20, color: PAYMENT_AMBER }} />
@@ -501,7 +501,7 @@ function RedeemTransactionCard({ tx, redeemIcon, redeemColor, onOpen, onVoid }) 
   const RedeemIconComponent = redeemIcon ? (MuiIcons[redeemIcon] ?? MuiIcons.Redeem) : MuiIcons.Redeem;
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: accent }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <RedeemIconComponent sx={{ fontSize: 20, color: accent }} />
@@ -613,7 +613,7 @@ function BuyTransactionCard({ tx, buyIcon, buyColor, onOpen, onVoid }) {
   const totalPaid = tx.totalPaid || items.reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: accent }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <BuyIconComponent sx={{ fontSize: 20, color: accent }} />
@@ -691,7 +691,7 @@ function TradeTransactionCard({ tx, tradeIcon, tradeColor, onOpen, onVoid }) {
   const taxAmt     = Number(tx.taxAmount || 0);
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: accent }}>
 
       {/* ── Header ── */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
