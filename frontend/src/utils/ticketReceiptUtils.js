@@ -177,7 +177,7 @@ export async function openBuySaleReceiptPDF(ticketId) {
         ${tx.customer_phone ? `<div class="info-row"><span class="info-label">Phone:</span><span>${tx.customer_phone}</span></div>` : ''}
         ${tx.customer_address ? `<div class="info-row"><span class="info-label">Address:</span><span>${tx.customer_address}</span></div>` : ''}
         <div class="info-row"><span class="info-label">${tx.parked_by_employee_name ? 'Completed By:' : 'Employee:'}</span><span>${tx.employee_name || 'N/A'}</span></div>
-        ${tx.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Parked By:</span><span>${tx.parked_by_employee_name}</span></div>` : ''}
+        ${tx.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Written By:</span><span>${tx.parked_by_employee_name}</span></div>` : ''}
       </div>
       <table class="items-table">
         <thead><tr><th>Item Description</th><th style="text-align: right;">Amount</th></tr></thead>
@@ -302,7 +302,7 @@ export async function openTransactionReceiptPDF(transactionId) {
         ${tx.customer_phone ? `<div class="info-row"><span class="info-label">Phone:</span><span>${tx.customer_phone}</span></div>` : ''}
         ${tx.customer_address ? `<div class="info-row"><span class="info-label">Address:</span><span>${tx.customer_address}</span></div>` : ''}
         <div class="info-row"><span class="info-label">${tx.parked_by_employee_name ? 'Completed By:' : 'Employee:'}</span><span>${tx.employee_name || 'N/A'}</span></div>
-        ${tx.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Parked By:</span><span>${tx.parked_by_employee_name}</span></div>` : ''}
+        ${tx.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Written By:</span><span>${tx.parked_by_employee_name}</span></div>` : ''}
       </div>
 
       ${Object.entries(allTicketGroups).map(([groupTicketId, items]) => `

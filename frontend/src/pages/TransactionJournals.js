@@ -347,7 +347,7 @@ function TransactionJournals() {
         <div class="info-row"><span class="info-label">Customer:</span><span>${selectedTransaction?.customer_name || 'N/A'}</span></div>
         ${selectedTransaction?.customer_phone ? `<div class="info-row"><span class="info-label">Phone:</span><span>${selectedTransaction.customer_phone}</span></div>` : ''}
         <div class="info-row"><span class="info-label">${selectedTransaction?.parked_by_employee_name ? 'Completed By:' : 'Employee:'}</span><span>${selectedTransaction?.employee_name || 'N/A'}</span></div>
-        ${selectedTransaction?.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Parked By:</span><span>${selectedTransaction.parked_by_employee_name}</span></div>` : ''}
+        ${selectedTransaction?.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Written By:</span><span>${selectedTransaction.parked_by_employee_name}</span></div>` : ''}
       </div>
       ${tradeInItems.length > 0 ? `
       <div class="section-title">TRADE-IN ITEMS</div>
@@ -455,7 +455,7 @@ function TransactionJournals() {
         <div class="info-row"><span class="info-label">Customer:</span><span>${selectedTransaction?.customer_name || 'N/A'}</span></div>
         ${selectedTransaction?.customer_phone ? `<div class="info-row"><span class="info-label">Phone:</span><span>${selectedTransaction.customer_phone}</span></div>` : ''}
         <div class="info-row"><span class="info-label">${selectedTransaction?.parked_by_employee_name ? 'Completed By:' : 'Employee:'}</span><span>${selectedTransaction?.employee_name || 'N/A'}</span></div>
-        ${selectedTransaction?.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Parked By:</span><span>${selectedTransaction.parked_by_employee_name}</span></div>` : ''}
+        ${selectedTransaction?.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Written By:</span><span>${selectedTransaction.parked_by_employee_name}</span></div>` : ''}
       </div>
 
       <div class="section-title">Pawn Extensions</div>
@@ -722,7 +722,7 @@ function TransactionJournals() {
             </div>
             ${selectedTransaction?.parked_by_employee_name ? `
             <div class="info-row">
-              <span class="info-label">Parked By:</span>
+              <span class="info-label">Written By:</span>
               <span>${selectedTransaction.parked_by_employee_name}</span>
             </div>` : ''}
           </div>
@@ -1018,7 +1018,7 @@ function TransactionJournals() {
           </div>
           ${selectedTransaction.parked_by_employee_name ? `
           <div class="info-row">
-            <span class="info-label">Parked By:</span>
+            <span class="info-label">Written By:</span>
             <span>${selectedTransaction.parked_by_employee_name}</span>
           </div>` : ''}
         </div>
@@ -1563,7 +1563,7 @@ function TransactionJournals() {
                     </TableRow>
                     {selectedTransaction.parked_by_employee_name && (
                       <TableRow>
-                        <TableCell variant="head">Parked By</TableCell>
+                        <TableCell variant="head">Written By</TableCell>
                         <TableCell>{selectedTransaction.parked_by_employee_name}</TableCell>
                       </TableRow>
                     )}
