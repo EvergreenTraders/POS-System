@@ -12,6 +12,7 @@ import {
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
+import HardgoodsIntakeScreen from './HardgoodsIntakeScreen';
 import RePawnSelector from './RePawnSelector';
 import RePawnIntakeScreen from './RePawnIntakeScreen';
 import { useAuth } from '../context/AuthContext';
@@ -149,6 +150,8 @@ export default function PawnTransactionScreen({
   const [intakeEntry, setIntakeEntry]     = useState('');
   const [parsedValues,    setParsedValues]    = useState(null);
   const [editingItem,     setEditingItem]     = useState(null);
+  const [hardgoodsIntakeOpen, setHardgoodsIntakeOpen] = useState(false);
+  const [editingHardgoodsItem, setEditingHardgoodsItem] = useState(null);
   const [photoTargetId,    setPhotoTargetId]    = useState(null);
   const [convertAnchor,    setConvertAnchor]    = useState(null);
   const [convertRow,       setConvertRow]       = useState(null);
@@ -593,6 +596,12 @@ export default function PawnTransactionScreen({
   const openIntake = () => {
     const text  = itemSearch.trim();
     const parts = text.toUpperCase().split(/\s+/);
+    if (parts[0] === 'H') {
+      setEditingHardgoodsItem(null);
+      setIntakeEntry(text);
+      setHardgoodsIntakeOpen(true);
+      return;
+    }
     if (parts[0] === 'J' && parts.length >= 2) {
       setParsedValues(parsePawnDescription(parts.slice(1), categoryCodeMap, colorCodeMap, metalTypeCodeMap));
     } else {
@@ -606,6 +615,38 @@ export default function PawnTransactionScreen({
     setIntakeOpen(false);
     setEditingItem(null);
     if (dest === 'transactions') onClose();
+  };
+
+  const handleHardgoodsIntakeBack = (dest) => {
+    setHardgoodsIntakeOpen(false);
+    setEditingHardgoodsItem(null);
+    if (dest === 'transactions') onClose();
+  };
+
+  const handleHardgoodsIntakeSave = (item) => {
+    setPawnItems(prev => {
+      const seq = prev.length + 1;
+      return [...prev, { ...item, part_number: makePartNumber(seq) }];
+    });
+    setItemSearch('');
+    setHardgoodsIntakeOpen(false);
+  };
+
+  const handleHardgoodsIntakeSaveAndAdd = (item) => {
+    setPawnItems(prev => {
+      const seq = prev.length + 1;
+      return [...prev, { ...item, part_number: makePartNumber(seq) }];
+    });
+    setItemSearch('');
+    setIntakeEntry('');
+    setEditingHardgoodsItem(null);
+    setHardgoodsIntakeOpen(true);
+  };
+
+  const handleHardgoodsIntakeUpdate = (item) => {
+    setPawnItems(prev => prev.map(i => i.id === item.id ? { ...item, part_number: i.part_number } : i));
+    setEditingHardgoodsItem(null);
+    setHardgoodsIntakeOpen(false);
   };
 
   const makePartNumber = (seqNum) => {
@@ -734,6 +775,22 @@ export default function PawnTransactionScreen({
         onSaveItem={isEditMode ? handleRePawnUpdate : handleRePawnSave}
         onSaveAndAddAnother={handleRePawnSaveAndAdd}
         backLabel={isEditMode ? 'Back to Pawn Ticket' : 'Back to Re-Pawn List'}
+      />
+    );
+  }
+
+  if (hardgoodsIntakeOpen) {
+    return (
+      <HardgoodsIntakeScreen
+        customer={customer}
+        ticketId={ticketId}
+        ticketLabel="Pawn Ticket"
+        initialEntry={intakeEntry}
+        editItem={editingHardgoodsItem}
+        onBack={handleHardgoodsIntakeBack}
+        onSaveItem={handleHardgoodsIntakeSave}
+        onSaveAndAddAnother={handleHardgoodsIntakeSaveAndAdd}
+        onUpdateItem={handleHardgoodsIntakeUpdate}
       />
     );
   }
@@ -1063,6 +1120,9 @@ export default function PawnTransactionScreen({
                         setRePawnSelectedItem(row);
                         setRePawnSelectorOpen(true);
                         setRePawnEditItemId(row.id);
+                      } else if (row.sourceEstimator === 'hardgoods') {
+                        setEditingHardgoodsItem(row);
+                        setHardgoodsIntakeOpen(true);
                       } else {
                         setEditingItem(row);
                         setIntakeOpen(true);

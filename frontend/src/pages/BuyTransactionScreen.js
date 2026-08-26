@@ -14,6 +14,7 @@ import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
+import HardgoodsIntakeScreen from './HardgoodsIntakeScreen';
 
 const BUY_BLUE  = '#0284c7';
 const BUY_DARK  = '#0369a1';
@@ -135,6 +136,8 @@ export default function BuyTransactionScreen({
   const [intakeEntry, setIntakeEntry]   = useState('');
   const [parsedValues, setParsedValues] = useState(null);
   const [editingIntakeItem, setEditingIntakeItem] = useState(null);
+  const [hardgoodsIntakeOpen, setHardgoodsIntakeOpen] = useState(false);
+  const [editingHardgoodsItem, setEditingHardgoodsItem] = useState(null);
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
   const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
@@ -347,6 +350,11 @@ export default function BuyTransactionScreen({
       setIntakeOpen(true);
       return;
     }
+    if (item.sourceEstimator === 'hardgoods' && item.jewelryData) {
+      setEditingHardgoodsItem({ ...item.jewelryData, _lineId: item._lineId, images: item.images?.length ? item.images : (item.jewelryData.images || []) });
+      setHardgoodsIntakeOpen(true);
+      return;
+    }
     setEditingItemId(item._lineId);
     setEditFields({ category_id: item.category_id || '', description: item.description, serial_number: item.serial_number || '', qty: item.qty, paid: item.paid });
   };
@@ -362,6 +370,12 @@ export default function BuyTransactionScreen({
   const openIntake = () => {
     const text  = scanInput.trim();
     const parts = text.toUpperCase().split(/\s+/);
+    if (parts[0] === 'H') {
+      setEditingHardgoodsItem(null);
+      setIntakeEntry(text);
+      setHardgoodsIntakeOpen(true);
+      return;
+    }
     if (parts[0] === 'J' && parts.length >= 2) {
       setParsedValues(parseItemDescription(parts.slice(1), categoryCodeMap, colorCodeMap, metalTypeCodeMap));
     } else {
@@ -393,9 +407,57 @@ export default function BuyTransactionScreen({
     };
   };
 
+  // jewelryData is reused (rather than a separate hardgoodsData key) so this row
+  // flows through the existing cartItems-building / checkout hardgoods-creation
+  // code unchanged — that code spreads `item.jewelryData` regardless of source.
+  const hardgoodsItemToBuyItem = (item, seq) => {
+    const totalPaid = parseFloat(item.buy_price) || parseFloat(item.paid_amount) || 0;
+    return {
+      _lineId: Date.now() + Math.random(),
+      part_no: `${ticketId}-${String(seq).padStart(2, '0')}`,
+      category_id: item.category_id || '',
+      category_name: item.category_name || item.category || '',
+      description: item.item || item.short_desc || '',
+      serial_number: item.serial_number || item.serial || '',
+      qty: 1,
+      paid: totalPaid,
+      images: item.images || [],
+      sourceEstimator: 'hardgoods',
+      jewelryData: item,
+    };
+  };
+
   const handleIntakeBack = () => {
     setIntakeOpen(false);
     setEditingIntakeItem(null);
+  };
+
+  const handleHardgoodsIntakeBack = () => {
+    setHardgoodsIntakeOpen(false);
+    setEditingHardgoodsItem(null);
+  };
+
+  const handleHardgoodsIntakeSave = (item) => {
+    setBuyItems(prev => [...prev, hardgoodsItemToBuyItem(item, prev.length + 1)]);
+    setScanInput('');
+    setHardgoodsIntakeOpen(false);
+  };
+
+  const handleHardgoodsIntakeSaveAndAdd = (item) => {
+    setBuyItems(prev => [...prev, hardgoodsItemToBuyItem(item, prev.length + 1)]);
+    setScanInput('');
+    setIntakeEntry('');
+    setEditingHardgoodsItem(null);
+    setHardgoodsIntakeOpen(true);
+  };
+
+  const handleHardgoodsIntakeUpdate = (item) => {
+    setBuyItems(prev => prev.map(i =>
+      i._lineId === editingHardgoodsItem?._lineId
+        ? { ...hardgoodsItemToBuyItem(item, 0), _lineId: i._lineId, part_no: i.part_no, paid: i.paid }
+        : i));
+    setEditingHardgoodsItem(null);
+    setHardgoodsIntakeOpen(false);
   };
 
   const handleIntakeSave = (item) => {
@@ -613,6 +675,22 @@ export default function BuyTransactionScreen({
   };
 
   const HEADER_COLS = '110px 52px 120px 1fr 110px 50px 95px 100px';
+
+  if (hardgoodsIntakeOpen) {
+    return (
+      <HardgoodsIntakeScreen
+        customer={customer}
+        ticketId={ticketId}
+        ticketLabel="Buy Ticket"
+        initialEntry={intakeEntry}
+        editItem={editingHardgoodsItem}
+        onBack={handleHardgoodsIntakeBack}
+        onSaveItem={handleHardgoodsIntakeSave}
+        onSaveAndAddAnother={handleHardgoodsIntakeSaveAndAdd}
+        onUpdateItem={handleHardgoodsIntakeUpdate}
+      />
+    );
+  }
 
   if (intakeOpen) {
     return (
