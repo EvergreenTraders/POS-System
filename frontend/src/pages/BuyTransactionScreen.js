@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
 import HardgoodsIntakeScreen from './HardgoodsIntakeScreen';
+import FindMatchingItemScreen from './FindMatchingItemScreen';
 
 const BUY_BLUE  = '#0284c7';
 const BUY_DARK  = '#0369a1';
@@ -138,6 +139,9 @@ export default function BuyTransactionScreen({
   const [editingIntakeItem, setEditingIntakeItem] = useState(null);
   const [hardgoodsIntakeOpen, setHardgoodsIntakeOpen] = useState(false);
   const [editingHardgoodsItem, setEditingHardgoodsItem] = useState(null);
+  const [hardgoodsMatchPrefill, setHardgoodsMatchPrefill] = useState(null);
+  const [findMatchOpen, setFindMatchOpen] = useState(false);
+  const [findMatchQuery, setFindMatchQuery] = useState('');
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
   const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
@@ -371,9 +375,11 @@ export default function BuyTransactionScreen({
     const text  = scanInput.trim();
     const parts = text.toUpperCase().split(/\s+/);
     if (parts[0] === 'H') {
+      const rest = parts.slice(1).join(' ') || text;
       setEditingHardgoodsItem(null);
-      setIntakeEntry(text);
-      setHardgoodsIntakeOpen(true);
+      setIntakeEntry(rest);
+      setFindMatchQuery(rest);
+      setFindMatchOpen(true);
       return;
     }
     if (parts[0] === 'J' && parts.length >= 2) {
@@ -435,12 +441,14 @@ export default function BuyTransactionScreen({
   const handleHardgoodsIntakeBack = () => {
     setHardgoodsIntakeOpen(false);
     setEditingHardgoodsItem(null);
+    setHardgoodsMatchPrefill(null);
   };
 
   const handleHardgoodsIntakeSave = (item) => {
     setBuyItems(prev => [...prev, hardgoodsItemToBuyItem(item, prev.length + 1)]);
     setScanInput('');
     setHardgoodsIntakeOpen(false);
+    setHardgoodsMatchPrefill(null);
   };
 
   const handleHardgoodsIntakeSaveAndAdd = (item) => {
@@ -448,6 +456,7 @@ export default function BuyTransactionScreen({
     setScanInput('');
     setIntakeEntry('');
     setEditingHardgoodsItem(null);
+    setHardgoodsMatchPrefill(null);
     setHardgoodsIntakeOpen(true);
   };
 
@@ -458,6 +467,30 @@ export default function BuyTransactionScreen({
         : i));
     setEditingHardgoodsItem(null);
     setHardgoodsIntakeOpen(false);
+  };
+
+  // ── Find Matching Item (search/match step ahead of Hardgoods intake) ──────
+  const handleFindMatchClose = () => setFindMatchOpen(false);
+
+  const handleFindMatchSelect = (match) => {
+    setHardgoodsMatchPrefill(match);
+    setEditingHardgoodsItem(null);
+    setFindMatchOpen(false);
+    setHardgoodsIntakeOpen(true);
+  };
+
+  const handleFindMatchAddNonCatalog = (query) => {
+    setHardgoodsMatchPrefill(null);
+    setEditingHardgoodsItem(null);
+    setIntakeEntry(query || findMatchQuery);
+    setFindMatchOpen(false);
+    setHardgoodsIntakeOpen(true);
+  };
+
+  const handleChangeHardgoodsMatch = (query) => {
+    setHardgoodsIntakeOpen(false);
+    setFindMatchQuery(query || '');
+    setFindMatchOpen(true);
   };
 
   const handleIntakeSave = (item) => {
@@ -684,6 +717,8 @@ export default function BuyTransactionScreen({
         ticketLabel="Buy Ticket"
         initialEntry={intakeEntry}
         editItem={editingHardgoodsItem}
+        matchPrefill={hardgoodsMatchPrefill}
+        onChangeMatch={editingHardgoodsItem ? undefined : handleChangeHardgoodsMatch}
         onBack={handleHardgoodsIntakeBack}
         onSaveItem={handleHardgoodsIntakeSave}
         onSaveAndAddAnother={handleHardgoodsIntakeSaveAndAdd}
@@ -713,6 +748,14 @@ export default function BuyTransactionScreen({
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', ...(readOnly && { pointerEvents: 'none', userSelect: 'none' }) }}>
+
+      <FindMatchingItemScreen
+        open={findMatchOpen}
+        initialQuery={findMatchQuery}
+        onClose={handleFindMatchClose}
+        onSelect={handleFindMatchSelect}
+        onAddNonCatalog={handleFindMatchAddNonCatalog}
+      />
 
       {/* Breadcrumb */}
       <Box sx={{ bgcolor: BUY_BLUE, color: '#fff', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>

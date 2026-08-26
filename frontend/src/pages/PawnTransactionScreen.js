@@ -13,6 +13,7 @@ import {
 import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
 import HardgoodsIntakeScreen from './HardgoodsIntakeScreen';
+import FindMatchingItemScreen from './FindMatchingItemScreen';
 import RePawnSelector from './RePawnSelector';
 import RePawnIntakeScreen from './RePawnIntakeScreen';
 import { useAuth } from '../context/AuthContext';
@@ -152,6 +153,9 @@ export default function PawnTransactionScreen({
   const [editingItem,     setEditingItem]     = useState(null);
   const [hardgoodsIntakeOpen, setHardgoodsIntakeOpen] = useState(false);
   const [editingHardgoodsItem, setEditingHardgoodsItem] = useState(null);
+  const [hardgoodsMatchPrefill, setHardgoodsMatchPrefill] = useState(null);
+  const [findMatchOpen, setFindMatchOpen] = useState(false);
+  const [findMatchQuery, setFindMatchQuery] = useState('');
   const [photoTargetId,    setPhotoTargetId]    = useState(null);
   const [convertAnchor,    setConvertAnchor]    = useState(null);
   const [convertRow,       setConvertRow]       = useState(null);
@@ -597,9 +601,11 @@ export default function PawnTransactionScreen({
     const text  = itemSearch.trim();
     const parts = text.toUpperCase().split(/\s+/);
     if (parts[0] === 'H') {
+      const rest = parts.slice(1).join(' ') || text;
       setEditingHardgoodsItem(null);
-      setIntakeEntry(text);
-      setHardgoodsIntakeOpen(true);
+      setIntakeEntry(rest);
+      setFindMatchQuery(rest);
+      setFindMatchOpen(true);
       return;
     }
     if (parts[0] === 'J' && parts.length >= 2) {
@@ -620,6 +626,7 @@ export default function PawnTransactionScreen({
   const handleHardgoodsIntakeBack = (dest) => {
     setHardgoodsIntakeOpen(false);
     setEditingHardgoodsItem(null);
+    setHardgoodsMatchPrefill(null);
     if (dest === 'transactions') onClose();
   };
 
@@ -630,6 +637,7 @@ export default function PawnTransactionScreen({
     });
     setItemSearch('');
     setHardgoodsIntakeOpen(false);
+    setHardgoodsMatchPrefill(null);
   };
 
   const handleHardgoodsIntakeSaveAndAdd = (item) => {
@@ -640,6 +648,7 @@ export default function PawnTransactionScreen({
     setItemSearch('');
     setIntakeEntry('');
     setEditingHardgoodsItem(null);
+    setHardgoodsMatchPrefill(null);
     setHardgoodsIntakeOpen(true);
   };
 
@@ -647,6 +656,30 @@ export default function PawnTransactionScreen({
     setPawnItems(prev => prev.map(i => i.id === item.id ? { ...item, part_number: i.part_number } : i));
     setEditingHardgoodsItem(null);
     setHardgoodsIntakeOpen(false);
+  };
+
+  // ── Find Matching Item (search/match step ahead of Hardgoods intake) ──────
+  const handleFindMatchClose = () => setFindMatchOpen(false);
+
+  const handleFindMatchSelect = (match) => {
+    setHardgoodsMatchPrefill(match);
+    setEditingHardgoodsItem(null);
+    setFindMatchOpen(false);
+    setHardgoodsIntakeOpen(true);
+  };
+
+  const handleFindMatchAddNonCatalog = (query) => {
+    setHardgoodsMatchPrefill(null);
+    setEditingHardgoodsItem(null);
+    setIntakeEntry(query || findMatchQuery);
+    setFindMatchOpen(false);
+    setHardgoodsIntakeOpen(true);
+  };
+
+  const handleChangeHardgoodsMatch = (query) => {
+    setHardgoodsIntakeOpen(false);
+    setFindMatchQuery(query || '');
+    setFindMatchOpen(true);
   };
 
   const makePartNumber = (seqNum) => {
@@ -787,6 +820,8 @@ export default function PawnTransactionScreen({
         ticketLabel="Pawn Ticket"
         initialEntry={intakeEntry}
         editItem={editingHardgoodsItem}
+        matchPrefill={hardgoodsMatchPrefill}
+        onChangeMatch={editingHardgoodsItem ? undefined : handleChangeHardgoodsMatch}
         onBack={handleHardgoodsIntakeBack}
         onSaveItem={handleHardgoodsIntakeSave}
         onSaveAndAddAnother={handleHardgoodsIntakeSaveAndAdd}
@@ -823,6 +858,14 @@ export default function PawnTransactionScreen({
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', ...(readOnly && { pointerEvents: 'none', userSelect: 'none' }) }}>
+
+      <FindMatchingItemScreen
+        open={findMatchOpen}
+        initialQuery={findMatchQuery}
+        onClose={handleFindMatchClose}
+        onSelect={handleFindMatchSelect}
+        onAddNonCatalog={handleFindMatchAddNonCatalog}
+      />
 
       {/* Breadcrumb */}
       <Box sx={{ bgcolor: PURPLE, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>

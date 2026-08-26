@@ -41,30 +41,37 @@ export default function HardgoodsIntakeScreen({
   ticketLabel = 'Buy Ticket',
   initialEntry = '',
   editItem = null,
+  matchPrefill = null,
   readOnly = false,
   onBack,
   onSaveItem,
   onSaveAndAddAnother,
   onUpdateItem,
+  onChangeMatch,
 }) {
   const editAttr = (key) => editItem?.attributes?.find(a => a.field_key === key)?.field_value;
+  const matchAttr = (key) => matchPrefill?.attributes?.find(a => a.field_key === key)?.field_value;
 
-  const [itemName,     setItemName]     = useState(editItem?.item || editItem?.short_desc || initialEntry || '');
-  const [brand,        setBrand]        = useState(editItem?.brand || editAttr('brand') || '');
-  const [model,        setModel]        = useState(editItem?.model || editAttr('model') || '');
-  const [itemType,     setItemType]     = useState(editItem?.type || editAttr('type') || '');
+  const [itemName,     setItemName]     = useState(editItem?.item || editItem?.short_desc || matchPrefill?.short_desc || initialEntry || '');
+  const [brand,        setBrand]        = useState(editItem?.brand || editAttr('brand') || matchAttr('brand') || '');
+  const [model,        setModel]        = useState(editItem?.model || editAttr('model') || matchAttr('model') || '');
+  const [itemType,     setItemType]     = useState(editItem?.type || editAttr('type') || matchAttr('type') || '');
   const [serialNumber, setSerialNumber] = useState(editItem?.serial || editItem?.serial_number || '');
-  const [condition,    setCondition]    = useState(editItem?.condition || '');
+  const [condition,    setCondition]    = useState(editItem?.condition || matchPrefill?.condition || '');
   const [colour,       setColour]       = useState(editItem?.colour || '');
   const [year,         setYear]         = useState(editItem?.year || '');
   const [notes,        setNotes]        = useState(editItem?.notes || '');
   const [accessories,  setAccessories]  = useState(editItem?.accessories || []);
   const [newAccessory, setNewAccessory] = useState('');
   const [suggestCatalog, setSuggestCatalog] = useState(false);
+  // Reference photo shown in "Catalog Photo" — from the matched intake-history
+  // record when one was picked via Find Matching Item, otherwise it mirrors
+  // whatever intake photo gets taken (see catalogPhoto below).
+  const [matchedPhoto] = useState(matchPrefill?.image || null);
 
   const [categories, setCategories]   = useState([]);
-  const [category,   setCategory]     = useState(editItem?.category_id || '');
-  const [categoryPickerOpen, setCategoryPickerOpen] = useState(!editItem?.category_id);
+  const [category,   setCategory]     = useState(editItem?.category_id || matchPrefill?.category_id || '');
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(!editItem?.category_id && !matchPrefill?.category_id);
   const [categoryFields, setCategoryFields] = useState([]);
   const [categoryFieldValues, setCategoryFieldValues] = useState({});
 
@@ -89,10 +96,10 @@ export default function HardgoodsIntakeScreen({
   const [suggestions, setSuggestions] = useState(() => {
     const seed = (single) => ({ low: single != null ? String(single) : '', high: '' });
     return {
-      buy:    seed(editItem?.buy_price),
+      buy:    seed(editItem?.buy_price ?? matchPrefill?.cost_price),
       pawn:   seed(editItem?.pawn_price),
       trade:  seed(editItem?.trade_price),
-      retail: seed(editItem?.retail_price),
+      retail: seed(editItem?.retail_price ?? matchPrefill?.retail_price),
     };
   });
   const updateSuggestion = (key, field, value) => setSuggestions(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
@@ -255,7 +262,7 @@ export default function HardgoodsIntakeScreen({
     setAddViewOpen(false);
   };
 
-  const catalogPhoto = views.find(v => v.image)?.image || null;
+  const catalogPhoto = matchedPhoto ? { url: matchedPhoto } : (views.find(v => v.image)?.image || null);
 
   // ── Accessories ────────────────────────────────────────────────────────────
   const handleAddAccessory = () => {
@@ -416,13 +423,21 @@ export default function HardgoodsIntakeScreen({
 
         {!readOnly && (
           <Box sx={{ display: 'flex', gap: 1 }}>
-            <Tooltip title="No product catalog is configured for this store yet">
-              <span>
-                <Button size="small" variant="outlined" disabled startIcon={<MuiIcons.SwapHoriz sx={{ fontSize: 15 }} />} sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12.5 }}>
-                  Change Match
-                </Button>
-              </span>
-            </Tooltip>
+            {onChangeMatch ? (
+              <Button size="small" variant="outlined" startIcon={<MuiIcons.SwapHoriz sx={{ fontSize: 15 }} />}
+                onClick={() => onChangeMatch(itemName || initialEntry)}
+                sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12.5 }}>
+                Change Match
+              </Button>
+            ) : (
+              <Tooltip title="Not available while editing an item already on the ticket">
+                <span>
+                  <Button size="small" variant="outlined" disabled startIcon={<MuiIcons.SwapHoriz sx={{ fontSize: 15 }} />} sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12.5 }}>
+                    Change Match
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
             <Button size="small" variant="outlined" startIcon={<MuiIcons.FolderOpen sx={{ fontSize: 15 }} />} onClick={() => setCategoryPickerOpen(true)}
               sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12.5 }}>
               Change Category
