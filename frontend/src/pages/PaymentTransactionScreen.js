@@ -118,6 +118,7 @@ export default function PaymentTransactionScreen({
   onClose,
   onAddToWorkspace,
   existingPaymentData,
+  readOnly = false,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -336,7 +337,7 @@ export default function PaymentTransactionScreen({
   };
 
   return (
-    <Box sx={{ display: 'flex', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
+    <Box sx={{ display: 'flex', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden', ...(readOnly && { pointerEvents: 'none', userSelect: 'none' }) }}>
 
       {/* ── Main content ── */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
@@ -616,45 +617,61 @@ export default function PaymentTransactionScreen({
         </Box>
 
         {/* Bottom action bar */}
-        <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-            <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-              Ticket Note
-            </Typography>
-            <TextField
-              fullWidth size="small"
-              placeholder="Add a note for this ticket (optional)"
-              value={ticketNote}
-              onChange={e => setTicketNote(e.target.value)}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-            />
-          </Box>
-          <FormControlLabel
-            control={<Checkbox size="small" checked={showOnReceipt} onChange={e => setShowOnReceipt(e.target.checked)} />}
-            label={<Typography variant="caption">Show on receipt</Typography>}
-            sx={{ whiteSpace: 'nowrap', mr: 0 }}
-          />
-          <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-          <Button variant="outlined" onClick={onClose} sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-            Cancel
-          </Button>
-          <Button
-            variant="outlined"
-            onClick={handleAddToWorkspace}
-            disabled={selectedPayments.length === 0}
-            sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, borderColor: PAYMENT_AMBER, color: PAYMENT_AMBER, '&:hover': { borderColor: PAYMENT_DARK, bgcolor: '#fff8e1' } }}
-          >
-            Add to Workspace
-          </Button>
-          <Button
-            variant="contained"
-            endIcon={<MuiIcons.ArrowForward />}
-            disabled={selectedPayments.length === 0}
-            onClick={handleCheckoutNow}
-            sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, fontWeight: 700 }}
-          >
-            Checkout Now
-          </Button>
+        <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10, pointerEvents: 'auto', userSelect: 'auto' }}>
+          {readOnly ? (
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 1.5, py: 0.5, bgcolor: '#f3e8ff', border: '1px solid #d8b4fe', borderRadius: 1.5 }}>
+                <MuiIcons.Visibility sx={{ fontSize: 14, color: '#7c3aed' }} />
+                <Typography variant="caption" color="#7c3aed" fontWeight={600}>View Only — this ticket is already completed</Typography>
+              </Box>
+              <Box sx={{ flex: 1 }} />
+              <Button size="small" variant="outlined" color="inherit" onClick={onClose}
+                sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+                Close
+              </Button>
+            </>
+          ) : (
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+                <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                  Ticket Note
+                </Typography>
+                <TextField
+                  fullWidth size="small"
+                  placeholder="Add a note for this ticket (optional)"
+                  value={ticketNote}
+                  onChange={e => setTicketNote(e.target.value)}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                />
+              </Box>
+              <FormControlLabel
+                control={<Checkbox size="small" checked={showOnReceipt} onChange={e => setShowOnReceipt(e.target.checked)} />}
+                label={<Typography variant="caption">Show on receipt</Typography>}
+                sx={{ whiteSpace: 'nowrap', mr: 0 }}
+              />
+              <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+              <Button variant="outlined" onClick={onClose} sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+                Cancel
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={handleAddToWorkspace}
+                disabled={selectedPayments.length === 0}
+                sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, borderColor: PAYMENT_AMBER, color: PAYMENT_AMBER, '&:hover': { borderColor: PAYMENT_DARK, bgcolor: '#fff8e1' } }}
+              >
+                Add to Workspace
+              </Button>
+              <Button
+                variant="contained"
+                endIcon={<MuiIcons.ArrowForward />}
+                disabled={selectedPayments.length === 0}
+                onClick={handleCheckoutNow}
+                sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, fontWeight: 700 }}
+              >
+                Checkout Now
+              </Button>
+            </>
+          )}
         </Paper>
       </Box>
 

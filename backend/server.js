@@ -5983,6 +5983,43 @@ app.put('/api/live_pricing', async (req, res) => {
   }
 });
 
+// Fetches current metal prices from the external API and saves them to
+// live_spot_prices with a fresh last_fetched timestamp. Single source of
+// truth for spot price data — the frontend never calls the external API
+// directly anymore, it only reads/triggers this. Used both by the manual
+// "Refresh Spot" button (POST /api/live_spot_prices/refresh) and by the
+// once-daily auto-refresh on store open.
+async function refreshLiveSpotPrices() {
+  const apiRes = await fetch('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=CAD&currencies=XPD,XAU,XAG,XPT');
+  if (!apiRes.ok) throw new Error(`metalpriceapi request failed: ${apiRes.status}`);
+  const data = await apiRes.json();
+  const rates = data.rates;
+  const mapped = {
+    CADXAU: (rates.CADXAU / 31).toFixed(2),
+    CADXAG: (rates.CADXAG / 31).toFixed(2),
+    CADXPT: (rates.CADXPT / 31).toFixed(2),
+    CADXPD: (rates.CADXPD / 31).toFixed(2),
+  };
+  const lastFetched = new Date();
+  await pool.query(
+    'UPDATE live_spot_prices SET CADXAG = $1, CADXAU = $2, CADXPD = $3, CADXPT = $4, last_fetched = $5',
+    [mapped.CADXAG, mapped.CADXAU, mapped.CADXPD, mapped.CADXPT, lastFetched]
+  );
+  return { ...mapped, last_fetched: lastFetched };
+}
+
+// POST /api/live_spot_prices/refresh — manual "Refresh Spot" trigger.
+// Always hits the external API, regardless of when it was last fetched.
+app.post('/api/live_spot_prices/refresh', async (req, res) => {
+  try {
+    const result = await refreshLiveSpotPrices();
+    res.json(result);
+  } catch (error) {
+    console.error('Error refreshing live spot prices:', error);
+    res.status(500).json({ error: 'Failed to refresh live spot prices' });
+  }
+});
+
 // Live Spot Prices API Endpoint
 app.get('/api/live_spot_prices', async (req, res) => {
   try {
@@ -8336,6 +8373,204 @@ app.delete('/api/inventory-status/:id', async (req, res) => {
   }
 });
 
+// GET /api/tickets/lookup/:query — read-only lookup of a completed transaction
+// or ticket by any of its IDs (transaction_id, buy/sale/pawn/trade/payment
+// ticket id). Used by the ModernTransactions workspace search bar to pull up
+// "everything from that visit" for reference without touching live data.
+app.get('/api/tickets/lookup/:query', async (req, res) => {
+  const q = (req.params.query || '').trim();
+  if (!q) return res.status(400).json({ error: 'Search query is required' });
+
+  try {
+    const matchOne = async (table, idCol) => {
+      const r = await pool.query(`SELECT DISTINCT ${idCol} AS id FROM ${table} WHERE UPPER(${idCol}) = UPPER($1) LIMIT 1`, [q]);
+      return r.rows[0]?.id || null;
+    };
+
+    let tradeTicketId   = await matchOne('trade_ticket', 'trade_ticket_id');
+    let buyTicketId     = await matchOne('buy_ticket', 'buy_ticket_id');
+    let saleTicketId    = await matchOne('sale_ticket', 'sale_ticket_id');
+    let pawnTicketId    = await matchOne('pawn_ticket', 'pawn_ticket_id');
+    let paymentTicketId = await matchOne('payment_ticket', 'payment_ticket_id');
+
+    // No direct ticket-id hit — maybe they searched a bare transaction_id.
+    // Find whichever ticket table(s) reference it.
+    if (!tradeTicketId && !buyTicketId && !saleTicketId && !pawnTicketId && !paymentTicketId) {
+      const tCheck = await pool.query('SELECT transaction_id FROM transactions WHERE UPPER(transaction_id) = UPPER($1)', [q]);
+      if (tCheck.rows.length > 0) {
+        const txId = tCheck.rows[0].transaction_id;
+        const [bt, st, pt, tt, pmt] = await Promise.all([
+          pool.query('SELECT DISTINCT buy_ticket_id FROM buy_ticket WHERE transaction_id = $1 LIMIT 1', [txId]),
+          pool.query('SELECT DISTINCT sale_ticket_id FROM sale_ticket WHERE transaction_id = $1 LIMIT 1', [txId]),
+          pool.query('SELECT DISTINCT pawn_ticket_id FROM pawn_ticket WHERE transaction_id = $1 LIMIT 1', [txId]),
+          pool.query('SELECT DISTINCT trade_ticket_id FROM trade_ticket WHERE transaction_id = $1 LIMIT 1', [txId]),
+          pool.query('SELECT DISTINCT payment_ticket_id FROM payment_ticket WHERE transaction_id = $1 LIMIT 1', [txId]),
+        ]);
+        buyTicketId     = bt.rows[0]?.buy_ticket_id || null;
+        saleTicketId    = st.rows[0]?.sale_ticket_id || null;
+        pawnTicketId    = pt.rows[0]?.pawn_ticket_id || null;
+        tradeTicketId   = tt.rows[0]?.trade_ticket_id || null;
+        paymentTicketId = pmt.rows[0]?.payment_ticket_id || null;
+      }
+    }
+
+    if (!tradeTicketId && !buyTicketId && !saleTicketId && !pawnTicketId && !paymentTicketId) {
+      return res.status(404).json({ error: 'No transaction or ticket found for that ID' });
+    }
+
+    // A trade bundles a buy_ticket (trade-in) and a sale_ticket (sale-out) —
+    // pull both sides in even though only the trade_ticket_id was searched.
+    let tradeNote = null, tradeShowOnReceipt = false, tradeTransactionId = null;
+    if (tradeTicketId) {
+      const tr = await pool.query(
+        'SELECT buy_ticket_id, sale_ticket_id, transaction_id, ticket_note, show_on_receipt FROM trade_ticket WHERE trade_ticket_id = $1',
+        [tradeTicketId]
+      );
+      if (tr.rows.length > 0) {
+        buyTicketId  = buyTicketId  || tr.rows[0].buy_ticket_id;
+        saleTicketId = saleTicketId || tr.rows[0].sale_ticket_id;
+        tradeTransactionId = tr.rows[0].transaction_id;
+        tradeNote = tr.rows[0].ticket_note;
+        tradeShowOnReceipt = tr.rows[0].show_on_receipt;
+      }
+    }
+
+    const ITEM_JOIN = `
+      LEFT JOIN jewelry j ON x.item_id = j.item_id
+      LEFT JOIN hardgoods h ON x.item_id = h.item_id
+    `;
+    const ITEM_FIELDS = `
+      COALESCE(j.short_desc, j.long_desc, h.short_desc, h.long_desc, x.item_id) AS description,
+      ABS(COALESCE(j.item_price, h.item_price)) AS price,
+      COALESCE(j.images, '[]'::jsonb) AS images
+    `;
+
+    let customer = null;
+    const fetchCustomerFor = async (transactionId) => {
+      if (customer || !transactionId) return;
+      const r = await pool.query(
+        `SELECT c.id, c.first_name, c.last_name, c.phone, c.email,
+                t.transaction_id, t.total_amount, t.transaction_date
+         FROM transactions t JOIN customers c ON t.customer_id = c.id
+         WHERE t.transaction_id = $1`,
+        [transactionId]
+      );
+      if (r.rows.length > 0) {
+        const row = r.rows[0];
+        customer = { id: row.id, first_name: row.first_name, last_name: row.last_name, phone: row.phone, email: row.email };
+      }
+    };
+
+    const groups = [];
+
+    if (buyTicketId) {
+      const rows = await pool.query(`
+        SELECT x.buy_ticket_id AS ticket_id, x.transaction_id, x.ticket_note, x.show_on_receipt, x.created_at,
+               x.item_id, ${ITEM_FIELDS}
+        FROM buy_ticket x ${ITEM_JOIN}
+        WHERE x.buy_ticket_id = $1
+        ORDER BY x.id
+      `, [buyTicketId]);
+      if (rows.rows.length > 0) {
+        await fetchCustomerFor(rows.rows[0].transaction_id);
+        const txMeta = await pool.query('SELECT total_amount, transaction_date FROM transactions WHERE transaction_id = $1', [rows.rows[0].transaction_id]);
+        groups.push({
+          type: 'BUY', ticketId: buyTicketId, transactionId: rows.rows[0].transaction_id,
+          ticketNote: rows.rows[0].ticket_note, createdAt: rows.rows[0].created_at,
+          totalAmount: txMeta.rows[0] ? Math.abs(parseFloat(txMeta.rows[0].total_amount)) : null,
+          isTradeIn: !!tradeTicketId,
+          items: rows.rows.map(r => ({ itemId: r.item_id, description: r.description, price: r.price, images: r.images })),
+        });
+      }
+    }
+
+    if (saleTicketId) {
+      const rows = await pool.query(`
+        SELECT x.sale_ticket_id AS ticket_id, x.transaction_id, x.ticket_note, x.show_on_receipt, x.created_at,
+               x.quantity, x.item_id, ${ITEM_FIELDS}
+        FROM sale_ticket x ${ITEM_JOIN}
+        WHERE x.sale_ticket_id = $1
+        ORDER BY x.id
+      `, [saleTicketId]);
+      if (rows.rows.length > 0) {
+        await fetchCustomerFor(rows.rows[0].transaction_id);
+        const txMeta = await pool.query('SELECT total_amount, transaction_date FROM transactions WHERE transaction_id = $1', [rows.rows[0].transaction_id]);
+        groups.push({
+          type: 'SALE', ticketId: saleTicketId, transactionId: rows.rows[0].transaction_id,
+          ticketNote: rows.rows[0].ticket_note, createdAt: rows.rows[0].created_at,
+          totalAmount: txMeta.rows[0] ? Math.abs(parseFloat(txMeta.rows[0].total_amount)) : null,
+          isTradeSale: !!tradeTicketId,
+          items: rows.rows.map(r => ({ itemId: r.item_id, description: r.description, price: r.price, quantity: r.quantity, images: r.images })),
+        });
+      }
+    }
+
+    if (pawnTicketId) {
+      const rows = await pool.query(`
+        SELECT x.pawn_ticket_id AS ticket_id, x.transaction_id, x.ticket_note, x.show_on_receipt, x.created_at,
+               x.status, x.due_date, x.interest_rate, x.term_days, x.storage_fee,
+               x.item_id, ${ITEM_FIELDS}
+        FROM pawn_ticket x ${ITEM_JOIN}
+        WHERE x.pawn_ticket_id = $1
+        ORDER BY x.id
+      `, [pawnTicketId]);
+      if (rows.rows.length > 0) {
+        await fetchCustomerFor(rows.rows[0].transaction_id);
+        const txMeta = await pool.query('SELECT total_amount, transaction_date FROM transactions WHERE transaction_id = $1', [rows.rows[0].transaction_id]);
+        groups.push({
+          type: 'PAWN', ticketId: pawnTicketId, transactionId: rows.rows[0].transaction_id,
+          ticketNote: rows.rows[0].ticket_note, createdAt: rows.rows[0].created_at,
+          status: rows.rows[0].status, dueDate: rows.rows[0].due_date,
+          totalAmount: txMeta.rows[0] ? Math.abs(parseFloat(txMeta.rows[0].total_amount)) : null,
+          items: rows.rows.map(r => ({
+            itemId: r.item_id, description: r.description, price: r.price, images: r.images,
+            interestRate: r.interest_rate, termDays: r.term_days, storageFee: r.storage_fee,
+          })),
+        });
+      }
+    }
+
+    if (tradeTicketId) {
+      await fetchCustomerFor(tradeTransactionId);
+      const txMeta = tradeTransactionId
+        ? await pool.query('SELECT total_amount, transaction_date FROM transactions WHERE transaction_id = $1', [tradeTransactionId])
+        : { rows: [] };
+      groups.push({
+        type: 'TRADE', ticketId: tradeTicketId, transactionId: tradeTransactionId,
+        ticketNote: tradeNote, showOnReceipt: tradeShowOnReceipt,
+        netAmount: txMeta.rows[0] ? parseFloat(txMeta.rows[0].total_amount) : null,
+        buyTicketId, saleTicketId,
+      });
+    }
+
+    if (paymentTicketId) {
+      const rows = await pool.query(`
+        SELECT payment_ticket_id AS ticket_id, transaction_id, ticket_note, show_on_receipt, created_at, pawn_ticket_id
+        FROM payment_ticket WHERE payment_ticket_id = $1 ORDER BY id
+      `, [paymentTicketId]);
+      if (rows.rows.length > 0) {
+        await fetchCustomerFor(rows.rows[0].transaction_id);
+        const txMeta = await pool.query('SELECT total_amount, transaction_date FROM transactions WHERE transaction_id = $1', [rows.rows[0].transaction_id]);
+        groups.push({
+          type: 'PAYMENT', ticketId: paymentTicketId, transactionId: rows.rows[0].transaction_id,
+          ticketNote: rows.rows[0].ticket_note, createdAt: rows.rows[0].created_at,
+          totalAmount: txMeta.rows[0] ? Math.abs(parseFloat(txMeta.rows[0].total_amount)) : null,
+          pawnTicketIds: rows.rows.map(r => r.pawn_ticket_id),
+        });
+      }
+    }
+
+    if (!customer) {
+      return res.status(404).json({ error: 'Ticket found but has no linked customer record' });
+    }
+
+    res.json({ customer, groups });
+  } catch (err) {
+    console.error('Error looking up ticket:', err);
+    res.status(500).json({ error: 'Failed to look up ticket' });
+  }
+});
+
 // Buy Ticket API Endpoints
 // GET /api/buy-ticket/last-id — for syncing the local counter with DB
 app.get('/api/buy-ticket/last-id', async (req, res) => {
@@ -10326,16 +10561,27 @@ app.get('/api/customers/search', async (req, res) => {
     const isSameSearchTerm = first_name === last_name && last_name === phone && phone === email;
 
     if (isSameSearchTerm && first_name) {
-      // General search - search across all fields with OR
+      // General search - search across all fields with OR. id_number is
+      // included and phone is matched digit-only (stripping formatting like
+      // dashes/parens on both sides) so "5551234567" finds a customer stored
+      // as "(555) 123-4567" — a plain LIKE on the raw phone column can't do that.
       const searchTerm = first_name.toLowerCase();
+      const digitsOnly = first_name.replace(/\D/g, '');
+      const params = [`%${searchTerm}%`, searchTerm, limit];
+      let phoneClause = '';
+      if (digitsOnly) {
+        phoneClause = ` OR regexp_replace(phone, '[^0-9]', '', 'g') LIKE $${params.length + 1}`;
+        params.push(`%${digitsOnly}%`);
+      }
       const query = `
         SELECT id, first_name, last_name, email, phone, status, tax_exempt, created_at, id_number
         FROM customers
         WHERE LOWER(first_name) LIKE $1
            OR LOWER(last_name) LIKE $1
            OR LOWER(email) LIKE $1
-           OR LOWER(phone) LIKE $1
            OR LOWER(first_name || ' ' || last_name) LIKE $1
+           OR CAST(id_number AS TEXT) ILIKE $1
+           ${phoneClause}
         ORDER BY
           CASE
             WHEN LOWER(first_name) = $2 THEN 1
@@ -10346,7 +10592,7 @@ app.get('/api/customers/search', async (req, res) => {
           created_at DESC
         LIMIT $3
       `;
-      const result = await client.query(query, [`%${searchTerm}%`, searchTerm, limit]);
+      const result = await client.query(query, params);
       res.json(result.rows);
       return;
     }
@@ -15133,6 +15379,20 @@ app.post('/api/store-sessions/open', async (req, res) => {
 
     // Invalidate store status cache
     storeStatusCache = { isOpen: null, lastChecked: 0 };
+
+    // Daily spot price refresh: if today's price hasn't been fetched yet,
+    // fetch it now that the store is open. Best-effort — a pricing API
+    // hiccup should never block the store from opening.
+    try {
+      const lastRow = (await pool.query('SELECT last_fetched FROM live_spot_prices LIMIT 1')).rows[0];
+      const alreadyFetchedToday = lastRow?.last_fetched &&
+        new Date(lastRow.last_fetched).toDateString() === new Date().toDateString();
+      if (!alreadyFetchedToday) {
+        await refreshLiveSpotPrices();
+      }
+    } catch (spotErr) {
+      console.error('Error auto-refreshing spot prices on store open:', spotErr);
+    }
 
     res.status(201).json({
       message: 'Store opened successfully',

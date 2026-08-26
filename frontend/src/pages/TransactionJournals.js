@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
   Box,
@@ -30,11 +31,12 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useWorkingDate } from '../context/WorkingDateContext';
 import { Avatar } from '@mui/material';
-import { openPawnReceiptPDF } from '../utils/pawnReceiptUtils';
+import { openPawnReceiptPDF } from '../utils/ticketReceiptUtils';
 import config from '../config';
 import { injectPDFScript } from '../utils/printUtils';
 
 function TransactionJournals() {
+  const navigate = useNavigate();
   const { getCurrentDateObject } = useWorkingDate();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [transactionToDelete, setTransactionToDelete] = useState(null);
@@ -345,7 +347,7 @@ function TransactionJournals() {
         <div class="info-row"><span class="info-label">Customer:</span><span>${selectedTransaction?.customer_name || 'N/A'}</span></div>
         ${selectedTransaction?.customer_phone ? `<div class="info-row"><span class="info-label">Phone:</span><span>${selectedTransaction.customer_phone}</span></div>` : ''}
         <div class="info-row"><span class="info-label">${selectedTransaction?.parked_by_employee_name ? 'Completed By:' : 'Employee:'}</span><span>${selectedTransaction?.employee_name || 'N/A'}</span></div>
-        ${selectedTransaction?.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Parked By:</span><span>${selectedTransaction.parked_by_employee_name}</span></div>` : ''}
+        ${selectedTransaction?.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Written By:</span><span>${selectedTransaction.parked_by_employee_name}</span></div>` : ''}
       </div>
       ${tradeInItems.length > 0 ? `
       <div class="section-title">TRADE-IN ITEMS</div>
@@ -453,7 +455,7 @@ function TransactionJournals() {
         <div class="info-row"><span class="info-label">Customer:</span><span>${selectedTransaction?.customer_name || 'N/A'}</span></div>
         ${selectedTransaction?.customer_phone ? `<div class="info-row"><span class="info-label">Phone:</span><span>${selectedTransaction.customer_phone}</span></div>` : ''}
         <div class="info-row"><span class="info-label">${selectedTransaction?.parked_by_employee_name ? 'Completed By:' : 'Employee:'}</span><span>${selectedTransaction?.employee_name || 'N/A'}</span></div>
-        ${selectedTransaction?.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Parked By:</span><span>${selectedTransaction.parked_by_employee_name}</span></div>` : ''}
+        ${selectedTransaction?.parked_by_employee_name ? `<div class="info-row"><span class="info-label">Written By:</span><span>${selectedTransaction.parked_by_employee_name}</span></div>` : ''}
       </div>
 
       <div class="section-title">Pawn Extensions</div>
@@ -720,7 +722,7 @@ function TransactionJournals() {
             </div>
             ${selectedTransaction?.parked_by_employee_name ? `
             <div class="info-row">
-              <span class="info-label">Parked By:</span>
+              <span class="info-label">Written By:</span>
               <span>${selectedTransaction.parked_by_employee_name}</span>
             </div>` : ''}
           </div>
@@ -1016,7 +1018,7 @@ function TransactionJournals() {
           </div>
           ${selectedTransaction.parked_by_employee_name ? `
           <div class="info-row">
-            <span class="info-label">Parked By:</span>
+            <span class="info-label">Written By:</span>
             <span>${selectedTransaction.parked_by_employee_name}</span>
           </div>` : ''}
         </div>
@@ -1561,7 +1563,7 @@ function TransactionJournals() {
                     </TableRow>
                     {selectedTransaction.parked_by_employee_name && (
                       <TableRow>
-                        <TableCell variant="head">Parked By</TableCell>
+                        <TableCell variant="head">Written By</TableCell>
                         <TableCell>{selectedTransaction.parked_by_employee_name}</TableCell>
                       </TableRow>
                     )}
@@ -1918,6 +1920,16 @@ function TransactionJournals() {
                 variant="outlined"
               >
                 Edit Transaction
+              </Button>
+              <Button
+                onClick={() => navigate('/modern-transactions', {
+                  state: { openTicketLookup: selectedTransaction?.transaction_id },
+                })}
+                color="secondary"
+                variant="outlined"
+                disabled={!selectedTransaction?.transaction_id}
+              >
+                View Workspace
               </Button>
               <Button
                 onClick={handlePrintTransaction}

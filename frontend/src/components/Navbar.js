@@ -1145,7 +1145,7 @@ function Navbar() {
                       <Typography fontWeight={700} noWrap>{pw.customer_name || 'Unknown Customer'}</Typography>
                       <Typography variant="caption" color="text.secondary" display="block">{summary}</Typography>
                       <Typography variant="caption" color="text.secondary" display="block">
-                        Parked by {pw.parked_by_employee_name || 'unknown'} · {ago}
+                        Written by {pw.parked_by_employee_name || 'unknown'} · {ago}
                       </Typography>
                     </Box>
                     <Stack direction="row" spacing={1}>

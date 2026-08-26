@@ -14,6 +14,8 @@ import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
+import HardgoodsIntakeScreen from './HardgoodsIntakeScreen';
+import FindMatchingItemScreen from './FindMatchingItemScreen';
 
 const BUY_BLUE  = '#0284c7';
 const BUY_DARK  = '#0369a1';
@@ -114,6 +116,7 @@ export default function BuyTransactionScreen({
   scrapPrefill = null,
   autoOpenUnique = false,
   uniqueParsedValues = null,
+  readOnly = false,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -134,6 +137,11 @@ export default function BuyTransactionScreen({
   const [intakeEntry, setIntakeEntry]   = useState('');
   const [parsedValues, setParsedValues] = useState(null);
   const [editingIntakeItem, setEditingIntakeItem] = useState(null);
+  const [hardgoodsIntakeOpen, setHardgoodsIntakeOpen] = useState(false);
+  const [editingHardgoodsItem, setEditingHardgoodsItem] = useState(null);
+  const [hardgoodsMatchPrefill, setHardgoodsMatchPrefill] = useState(null);
+  const [findMatchOpen, setFindMatchOpen] = useState(false);
+  const [findMatchQuery, setFindMatchQuery] = useState('');
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
   const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
@@ -346,6 +354,11 @@ export default function BuyTransactionScreen({
       setIntakeOpen(true);
       return;
     }
+    if (item.sourceEstimator === 'hardgoods' && item.jewelryData) {
+      setEditingHardgoodsItem({ ...item.jewelryData, _lineId: item._lineId, images: item.images?.length ? item.images : (item.jewelryData.images || []) });
+      setHardgoodsIntakeOpen(true);
+      return;
+    }
     setEditingItemId(item._lineId);
     setEditFields({ category_id: item.category_id || '', description: item.description, serial_number: item.serial_number || '', qty: item.qty, paid: item.paid });
   };
@@ -361,6 +374,14 @@ export default function BuyTransactionScreen({
   const openIntake = () => {
     const text  = scanInput.trim();
     const parts = text.toUpperCase().split(/\s+/);
+    if (parts[0] === 'H') {
+      const rest = parts.slice(1).join(' ') || text;
+      setEditingHardgoodsItem(null);
+      setIntakeEntry(rest);
+      setFindMatchQuery(rest);
+      setFindMatchOpen(true);
+      return;
+    }
     if (parts[0] === 'J' && parts.length >= 2) {
       setParsedValues(parseItemDescription(parts.slice(1), categoryCodeMap, colorCodeMap, metalTypeCodeMap));
     } else {
@@ -392,9 +413,84 @@ export default function BuyTransactionScreen({
     };
   };
 
+  // jewelryData is reused (rather than a separate hardgoodsData key) so this row
+  // flows through the existing cartItems-building / checkout hardgoods-creation
+  // code unchanged — that code spreads `item.jewelryData` regardless of source.
+  const hardgoodsItemToBuyItem = (item, seq) => {
+    const totalPaid = parseFloat(item.buy_price) || parseFloat(item.paid_amount) || 0;
+    return {
+      _lineId: Date.now() + Math.random(),
+      part_no: `${ticketId}-${String(seq).padStart(2, '0')}`,
+      category_id: item.category_id || '',
+      category_name: item.category_name || item.category || '',
+      description: item.item || item.short_desc || '',
+      serial_number: item.serial_number || item.serial || '',
+      qty: 1,
+      paid: totalPaid,
+      images: item.images || [],
+      sourceEstimator: 'hardgoods',
+      jewelryData: item,
+    };
+  };
+
   const handleIntakeBack = () => {
     setIntakeOpen(false);
     setEditingIntakeItem(null);
+  };
+
+  const handleHardgoodsIntakeBack = () => {
+    setHardgoodsIntakeOpen(false);
+    setEditingHardgoodsItem(null);
+    setHardgoodsMatchPrefill(null);
+  };
+
+  const handleHardgoodsIntakeSave = (item) => {
+    setBuyItems(prev => [...prev, hardgoodsItemToBuyItem(item, prev.length + 1)]);
+    setScanInput('');
+    setHardgoodsIntakeOpen(false);
+    setHardgoodsMatchPrefill(null);
+  };
+
+  const handleHardgoodsIntakeSaveAndAdd = (item) => {
+    setBuyItems(prev => [...prev, hardgoodsItemToBuyItem(item, prev.length + 1)]);
+    setScanInput('');
+    setIntakeEntry('');
+    setEditingHardgoodsItem(null);
+    setHardgoodsMatchPrefill(null);
+    setHardgoodsIntakeOpen(true);
+  };
+
+  const handleHardgoodsIntakeUpdate = (item) => {
+    setBuyItems(prev => prev.map(i =>
+      i._lineId === editingHardgoodsItem?._lineId
+        ? { ...hardgoodsItemToBuyItem(item, 0), _lineId: i._lineId, part_no: i.part_no, paid: i.paid }
+        : i));
+    setEditingHardgoodsItem(null);
+    setHardgoodsIntakeOpen(false);
+  };
+
+  // ── Find Matching Item (search/match step ahead of Hardgoods intake) ──────
+  const handleFindMatchClose = () => setFindMatchOpen(false);
+
+  const handleFindMatchSelect = (match) => {
+    setHardgoodsMatchPrefill(match);
+    setEditingHardgoodsItem(null);
+    setFindMatchOpen(false);
+    setHardgoodsIntakeOpen(true);
+  };
+
+  const handleFindMatchAddNonCatalog = (query) => {
+    setHardgoodsMatchPrefill(null);
+    setEditingHardgoodsItem(null);
+    setIntakeEntry(query || findMatchQuery);
+    setFindMatchOpen(false);
+    setHardgoodsIntakeOpen(true);
+  };
+
+  const handleChangeHardgoodsMatch = (query) => {
+    setHardgoodsIntakeOpen(false);
+    setFindMatchQuery(query || '');
+    setFindMatchOpen(true);
   };
 
   const handleIntakeSave = (item) => {
@@ -613,6 +709,24 @@ export default function BuyTransactionScreen({
 
   const HEADER_COLS = '110px 52px 120px 1fr 110px 50px 95px 100px';
 
+  if (hardgoodsIntakeOpen) {
+    return (
+      <HardgoodsIntakeScreen
+        customer={customer}
+        ticketId={ticketId}
+        ticketLabel="Buy Ticket"
+        initialEntry={intakeEntry}
+        editItem={editingHardgoodsItem}
+        matchPrefill={hardgoodsMatchPrefill}
+        onChangeMatch={editingHardgoodsItem ? undefined : handleChangeHardgoodsMatch}
+        onBack={handleHardgoodsIntakeBack}
+        onSaveItem={handleHardgoodsIntakeSave}
+        onSaveAndAddAnother={handleHardgoodsIntakeSaveAndAdd}
+        onUpdateItem={handleHardgoodsIntakeUpdate}
+      />
+    );
+  }
+
   if (intakeOpen) {
     return (
       <JewelryIntakeScreen
@@ -633,7 +747,15 @@ export default function BuyTransactionScreen({
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', ...(readOnly && { pointerEvents: 'none', userSelect: 'none' }) }}>
+
+      <FindMatchingItemScreen
+        open={findMatchOpen}
+        initialQuery={findMatchQuery}
+        onClose={handleFindMatchClose}
+        onSelect={handleFindMatchSelect}
+        onAddNonCatalog={handleFindMatchAddNonCatalog}
+      />
 
       {/* Breadcrumb */}
       <Box sx={{ bgcolor: BUY_BLUE, color: '#fff', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -1012,47 +1134,63 @@ export default function BuyTransactionScreen({
       </Box>
 
       {/* ── Bottom action bar — sticky ── */}
-      <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-          <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-            Ticket Note
-          </Typography>
-          <TextField
-            fullWidth size="small"
-            placeholder="Add a note for this ticket (optional)"
-            value={ticketNote}
-            onChange={e => setTicketNote(e.target.value)}
-            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-          />
-        </Box>
-        <FormControlLabel
-          control={<Checkbox size="small" checked={showOnReceipt} onChange={e => setShowOnReceipt(e.target.checked)} />}
-          label={<Typography variant="caption">Show on receipt</Typography>}
-          sx={{ whiteSpace: 'nowrap', mr: 0 }}
-        />
-        <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-        <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
-          disabled={buyItems.length === 0 || !customer?.id}
-          onClick={handleSaveAsQuote}
-          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-          Save as Quote
-        </Button>
-        <Button size="small" variant="outlined" color="error" onClick={onClose}
-          sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-          Cancel
-        </Button>
-        <Button size="small" variant="outlined"
-          disabled={buyItems.length === 0}
-          onClick={handleAddToWorkspace}
-          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-          Add to Workspace
-        </Button>
-        <Button size="small" variant="contained" endIcon={<MuiIcons.ArrowForward />}
-          disabled={buyItems.length === 0}
-          onClick={handleCheckoutNow}
-          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: BUY_BLUE, '&:hover': { bgcolor: BUY_DARK } }}>
-          Checkout Now
-        </Button>
+      <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10, pointerEvents: 'auto', userSelect: 'auto' }}>
+        {readOnly ? (
+          <>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 1.5, py: 0.5, bgcolor: '#f3e8ff', border: '1px solid #d8b4fe', borderRadius: 1.5 }}>
+              <MuiIcons.Visibility sx={{ fontSize: 14, color: '#7c3aed' }} />
+              <Typography variant="caption" color="#7c3aed" fontWeight={600}>View Only — this ticket is already completed</Typography>
+            </Box>
+            <Box sx={{ flex: 1 }} />
+            <Button size="small" variant="outlined" color="inherit" onClick={onClose}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Close
+            </Button>
+          </>
+        ) : (
+          <>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+              <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                Ticket Note
+              </Typography>
+              <TextField
+                fullWidth size="small"
+                placeholder="Add a note for this ticket (optional)"
+                value={ticketNote}
+                onChange={e => setTicketNote(e.target.value)}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+              />
+            </Box>
+            <FormControlLabel
+              control={<Checkbox size="small" checked={showOnReceipt} onChange={e => setShowOnReceipt(e.target.checked)} />}
+              label={<Typography variant="caption">Show on receipt</Typography>}
+              sx={{ whiteSpace: 'nowrap', mr: 0 }}
+            />
+            <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+            <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
+              disabled={buyItems.length === 0 || !customer?.id}
+              onClick={handleSaveAsQuote}
+              sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Save as Quote
+            </Button>
+            <Button size="small" variant="outlined" color="error" onClick={onClose}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Cancel
+            </Button>
+            <Button size="small" variant="outlined"
+              disabled={buyItems.length === 0}
+              onClick={handleAddToWorkspace}
+              sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Add to Workspace
+            </Button>
+            <Button size="small" variant="contained" endIcon={<MuiIcons.ArrowForward />}
+              disabled={buyItems.length === 0}
+              onClick={handleCheckoutNow}
+              sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: BUY_BLUE, '&:hover': { bgcolor: BUY_DARK } }}>
+              Checkout Now
+            </Button>
+          </>
+        )}
       </Paper>
 
       {/* Camera dialog */}

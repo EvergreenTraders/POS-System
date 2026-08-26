@@ -152,6 +152,7 @@ export default function SaleTransactionScreen({
   existingSaleData,
   onConvertTo,
   workspaceTradeTickets = [],
+  readOnly = false,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -607,7 +608,7 @@ export default function SaleTransactionScreen({
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', ...(readOnly && { pointerEvents: 'none', userSelect: 'none' }) }}>
 
       {/* ── Breadcrumb ── */}
       <Box sx={{ bgcolor: GREEN, color: '#fff', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -1171,68 +1172,84 @@ export default function SaleTransactionScreen({
       </Box>
 
       {/* ── Sticky bottom action bar (matches PawnTransactionScreen pattern) ── */}
-      <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10 }}>
-        {/* Ticket Note inline field */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-          <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-            Ticket Note
-          </Typography>
-          <TextField
-            fullWidth
-            size="small"
-            placeholder="Add a note for this ticket (optional)"
-            value={ticketNote}
-            onChange={e => setTicketNote(e.target.value)}
-            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-          />
-        </Box>
+      <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10, pointerEvents: 'auto', userSelect: 'auto' }}>
+        {readOnly ? (
+          <>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 1.5, py: 0.5, bgcolor: '#f3e8ff', border: '1px solid #d8b4fe', borderRadius: 1.5 }}>
+              <MuiIcons.Visibility sx={{ fontSize: 14, color: '#7c3aed' }} />
+              <Typography variant="caption" color="#7c3aed" fontWeight={600}>View Only — this ticket is already completed</Typography>
+            </Box>
+            <Box sx={{ flex: 1 }} />
+            <Button size="small" variant="outlined" color="inherit" onClick={onClose}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Close
+            </Button>
+          </>
+        ) : (
+          <>
+            {/* Ticket Note inline field */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+              <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                Ticket Note
+              </Typography>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="Add a note for this ticket (optional)"
+                value={ticketNote}
+                onChange={e => setTicketNote(e.target.value)}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+              />
+            </Box>
 
-        {/* Show on receipt */}
-        <FormControlLabel
-          control={<Checkbox size="small" checked={showOnReceipt} onChange={e => setShowOnReceipt(e.target.checked)} />}
-          label={<Typography variant="caption">Show on receipt</Typography>}
-          sx={{ whiteSpace: 'nowrap', mr: 0 }}
-        />
+            {/* Show on receipt */}
+            <FormControlLabel
+              control={<Checkbox size="small" checked={showOnReceipt} onChange={e => setShowOnReceipt(e.target.checked)} />}
+              label={<Typography variant="caption">Show on receipt</Typography>}
+              sx={{ whiteSpace: 'nowrap', mr: 0 }}
+            />
 
-        <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+            <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
 
-        {/* Save as Quote */}
-        <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
-          disabled={saleItems.length === 0}
-          onClick={handleSaveAsQuote}
-          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-          Save as Quote
-        </Button>
-
-        {/* Cancel — always enabled */}
-        <Button size="small" variant="outlined" color="error" onClick={onClose}
-          sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-          Cancel
-        </Button>
-
-        {/* Add to Workspace */}
-        <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
-          <span>
-            <Button size="small" variant="outlined"
-              disabled={saleItems.length === 0 || customerValidationErrors.length > 0}
-              onClick={handleAddToWorkspace}
+            {/* Save as Quote */}
+            <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
+              disabled={saleItems.length === 0}
+              onClick={handleSaveAsQuote}
               sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-              Add to Workspace
+              Save as Quote
             </Button>
-          </span>
-        </Tooltip>
 
-        {/* Checkout Now */}
-        <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
-          <span>
-            <Button size="small" variant="contained"
-              disabled={saleItems.length === 0 || customerValidationErrors.length > 0}
-              onClick={handleCheckoutNow}
-              sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_DARK } }}>
-              Checkout Now
+            {/* Cancel — always enabled */}
+            <Button size="small" variant="outlined" color="error" onClick={onClose}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Cancel
             </Button>
-          </span>
-        </Tooltip>
+
+            {/* Add to Workspace */}
+            <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
+              <span>
+                <Button size="small" variant="outlined"
+                  disabled={saleItems.length === 0 || customerValidationErrors.length > 0}
+                  onClick={handleAddToWorkspace}
+                  sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+                  Add to Workspace
+                </Button>
+              </span>
+            </Tooltip>
+
+            {/* Checkout Now */}
+            <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
+              <span>
+                <Button size="small" variant="contained"
+                  disabled={saleItems.length === 0 || customerValidationErrors.length > 0}
+                  onClick={handleCheckoutNow}
+                  sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_DARK } }}>
+                  Checkout Now
+                </Button>
+              </span>
+            </Tooltip>
+          </>
+        )}
       </Paper>
 
       {/* ── Discount dialog ── */}

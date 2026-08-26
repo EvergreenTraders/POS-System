@@ -7,7 +7,7 @@ import {
   Divider, TextField, InputAdornment, Badge, Tooltip, Stack, Snackbar, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions,
   List, ListItem, ListItemText, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Menu, FormControlLabel, Checkbox,
+  Menu, FormControlLabel, Checkbox, Popper,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
@@ -18,25 +18,36 @@ import PaymentTransactionScreen from './PaymentTransactionScreen';
 import RedeemTransactionScreen from './RedeemTransactionScreen';
 import { useWorkspaceGuard } from '../context/WorkspaceGuardContext';
 import { useAuth } from '../context/AuthContext';
+import { openPawnReceiptPDF, openBuySaleReceiptPDF, openTransactionReceiptPDF } from '../utils/ticketReceiptUtils';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 const BUY_BLUE = '#0284c7';
 
+// Converts a Buffer-like object (from backend) to a base64 data URL for image preview
+function bufferToDataUrl(bufferObj) {
+  if (!bufferObj || !bufferObj.data) return null;
+  const base64 = btoa(
+    new Uint8Array(bufferObj.data).reduce((data, byte) => data + String.fromCharCode(byte), '')
+  );
+  return `data:image/jpeg;base64,${base64}`;
+}
+
 // ── "scrap" search-bar shortcut parsing ──────────────────────────────────────
 // Recognizes a weight + purity (in any order, e.g. "5.6g 14k" or "14k 5.6g")
 // typed into the transactions search bar. rowKey matches one of
-// JewelryIntakeScreen's SCRAP_FIXED_ROWS keys (one row per metal); the actual
-// purity option within that row is resolved there once its dropdown loads.
+// JewelryIntakeScreen's SCRAP_FIXED_ROWS keys — one row per common
+// karat/fineness, purity baked in. Platinum/palladium and uncommon purities
+// have no fixed row (Custom Rows only), so they resolve to no rowKey and the
+// text falls through to the unique-item-prefill path instead of bulk scrap.
 const SCRAP_PURITY_BY_DECIMAL = [
-  { rowKey: 'gold',   value: 0.417, metal: 'Gold',   karat: 10 },
-  { rowKey: 'gold',   value: 0.585, metal: 'Gold',   karat: 14 },
-  { rowKey: 'gold',   value: 0.750, metal: 'Gold',   karat: 18 },
-  { rowKey: 'gold',   value: 0.917, metal: 'Gold',   karat: 22 },
-  { rowKey: 'silver', value: 0.925, metal: 'Silver', karat: null },
+  { rowKey: 'gold10k',   value: 0.417, metal: 'Gold',   karat: 10 },
+  { rowKey: 'gold14k',   value: 0.585, metal: 'Gold',   karat: 14 },
+  { rowKey: 'gold18k',   value: 0.750, metal: 'Gold',   karat: 18 },
+  { rowKey: 'gold22k',   value: 0.917, metal: 'Gold',   karat: 22 },
+  { rowKey: 'silver925', value: 0.925, metal: 'Silver', karat: null },
 ];
 const SCRAP_METAL_WORDS = { gold: 'Gold', silver: 'Silver', platinum: 'Platinum', palladium: 'Palladium' };
-const SCRAP_ROW_KEY_BY_METAL = { Gold: 'gold', Silver: 'silver', Platinum: 'platinum', Palladium: 'palladium' };
 
 function parseQuickScrapEntry(text) {
   const tokens = text.trim().split(/\s+/).filter(Boolean);
@@ -80,7 +91,12 @@ function parseQuickScrapEntry(text) {
     leftover.push(tok);
   }
 
-  const rowKey = metal ? SCRAP_ROW_KEY_BY_METAL[metal] : null;
+  // rowKey only resolves for a known common karat/fineness with a fixed row —
+  // platinum, palladium, and uncommon purities have none.
+  const rowMatch = purityValue != null
+    ? SCRAP_PURITY_BY_DECIMAL.find(c => Math.abs(c.value - purityValue) <= 0.01 && (!metal || c.metal === metal))
+    : null;
+  const rowKey = rowMatch?.rowKey ?? null;
   const hasWeightAndPurity = weightG != null && purityValue != null;
   const isBulkScrap = hasScrapWord || (hasWeightAndPurity && leftover.length === 0);
   const isUniqueWithPrefill = !isBulkScrap && hasWeightAndPurity;
@@ -188,7 +204,7 @@ function PawnTransactionCard({ tx, pawnIcon, pawnColor, onOpen, onVoid }) {
   const PawnIconComponent = pawnIcon ? (MuiIcons[pawnIcon] ?? MuiIcons.Casino) : MuiIcons.Casino;
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: accent }}>
       {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -296,7 +312,7 @@ function SaleTransactionCard({ tx, saleIcon, saleColor, onOpen, onVoid }) {
   const moreCount = itemCount - SHOW;
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: accent }}>
       {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -418,7 +434,7 @@ function PaymentTransactionCard({ tx, onOpen, onVoid }) {
   const layawayCount = (tx.selectedPayments || []).filter(p => p.type === 'layaway').length;
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: PAYMENT_AMBER }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${PAYMENT_AMBER}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <MuiIcons.Payment sx={{ fontSize: 20, color: PAYMENT_AMBER }} />
@@ -485,7 +501,7 @@ function RedeemTransactionCard({ tx, redeemIcon, redeemColor, onOpen, onVoid }) 
   const RedeemIconComponent = redeemIcon ? (MuiIcons[redeemIcon] ?? MuiIcons.Redeem) : MuiIcons.Redeem;
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: accent }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <RedeemIconComponent sx={{ fontSize: 20, color: accent }} />
@@ -527,23 +543,25 @@ function RedeemTransactionCard({ tx, redeemIcon, redeemColor, onOpen, onVoid }) 
   );
 }
 
-function TransactionTypeButton({ label, icon, color, onClick, count }) {
+function TransactionTypeButton({ label, icon, color, onClick, count, disabled = false }) {
+  const effectiveColor = disabled ? '#bdbdbd' : color;
   return (
     <Badge badgeContent={count || 0} color="primary" overlap="rectangular"
       sx={{ '& .MuiBadge-badge': { fontSize: 9, minWidth: 16, height: 16, top: 4, right: 4 } }}>
       <Paper
         variant="outlined"
-        onClick={onClick}
+        onClick={disabled ? undefined : onClick}
         sx={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          p: { md: 1, xl: 0.75 }, cursor: 'pointer', borderRadius: 2, borderColor: '#e0e0e0',
+          p: { md: 1, xl: 0.75 }, cursor: disabled ? 'default' : 'pointer', borderRadius: 2, borderColor: '#e0e0e0',
           minWidth: { md: 70, xl: 60 },
-          '&:hover': { bgcolor: '#f5f5f5', borderColor: color },
+          opacity: disabled ? 0.4 : 1,
+          ...(disabled ? {} : { '&:hover': { bgcolor: '#f5f5f5', borderColor: color } }),
           transition: 'all 0.15s',
         }}
       >
-        <Box sx={{ color, mb: 0.25, '& svg': { fontSize: { md: 24, xl: 20 } } }}>{icon}</Box>
-        <Typography align="center" fontWeight={500} sx={{ fontSize: { md: 10, xl: 9 }, color }}>{label}</Typography>
+        <Box sx={{ color: effectiveColor, mb: 0.25, '& svg': { fontSize: { md: 24, xl: 20 } } }}>{icon}</Box>
+        <Typography align="center" fontWeight={500} sx={{ fontSize: { md: 10, xl: 9 }, color: effectiveColor }}>{label}</Typography>
       </Paper>
     </Badge>
   );
@@ -595,7 +613,7 @@ function BuyTransactionCard({ tx, buyIcon, buyColor, onOpen, onVoid }) {
   const totalPaid = tx.totalPaid || items.reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: accent }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <BuyIconComponent sx={{ fontSize: 20, color: accent }} />
@@ -673,7 +691,7 @@ function TradeTransactionCard({ tx, tradeIcon, tradeColor, onOpen, onVoid }) {
   const taxAmt     = Number(tx.taxAmount || 0);
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderWidth: 1.5, borderColor: accent }}>
 
       {/* ── Header ── */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
@@ -800,6 +818,10 @@ export default function ModernTransactions() {
   });
   const [openingTxId, setOpeningTxId]     = useState(null);
   const [restoredPawnData, setRestoredPawnData] = useState(null);
+  // True while the currently-open Buy/Sale/Pawn/Trade/Payment screen is
+  // showing a looked-up historical ticket (see HISTORICAL cards) rather than
+  // a real in-progress one — makes that screen non-interactive.
+  const [openReadOnly, setOpenReadOnly] = useState(false);
   const [existingSaleData, setExistingSaleData] = useState(() => {
     if (location.state?.returnToSale) {
       const raw = sessionStorage.getItem('pendingSaleReturn');
@@ -907,8 +929,22 @@ export default function ModernTransactions() {
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
   const [parkSnackbar, setParkSnackbar]   = useState(null); // { severity, message }
 
+  // Top search bar: look up a completed transaction/ticket by any of its IDs
+  // (transaction_id, buy/sale/pawn/trade/payment ticket id) — each ticket
+  // found is added to the workspace as a HISTORICAL card (see
+  // adaptLookupGroupToCardTx) which opens the real screen read-only.
+  const [ticketLookupLoading, setTicketLookupLoading] = useState(false);
+  const [ticketLookupError, setTicketLookupError] = useState('');
+  // Which ADD TRANSACTION footer buttons a ticket lookup narrows down to:
+  // a looked-up pawn only makes sense to Payment or Redeem next; a looked-up
+  // sale only makes sense to Pawn or Refund next; a looked-up buy only makes
+  // sense to Print (its receipt) next. null = no restriction.
+  const [lookupContext, setLookupContext] = useState(null);
+  const [lastLookupGroups, setLastLookupGroups] = useState([]); // groups from the most recent lookup, for Print
+
   const customerIdRef = useRef(undefined);
   const pendingResumeWorkspaceRef = useRef(null); // workspace to load on next customer change (from Park resume)
+  const handledTicketLookupRef = useRef(null); // last location.state.openTicketLookup value already handled — guards StrictMode's double effect-invoke
 
   // Customer state
   const [customer, setCustomer] = useState(null);
@@ -918,6 +954,45 @@ export default function ModernTransactions() {
   const [customerResults, setCustomerResults] = useState([]);
   const [searchingCustomer, setSearchingCustomer] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  // Anchors the results Popper — rendered via portal so it isn't clipped or
+  // scrolled by the Customer panel's own overflowY:auto container.
+  const customerSearchBoxRef = useRef(null);
+
+  // Full search-results dialog (opened on Enter), copied from the old Home
+  // page customer lookup's layout. Uses the same /api/customers/search general
+  // search as the inline dropdown below (all four fields set to the same
+  // query), which now searches id_number and normalizes phone digits too —
+  // see the isSameSearchTerm branch in server.js.
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+  const [dialogSearchResults, setDialogSearchResults] = useState([]);
+  const [selectedDialogIdx, setSelectedDialogIdx] = useState(-1);
+  const [searchingDialog, setSearchingDialog] = useState(false);
+
+  const handleOpenSearchDialog = async () => {
+    const query = customerSearch.trim();
+    if (!query) return;
+    setShowResults(false);
+    setSearchingDialog(true);
+    try {
+      const res = await axios.get(`${config.apiUrl}/customers/search`, {
+        params: { first_name: query, last_name: query, phone: query, email: query },
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setDialogSearchResults(res.data);
+      setSelectedDialogIdx(res.data.length > 0 ? 0 : -1);
+      setSearchDialogOpen(true);
+    } catch (err) {
+      console.error('Customer search failed:', err);
+    } finally {
+      setSearchingDialog(false);
+    }
+  };
+
+  const handleCloseSearchDialog = () => {
+    setSearchDialogOpen(false);
+    setDialogSearchResults([]);
+    setSelectedDialogIdx(-1);
+  };
 
   useEffect(() => {
     axios.get(`${config.apiUrl}/transaction-types`)
@@ -1014,6 +1089,17 @@ export default function ModernTransactions() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state?.resumedWorkspace]);
+
+  // "View Workspace" from the Transaction Details popup on the Transactions
+  // page — same lookup the search bar runs for a typed ticket/transaction ID,
+  // just triggered by navigation instead of Enter.
+  useEffect(() => {
+    const query = location.state?.openTicketLookup;
+    if (!query || handledTicketLookupRef.current === query) return;
+    handledTicketLookupRef.current = query;
+    handleTicketLookup(query);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state?.openTicketLookup]);
 
   // Restore pawn screen after returning from Checkout (user pressed Cancel/Back)
   useEffect(() => {
@@ -1291,7 +1377,7 @@ export default function ModernTransactions() {
     setSearchingCustomer(true);
     try {
       const res = await axios.get(`${config.apiUrl}/customers/search`, {
-        params: { first_name: query, last_name: query, phone: query, email: query },
+        params: { first_name: query, last_name: query, phone: query, email: query, limit: 5 },
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
       setCustomerResults(res.data);
@@ -1307,6 +1393,8 @@ export default function ModernTransactions() {
     const proceed = await confirmLeaveWorkspace();
     if (!proceed) return;
 
+    setLookupContext(null);
+    setLastLookupGroups([]);
     setCustomerStats(null);
     setCustomerSearch('');
     setCustomerResults([]);
@@ -1341,6 +1429,134 @@ export default function ModernTransactions() {
     if (!proceed) return;
     setCustomer(null);
     setCustomerStats(null);
+    setLookupContext(null);
+    setLastLookupGroups([]);
+  };
+
+  // Adapts one /api/tickets/lookup "group" into the exact tx shape the real
+  // BuyTransactionCard/SaleTransactionCard/PawnTransactionCard/TradeTransactionCard/
+  // PaymentTransactionCard already expect, so a looked-up ticket renders with
+  // the same component — not a bespoke card. type stays 'HISTORICAL' so it's
+  // still invisible to summaryLines/netDue/checkoutItems (all of which only
+  // match the live BUY/SALE/PAWN/TRADE/PAYMENT types); historicalType carries
+  // the real ticket type so the render switch below picks the right card.
+  const adaptLookupGroupToCardTx = (g, allGroups, customer) => {
+    const absImg = (imgs) => (imgs || []).map(im => ({
+      ...im, url: im.url?.startsWith('/uploads') ? `${config.apiUrl.replace('/api', '')}${im.url}` : im.url,
+    }));
+    // Postgres NUMERIC columns come back from the lookup API as strings
+    // (e.g. "270.00"); the real screens call .toFixed() directly on item
+    // prices in a few places, which throws on a string — always hand them
+    // real numbers.
+    const num = (v) => parseFloat(v) || 0;
+    const base = { id: `${g.type}-${g.ticketId}-${Date.now()}`, type: 'HISTORICAL', historicalType: g.type, ticketId: g.ticketId, customer, groups: allGroups };
+
+    if (g.type === 'BUY') {
+      return { ...base, buyItems: g.items.map(it => ({ description: it.description, paid: num(it.price), images: absImg(it.images) })), totalPaid: num(g.totalAmount) };
+    }
+    if (g.type === 'SALE') {
+      return { ...base, saleItems: g.items.map(it => ({ name: it.description, price: num(it.price), quantity: it.quantity || 1, images: absImg(it.images) })), total: num(g.totalAmount) };
+    }
+    if (g.type === 'PAWN') {
+      return {
+        ...base,
+        pawnItems: g.items.map(it => ({ item: it.description, amount: num(it.price), images: absImg(it.images) })),
+        totalPawnAmount: num(g.totalAmount), costToRedeem: num(g.totalAmount),
+        dueDate: g.dueDate ? new Date(g.dueDate).toLocaleDateString() : '—',
+        overduePawnCount: 0,
+      };
+    }
+    if (g.type === 'TRADE') {
+      const buyGroup  = allGroups.find(x => x.type === 'BUY'  && x.ticketId === g.buyTicketId);
+      const saleGroup = allGroups.find(x => x.type === 'SALE' && x.ticketId === g.saleTicketId);
+      const tradeItems = (buyGroup?.items || []).map(it => ({ description: it.description, tradeAllowance: num(it.price), qty: 1, images: absImg(it.images) }));
+      const saleItems  = (saleGroup?.items || []).map(it => ({ name: it.description, price: num(it.price), quantity: it.quantity || 1, discount: 0, images: absImg(it.images) }));
+      return {
+        ...base,
+        tradeItems, saleItems,
+        totalTradeAllowance: num(buyGroup?.totalAmount), totalSaleAfterTax: num(saleGroup?.totalAmount),
+        netDueToCustomer: num(buyGroup?.totalAmount) - num(saleGroup?.totalAmount),
+        taxRate: 0, taxAmount: 0,
+      };
+    }
+    if (g.type === 'PAYMENT') {
+      return {
+        ...base,
+        selectedPayments: (g.pawnTicketIds || []).map(id => ({ type: 'pawn_extension', ref: id })),
+        pawnTotal: num(g.totalAmount), layawayTotal: 0, totalPayment: num(g.totalAmount),
+      };
+    }
+    return base;
+  };
+
+  // Top search bar: resolve any transaction/ticket ID and drop each ticket it
+  // contains into the workspace using the same cards as a live transaction —
+  // auto-selects the customer, but View/Void on these cards are rewired to a
+  // read-only summary and a plain local removal (see the render switch),
+  // never the real edit screen or a real void.
+  const handleTicketLookup = async (query) => {
+    setTicketLookupLoading(true);
+    setTicketLookupError('');
+    try {
+      const res = await axios.get(`${config.apiUrl}/tickets/lookup/${encodeURIComponent(query)}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setSearch('');
+      await handleSelectCustomer(res.data.customer);
+      const newCards = res.data.groups.map(g => adaptLookupGroupToCardTx(g, res.data.groups, res.data.customer));
+      setWorkspaceTransactions(prev => [...prev, ...newCards]);
+      setLastLookupGroups(res.data.groups);
+      // Narrow the ADD TRANSACTION footer to the sensible next actions for
+      // what was just found: a pawn only leads to Payment or Redeem next;
+      // a sale only leads to Pawn or Refund next; a standalone buy only
+      // leads to printing its receipt.
+      if (res.data.groups.some(g => g.type === 'PAWN')) {
+        setLookupContext('PAWN');
+      } else if (res.data.groups.some(g => g.type === 'SALE')) {
+        setLookupContext('SALE');
+      } else if (res.data.groups.some(g => g.type === 'BUY')) {
+        setLookupContext('BUY');
+      } else {
+        setLookupContext(null);
+      }
+    } catch (err) {
+      setTicketLookupError(
+        err.response?.status === 404
+          ? `No transaction or ticket found for "${query}"`
+          : 'Failed to look up that ticket'
+      );
+    } finally {
+      setTicketLookupLoading(false);
+    }
+  };
+
+  // ACTIONS → Print, for a looked-up ticket. One ticket in the workspace
+  // prints its own type-specific receipt (pawn/buy/sale); more than one
+  // (e.g. a trade's buy-in + sale-out, or a transaction_id covering several
+  // tickets) prints the whole-transaction receipt instead — same split
+  // TransactionJournals.js uses between a single ticket's receipt and its
+  // "Reprint" button.
+  const handlePrintTicketReceipt = async () => {
+    if (lastLookupGroups.length === 0) return;
+    try {
+      if (lastLookupGroups.length > 1) {
+        await openTransactionReceiptPDF(lastLookupGroups[0].transactionId);
+        return;
+      }
+      const [group] = lastLookupGroups;
+      if (group.type === 'PAWN') {
+        await openPawnReceiptPDF(group.ticketId);
+      } else if (group.type === 'BUY' || group.type === 'SALE') {
+        await openBuySaleReceiptPDF(group.ticketId);
+      } else {
+        // Lone trade/payment ticket — no dedicated single-ticket template,
+        // fall back to the whole-transaction receipt.
+        await openTransactionReceiptPDF(group.transactionId);
+      }
+    } catch (err) {
+      console.error('Failed to print ticket receipt:', err);
+      setParkSnackbar({ severity: 'error', message: 'Failed to generate receipt' });
+    }
   };
 
   const handleAddPawnToWorkspace = (pawnData) => {
@@ -2147,7 +2363,7 @@ export default function ModernTransactions() {
       <PawnTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => { setPawnOpen(false); setOpeningTxId(null); setRestoredPawnData(null); }}
+        onClose={() => { setPawnOpen(false); setOpeningTxId(null); setRestoredPawnData(null); setOpenReadOnly(false); }}
         onAddToWorkspace={(data) => { handleAddPawnToWorkspace(data); setRestoredPawnData(null); }}
         onConvertTo={handlePawnConvertTo}
         onRemoveFromWorkspace={(ticketId) => {
@@ -2155,10 +2371,12 @@ export default function ModernTransactions() {
           setPawnOpen(false);
           setOpeningTxId(null);
           setRestoredPawnData(null);
+          setOpenReadOnly(false);
         }}
         existingPawnData={existingPawnData}
         workspaceBuyTickets={workspaceBuyTickets}
         workspaceTradeTickets={workspaceTradeTickets}
+        readOnly={openReadOnly}
       />
     );
   }
@@ -2169,17 +2387,19 @@ export default function ModernTransactions() {
       <SaleTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => { setSaleOpen(false); setExistingSaleData(null); }}
+        onClose={() => { setSaleOpen(false); setExistingSaleData(null); setOpenReadOnly(false); }}
         onAddToWorkspace={handleAddSaleToWorkspace}
         onRemoveFromWorkspace={(ticketId) => {
           setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'SALE' && t.ticketId === ticketId)));
           setSaleOpen(false);
           setExistingSaleData(null);
+          setOpenReadOnly(false);
         }}
         onSelectCustomer={handleSelectCustomer}
         existingSaleData={existingSaleData}
         onConvertTo={handleSaleConvertTo}
         workspaceTradeTickets={workspaceTradeTickets}
+        readOnly={openReadOnly}
       />
     );
   }
@@ -2195,6 +2415,7 @@ export default function ModernTransactions() {
           setBuyOpen(false); setExistingBuyData(null);
           setBuyAutoScrap(false); setScrapPrefill(null);
           setBuyAutoUnique(false); setUniquePrefill(null);
+          setOpenReadOnly(false);
         }}
         onAddToWorkspace={handleAddBuyToWorkspace}
         onRemoveFromWorkspace={(ticketId) => {
@@ -2205,6 +2426,7 @@ export default function ModernTransactions() {
           setScrapPrefill(null);
           setBuyAutoUnique(false);
           setUniquePrefill(null);
+          setOpenReadOnly(false);
         }}
         onConvertTo={handleBuyConvertTo}
         existingBuyData={existingBuyData}
@@ -2214,6 +2436,7 @@ export default function ModernTransactions() {
         scrapPrefill={scrapPrefill}
         autoOpenUnique={buyAutoUnique}
         uniqueParsedValues={uniquePrefill}
+        readOnly={openReadOnly}
       />
     );
   }
@@ -2225,13 +2448,14 @@ export default function ModernTransactions() {
       <TradeTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => { setTradeOpen(false); setExistingTradeData(null); }}
+        onClose={() => { setTradeOpen(false); setExistingTradeData(null); setOpenReadOnly(false); }}
         onAddToWorkspace={handleAddTradeToWorkspace}
         onConvertToBuy={handleConvertTradeItemToBuy}
         onRemoveFromWorkspace={(ticketId) => {
           setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'TRADE' && t.ticketId === ticketId)));
           setTradeOpen(false);
           setExistingTradeData(null);
+          setOpenReadOnly(false);
         }}
         existingTradeData={existingTradeData}
         workspaceBuyTickets={workspaceBuyTickets}
@@ -2244,6 +2468,7 @@ export default function ModernTransactions() {
         }
         onSwitchToBuy={handleSwitchToBuy}
         onSwitchToSale={handleSwitchToSale}
+        readOnly={openReadOnly}
       />
     );
   }
@@ -2253,9 +2478,10 @@ export default function ModernTransactions() {
       <PaymentTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => { setPaymentOpen(false); setExistingPaymentData(null); }}
+        onClose={() => { setPaymentOpen(false); setExistingPaymentData(null); setOpenReadOnly(false); }}
         onAddToWorkspace={handleAddPaymentToWorkspace}
         existingPaymentData={existingPaymentData}
+        readOnly={openReadOnly}
       />
     );
   }
@@ -2283,7 +2509,12 @@ export default function ModernTransactions() {
           onKeyDown={e => {
             if (e.key !== 'Enter') return;
             const parsed = parseQuickScrapEntry(search);
-            if (!parsed.isBulkScrap && !parsed.isUniqueWithPrefill) return;
+            if (!parsed.isBulkScrap && !parsed.isUniqueWithPrefill) {
+              // Not a scrap shortcut — try resolving it as a transaction/ticket ID.
+              const q = search.trim();
+              if (q) handleTicketLookup(q);
+              return;
+            }
             if (!customer) { setNoCustomerWarning('buy ticket'); return; }
             if (parsed.isBulkScrap) {
               setSearch('');
@@ -2423,10 +2654,6 @@ export default function ModernTransactions() {
                 <Divider sx={{ mb: 1 }} />
 
                 <Stack spacing={0.75}>
-                  <Button fullWidth variant="contained" size="small"
-                    sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, borderRadius: 2, fontSize: 11, fontWeight: 700 }}>
-                    Select Customer
-                  </Button>
                   <Button fullWidth variant="outlined" size="small"
                     startIcon={<MuiIcons.Edit fontSize="small" />}
                     onClick={() => navigate('/customer-editor', {
@@ -2455,7 +2682,7 @@ export default function ModernTransactions() {
               /* ── No customer selected ── */
               <>
                 {/* Search box */}
-                <Box sx={{ position: 'relative', mb: 1.5 }}>
+                <Box ref={customerSearchBoxRef} sx={{ position: 'relative', mb: 1.5 }}>
                   <TextField
                     fullWidth size="small"
                     placeholder="Search by name, phone, email..."
@@ -2463,10 +2690,11 @@ export default function ModernTransactions() {
                     onChange={e => handleCustomerSearch(e.target.value)}
                     onBlur={() => setTimeout(() => setShowResults(false), 200)}
                     onFocus={() => customerResults.length > 0 && setShowResults(true)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleOpenSearchDialog(); } }}
                     InputProps={{
                       startAdornment: (
                         <InputAdornment position="start">
-                          {searchingCustomer
+                          {(searchingCustomer || searchingDialog)
                             ? <MuiIcons.HourglassEmpty fontSize="small" sx={{ color: 'text.secondary' }} />
                             : <MuiIcons.Search fontSize="small" sx={{ color: 'text.secondary' }} />}
                         </InputAdornment>
@@ -2474,26 +2702,37 @@ export default function ModernTransactions() {
                     }}
                     sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
                   />
-                  {showResults && customerResults.length > 0 && (
-                    <Paper elevation={4} sx={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, maxHeight: 200, overflowY: 'auto', borderRadius: 1, mt: 0.5 }}>
-                      {customerResults.map(c => (
-                        <Box
-                          key={c.id}
-                          onMouseDown={() => handleSelectCustomer(c)}
-                          sx={{ px: 1.5, py: 1, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' }, borderBottom: '1px solid #f0f0f0' }}
-                        >
-                          <Typography fontSize={12} fontWeight={600}>{c.first_name} {c.last_name}</Typography>
-                          {c.phone && <Typography fontSize={11} color="text.secondary">{c.phone}</Typography>}
-                          {c.email && <Typography fontSize={11} color="text.secondary" noWrap>{c.email}</Typography>}
-                        </Box>
-                      ))}
-                    </Paper>
-                  )}
-                  {showResults && customerResults.length === 0 && !searchingCustomer && customerSearch && (
-                    <Paper elevation={4} sx={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, borderRadius: 1, mt: 0.5, px: 1.5, py: 1 }}>
-                      <Typography fontSize={12} color="text.secondary">No customers found</Typography>
-                    </Paper>
-                  )}
+                  {/* Rendered via Popper (portaled to <body>) so the results
+                      list floats above the page instead of being clipped or
+                      forcing the Customer panel's own scroll container to
+                      scroll — the panel stays a fixed size, the list doesn't. */}
+                  <Popper
+                    open={showResults && !!customerSearch}
+                    anchorEl={customerSearchBoxRef.current}
+                    placement="bottom-start"
+                    style={{ zIndex: 1300, width: customerSearchBoxRef.current?.clientWidth }}
+                    modifiers={[{ name: 'offset', options: { offset: [0, 4] } }]}
+                  >
+                    {customerResults.length > 0 ? (
+                      <Paper elevation={4} sx={{ borderRadius: 1, maxHeight: 200, overflowY: 'auto' }}>
+                        {customerResults.map(c => (
+                          <Box
+                            key={c.id}
+                            onMouseDown={() => handleSelectCustomer(c)}
+                            sx={{ px: 1.5, py: 1, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' }, borderBottom: '1px solid #f0f0f0' }}
+                          >
+                            <Typography fontSize={12} fontWeight={600}>{c.first_name} {c.last_name}</Typography>
+                            {c.phone && <Typography fontSize={11} color="text.secondary">{c.phone}</Typography>}
+                            {c.email && <Typography fontSize={11} color="text.secondary" noWrap>{c.email}</Typography>}
+                          </Box>
+                        ))}
+                      </Paper>
+                    ) : !searchingCustomer && (
+                      <Paper elevation={4} sx={{ borderRadius: 1, px: 1.5, py: 1 }}>
+                        <Typography fontSize={12} color="text.secondary">No customers found</Typography>
+                      </Paper>
+                    )}
+                  </Popper>
                 </Box>
 
               </>
@@ -2708,6 +2947,50 @@ export default function ModernTransactions() {
                         onOpen={() => { setExistingRedeemData(tx); setRedeemOpen(true); }}
                         onVoid={() => setVoidConfirm(tx)}
                       />
+                    ) : tx.type === 'HISTORICAL' ? (
+                      // Looked-up ticket — same card component as the live one of
+                      // that type. View opens the real transaction screen for that
+                      // type in read-only mode (see readOnly prop below); Void just
+                      // drops the card from the workspace instead of touching data.
+                      (() => {
+                        const removeHistorical = () => setWorkspaceTransactions(prev => prev.filter(t => t.id !== tx.id));
+                        const viewHistorical = () => {
+                          setOpenReadOnly(true);
+                          if (tx.historicalType === 'PAWN')  { setRestoredPawnData(tx); setOpeningTxId(null); setPawnOpen(true); }
+                          if (tx.historicalType === 'SALE')  { setExistingSaleData(tx); setSaleOpen(true); }
+                          if (tx.historicalType === 'BUY')   { setExistingBuyData(tx); setBuyOpen(true); }
+                          if (tx.historicalType === 'TRADE') { setExistingTradeData(tx); setTradeOpen(true); }
+                          if (tx.historicalType === 'PAYMENT') { setExistingPaymentData(tx); setPaymentOpen(true); }
+                        };
+                        if (tx.historicalType === 'PAWN') {
+                          return <PawnTransactionCard tx={tx}
+                            pawnIcon={transactionTypes.find(t => t.type === 'pawn')?.icon}
+                            pawnColor={transactionTypes.find(t => t.type === 'pawn')?.color}
+                            onOpen={viewHistorical} onVoid={removeHistorical} />;
+                        }
+                        if (tx.historicalType === 'SALE') {
+                          return <SaleTransactionCard tx={tx}
+                            saleIcon={transactionTypes.find(t => t.type === 'sale')?.icon}
+                            saleColor={transactionTypes.find(t => t.type === 'sale')?.color}
+                            onOpen={viewHistorical} onVoid={removeHistorical} />;
+                        }
+                        if (tx.historicalType === 'BUY') {
+                          return <BuyTransactionCard tx={tx}
+                            buyIcon={transactionTypes.find(t => t.type === 'buy')?.icon}
+                            buyColor={transactionTypes.find(t => t.type === 'buy')?.color}
+                            onOpen={viewHistorical} onVoid={removeHistorical} />;
+                        }
+                        if (tx.historicalType === 'TRADE') {
+                          return <TradeTransactionCard tx={tx}
+                            tradeIcon={transactionTypes.find(t => t.type === 'trade')?.icon}
+                            tradeColor={transactionTypes.find(t => t.type === 'trade')?.color}
+                            onOpen={viewHistorical} onVoid={removeHistorical} />;
+                        }
+                        if (tx.historicalType === 'PAYMENT') {
+                          return <PaymentTransactionCard tx={tx} onOpen={viewHistorical} onVoid={removeHistorical} />;
+                        }
+                        return null;
+                      })()
                     ) : null}
                   </Grid>
                 ))}
@@ -2789,6 +3072,10 @@ export default function ModernTransactions() {
             {transactionTypes.map(t => {
               const IconComponent = MuiIcons[t.icon] ?? MuiIcons.Add;
               const count = workspaceTransactions.filter(tx => tx.type === t.type.toUpperCase()).length;
+              const allowedTypes = lookupContext === 'PAWN' ? ['payment', 'redeem']
+                : lookupContext === 'SALE' ? ['pawn', 'refund']
+                : lookupContext === 'BUY' ? []
+                : null;
               return (
                 <TransactionTypeButton
                   key={t.id}
@@ -2797,6 +3084,7 @@ export default function ModernTransactions() {
                   color={t.color ?? '#607d8b'}
                   onClick={() => handleTransactionTypeClick(t.type)}
                   count={count}
+                  disabled={allowedTypes ? !allowedTypes.includes(t.type) : false}
                 />
               );
             })}
@@ -2816,11 +3104,14 @@ export default function ModernTransactions() {
               { label: 'Notes',    icon: 'Assignment' },
               { label: 'Discount', icon: 'Percent'    },
               { label: 'Void',     icon: 'Block'      },
-              { label: 'Print',    icon: 'Print'      },
+              { label: 'Print',    icon: 'Print', onClick: handlePrintTicketReceipt },
             ].map(a => {
               const Icon = MuiIcons[a.icon];
               return (
-                <TransactionTypeButton key={a.label} label={a.label} icon={<Icon />} color="#607d8b" />
+                <TransactionTypeButton key={a.label} label={a.label} icon={<Icon />} color="#607d8b"
+                  onClick={a.onClick}
+                  disabled={lookupContext === 'BUY' && a.label !== 'Print'}
+                />
               );
             })}
           </Box>
@@ -2837,6 +3128,173 @@ export default function ModernTransactions() {
       >
         <Alert severity="warning" onClose={() => setNoCustomerWarning('')} sx={{ fontWeight: 600 }}>
           Please select a customer before opening a {noCustomerWarning}.
+        </Alert>
+      </Snackbar>
+
+      {/* ── Customer search-results dialog (Enter in the lookup box) — same
+          layout/behavior as the old Home page's Customer Lookup search ── */}
+      <Dialog
+        open={searchDialogOpen}
+        onClose={handleCloseSearchDialog}
+        aria-labelledby="workspace-customer-search-dialog-title"
+        maxWidth={false}
+        fullWidth
+        onKeyDown={e => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (dialogSearchResults.length > 0) {
+              setSelectedDialogIdx(Math.min(selectedDialogIdx + 1, dialogSearchResults.length - 1));
+            }
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (dialogSearchResults.length > 0 && selectedDialogIdx > 0) {
+              setSelectedDialogIdx(selectedDialogIdx - 1);
+            }
+          } else if (e.key === 'Enter' && selectedDialogIdx >= 0 && dialogSearchResults[selectedDialogIdx]) {
+            handleSelectCustomer(dialogSearchResults[selectedDialogIdx]);
+            handleCloseSearchDialog();
+          }
+        }}
+        PaperProps={{ sx: { width: 800, height: 420, maxWidth: '100vw', maxHeight: '100vh', overflow: 'visible', position: 'relative' } }}
+      >
+        {dialogSearchResults.length > 0 && (
+          <Box sx={{ position: 'absolute', top: 12, right: 20, zIndex: 10, display: 'flex', gap: 1 }}>
+            <Button variant="outlined" color="primary" size="small" onClick={handleOpenSearchDialog}
+              sx={{ minWidth: 100, px: 2, fontWeight: 600, borderRadius: 2, fontSize: 14 }}>
+              Search Again
+            </Button>
+            <Button variant="outlined" color="secondary" size="small" onClick={handleCloseSearchDialog}
+              sx={{ minWidth: 44, px: 1, ml: 1, fontWeight: 700, borderRadius: 2, fontSize: 18, lineHeight: 1, minHeight: 36 }}>
+              ×
+            </Button>
+          </Box>
+        )}
+        <DialogTitle>{dialogSearchResults.length > 0 ? 'Search Results' : 'No Customers Found'}</DialogTitle>
+        <DialogContent sx={{ overflow: 'visible' }}>
+          {dialogSearchResults.length > 0 ? (
+            <>
+              <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', minWidth: 700, gap: 0 }}>
+                <Box sx={{ minWidth: 140, maxWidth: 180, mr: 0, pl: 0, ml: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', pt: 1, gap: 2 }}>
+                  {dialogSearchResults[selectedDialogIdx]?.image && (
+                    <img
+                      src={
+                        typeof dialogSearchResults[selectedDialogIdx].image === 'string'
+                          ? dialogSearchResults[selectedDialogIdx].image
+                          : dialogSearchResults[selectedDialogIdx].image?.data
+                          ? bufferToDataUrl(dialogSearchResults[selectedDialogIdx].image)
+                          : undefined
+                      }
+                      alt="Customer"
+                      style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 8, margin: '0 auto', border: `2px solid ${GREEN}`, background: '#fafafa', boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)', display: 'block' }}
+                    />
+                  )}
+                  {dialogSearchResults[selectedDialogIdx]?.id_image_front && (
+                    <img
+                      src={
+                        typeof dialogSearchResults[selectedDialogIdx].id_image_front === 'string'
+                          ? dialogSearchResults[selectedDialogIdx].id_image_front
+                          : dialogSearchResults[selectedDialogIdx].id_image_front?.data
+                          ? bufferToDataUrl(dialogSearchResults[selectedDialogIdx].id_image_front)
+                          : undefined
+                      }
+                      alt="ID Front"
+                      style={{ width: 120, height: 100, objectFit: 'cover', borderRadius: 8, margin: '0 auto', border: '2px solid #ff9800', background: '#fafafa', boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)', display: 'block' }}
+                    />
+                  )}
+                </Box>
+                <Box sx={{ flex: 1, position: 'relative', display: 'flex' }}>
+                  <TableContainer component={Paper} sx={{ mb: 0, maxHeight: 300, overflowY: 'auto', p: 0, m: 0, flex: '1 1 auto' }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Name</TableCell>
+                          <TableCell>DOB</TableCell>
+                          <TableCell>Phone</TableCell>
+                          <TableCell>ID</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {dialogSearchResults.map((c, index) => (
+                          <TableRow key={c.id} hover selected={selectedDialogIdx === index} sx={{ cursor: 'pointer' }}
+                            onClick={() => setSelectedDialogIdx(index)}
+                            onDoubleClick={() => { handleSelectCustomer(c); handleCloseSearchDialog(); }}>
+                            <TableCell sx={{ width: 140, maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.first_name} {c.last_name}</TableCell>
+                            <TableCell>{c.date_of_birth ? c.date_of_birth.substring(0, 10) : ''}</TableCell>
+                            <TableCell>{c.phone || ''}</TableCell>
+                            <TableCell>{c.id_number || ''}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Box>
+              </Box>
+
+              {selectedDialogIdx >= 0 && dialogSearchResults[selectedDialogIdx] && (
+                <Box sx={{ position: 'relative', mt: 2, mb: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, width: '100%' }}>
+                    <Button variant="outlined" size="small" sx={{ minWidth: 70 }}
+                      onClick={e => {
+                        e.stopPropagation();
+                        const c = dialogSearchResults[selectedDialogIdx];
+                        navigate('/customer-editor', {
+                          state: {
+                            customer: {
+                              ...c,
+                              id_expiry_date: c.id_expiry_date ? new Date(c.id_expiry_date).toISOString().substring(0, 10) : '',
+                              date_of_birth:  c.date_of_birth  ? new Date(c.date_of_birth).toISOString().substring(0, 10)  : '',
+                            },
+                            mode: 'edit',
+                            returnTo: location.pathname,
+                          },
+                        });
+                      }}>
+                      Edit
+                    </Button>
+                    <Button variant="contained" size="small" sx={{ minWidth: 70, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT } }}
+                      onClick={e => { e.stopPropagation(); handleSelectCustomer(dialogSearchResults[selectedDialogIdx]); handleCloseSearchDialog(); }}>
+                      Select
+                    </Button>
+                  </Box>
+                  <Box sx={{ position: 'absolute', right: 0, top: 0 }}>
+                    <Button variant="contained" color="primary" size="small" sx={{ minWidth: 160 }}
+                      onClick={e => {
+                        e.stopPropagation();
+                        handleCloseSearchDialog();
+                        navigate('/customer-editor', { state: { mode: 'create', returnTo: location.pathname } });
+                      }}>
+                      Add New Customer
+                    </Button>
+                  </Box>
+                </Box>
+              )}
+            </>
+          ) : (
+            <Box sx={{ p: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+                <Typography variant="body1" color="text.secondary">No customers found matching your search.</Typography>
+              </Box>
+              <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
+                <Button variant="contained" sx={{ height: 48, flex: 1, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT } }}
+                  onClick={() => {
+                    handleCloseSearchDialog();
+                    navigate('/customer-editor', { state: { mode: 'create', returnTo: location.pathname } });
+                  }}>
+                  Add New Customer
+                </Button>
+                <Button variant="outlined" sx={{ height: 48, flex: 1 }} onClick={handleCloseSearchDialog}>
+                  Search Again
+                </Button>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Snackbar open={!!ticketLookupError} autoHideDuration={4000} onClose={() => setTicketLookupError('')}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert severity="warning" onClose={() => setTicketLookupError('')} sx={{ fontWeight: 600 }}>
+          {ticketLookupError}
         </Alert>
       </Snackbar>
 

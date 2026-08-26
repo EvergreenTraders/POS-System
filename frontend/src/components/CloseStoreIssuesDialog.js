@@ -137,7 +137,7 @@ export default function CloseStoreIssuesDialog({
                     </ListItemIcon>
                     <ListItemText
                       primary={pw.customer_name || 'Unknown Customer'}
-                      secondary={`Parked by ${pw.parked_by_employee_name || 'unknown'} - ${new Date(pw.parked_at).toLocaleTimeString()}`}
+                      secondary={`Written by ${pw.parked_by_employee_name || 'unknown'} - ${new Date(pw.parked_at).toLocaleTimeString()}`}
                       sx={{ pr: 10 }}
                     />
                   </ListItem>
