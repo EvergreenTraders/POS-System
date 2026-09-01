@@ -2045,6 +2045,14 @@ export default function ModernTransactions() {
     } else if (type === 'redeem') {
       if (!customer) { setNoCustomerWarning('redeem ticket'); return; }
       setRedeemOpen(true);
+    } else {
+      // consignment / layaway / repair / refund — no dedicated ticket screen
+      // exists yet, so this used to silently do nothing on click (no warning,
+      // no screen). Still enforce the same customer requirement as every
+      // other transaction type, and tell the user explicitly rather than the
+      // button appearing dead.
+      if (!customer) { setNoCustomerWarning(`${type} ticket`); return; }
+      setParkSnackbar({ severity: 'info', message: `${type.charAt(0).toUpperCase() + type.slice(1)} tickets aren't available yet.` });
     }
   };
 
