@@ -1423,6 +1423,30 @@ export default function ModernTransactions() {
       .catch(err => console.error('Failed to refresh customer after redeem checkout back:', err));
   }, [location.state]);
 
+  // Restore the selected customer (and any workspace cards) after returning
+  // from CustomerEditor when Edit Customer was clicked directly from the main
+  // customer panel — i.e. no Pawn/Sale/Buy/Trade/Payment/Redeem screen was
+  // open, so none of the pending*State restores above apply. Without this,
+  // navigating to /customer-editor and back (whether Saved or Cancelled)
+  // unmounts this whole page and both customer and workspaceTransactions
+  // reset to empty.
+  useEffect(() => {
+    if (!location.state?.customerUpdated) return;
+    const raw = sessionStorage.getItem('pendingWorkspaceCustomerState');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingWorkspaceCustomerState');
+    const { customerId, workspaceTransactions: savedWorkspaceTransactions } = pending;
+    if (!customerId) return;
+    pendingResumeWorkspaceRef.current = savedWorkspaceTransactions || [];
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after edit:', err));
+  }, [location.state]);
+
   const handleCustomerSearch = async (query) => {
     setCustomerSearch(query);
     if (!query.trim()) { setCustomerResults([]); setShowResults(false); return; }
@@ -2708,17 +2732,28 @@ export default function ModernTransactions() {
                 <Stack spacing={0.75}>
                   <Button fullWidth variant="outlined" size="small"
                     startIcon={<MuiIcons.Edit fontSize="small" />}
-                    onClick={() => navigate('/customer-editor', {
-                      state: {
-                        customer: {
-                          ...customer,
-                          id_expiry_date: customer.id_expiry_date ? new Date(customer.id_expiry_date).toISOString().substring(0, 10) : '',
-                          date_of_birth:  customer.date_of_birth  ? new Date(customer.date_of_birth).toISOString().substring(0, 10)  : '',
+                    onClick={() => {
+                      // Navigating to /customer-editor unmounts this whole page, so
+                      // both the selected customer and the workspace cards would
+                      // otherwise be lost on the way back — whether Saved or
+                      // Cancelled. Stash them and restore in the customerUpdated
+                      // effect above.
+                      sessionStorage.setItem('pendingWorkspaceCustomerState', JSON.stringify({
+                        customerId: customer.id,
+                        workspaceTransactions: stripImages(workspaceTransactions),
+                      }));
+                      navigate('/customer-editor', {
+                        state: {
+                          customer: {
+                            ...customer,
+                            id_expiry_date: customer.id_expiry_date ? new Date(customer.id_expiry_date).toISOString().substring(0, 10) : '',
+                            date_of_birth:  customer.date_of_birth  ? new Date(customer.date_of_birth).toISOString().substring(0, 10)  : '',
+                          },
+                          mode: 'edit',
+                          returnTo: location.pathname,
                         },
-                        mode: 'edit',
-                        returnTo: location.pathname,
-                      },
-                    })}
+                      });
+                    }}
                     sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
                     Edit Customer
                   </Button>
@@ -2795,21 +2830,24 @@ export default function ModernTransactions() {
               </>
             )}
 
-            {/* Always visible */}
-            <Stack spacing={0.75} mt={1.5}>
-              <Divider />
-              <Button fullWidth variant="outlined" size="small"
-                startIcon={<MuiIcons.PersonAdd fontSize="small" />}
-                onClick={() => navigate('/customer-editor', { state: { mode: 'create', returnTo: location.pathname } })}
-                sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
-                New Customer
-              </Button>
-              <Button fullWidth variant="outlined" size="small"
-                startIcon={<MuiIcons.QrCode2 fontSize="small" />}
-                sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
-                Scan ID
-              </Button>
-            </Stack>
+            {/* Only shown before a customer is selected — once one is, Edit/Clear
+                Customer above cover it and these would just be clutter. */}
+            {!customer && (
+              <Stack spacing={0.75} mt={1.5}>
+                <Divider />
+                <Button fullWidth variant="outlined" size="small"
+                  startIcon={<MuiIcons.PersonAdd fontSize="small" />}
+                  onClick={() => navigate('/customer-editor', { state: { mode: 'create', returnTo: location.pathname } })}
+                  sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
+                  New Customer
+                </Button>
+                <Button fullWidth variant="outlined" size="small"
+                  startIcon={<MuiIcons.QrCode2 fontSize="small" />}
+                  sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
+                  Scan ID
+                </Button>
+              </Stack>
+            )}
           </Box>
         </Paper>
 
