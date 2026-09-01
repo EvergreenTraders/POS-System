@@ -961,6 +961,9 @@ export default function BuyTransactionScreen({
 
             {/* Scan + Free-type row */}
             <Box sx={{ px: 2, py: 1.25, borderBottom: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography fontSize={11} fontWeight={700} color="text.secondary" letterSpacing={0.5}>
+                ADD NEW ITEM
+              </Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <TextField
                   fullWidth size="small"

@@ -1049,33 +1049,38 @@ export default function PawnTransactionScreen({
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, px: 1.5, pb: 1.5 }}>
 
         {/* Search bar */}
-        <Paper sx={{ px: 1.5, py: 1, borderRadius: 2, display: 'flex', gap: 1, alignItems: 'center' }}>
-          <TextField
-            size="small"
-            placeholder="Scan / Search / Describe Item"
-            value={itemSearch}
-            onChange={e => setItemSearch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && itemSearch.trim() && openIntake()}
-            InputProps={{
-              startAdornment: <InputAdornment position="start"><MuiIcons.Search sx={{ color: 'text.secondary' }} /></InputAdornment>,
-              endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton size="small"><MuiIcons.QrCodeScanner /></IconButton>
-                </InputAdornment>
-              ),
-            }}
-            sx={{ flex: 1, minWidth: 0, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-          />
-          <Button variant="outlined" startIcon={<MuiIcons.AddCircleOutline />}
-            onClick={openQuickAdd}
-            sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-            Free-type Quick Add
-          </Button>
-          <Button variant="contained" startIcon={<MuiIcons.Refresh />}
-            onClick={() => { setRePawnSelectorOpen(true); setRePawnSelectedItem(null); }}
-            sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}>
-            Re-Pawn
-          </Button>
+        <Paper sx={{ px: 1.5, py: 1, borderRadius: 2, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+          <Typography fontSize={11} fontWeight={700} color="text.secondary" letterSpacing={0.5}>
+            ADD NEW ITEM
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            <TextField
+              size="small"
+              placeholder="Scan / Search / Describe Item"
+              value={itemSearch}
+              onChange={e => setItemSearch(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && itemSearch.trim() && openIntake()}
+              InputProps={{
+                startAdornment: <InputAdornment position="start"><MuiIcons.Search sx={{ color: 'text.secondary' }} /></InputAdornment>,
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton size="small"><MuiIcons.QrCodeScanner /></IconButton>
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ flex: 1, minWidth: 0, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+            />
+            <Button variant="outlined" startIcon={<MuiIcons.AddCircleOutline />}
+              onClick={openQuickAdd}
+              sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Free-type Quick Add
+            </Button>
+            <Button variant="contained" startIcon={<MuiIcons.Refresh />}
+              onClick={() => { setRePawnSelectorOpen(true); setRePawnSelectedItem(null); }}
+              sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}>
+              Re-Pawn
+            </Button>
+          </Box>
         </Paper>
 
         {/* Items being pawned table — grows with content */}
