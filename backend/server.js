@@ -10555,7 +10555,13 @@ app.get('/api/customers', async (req, res) => {
 app.get('/api/customers/search', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { first_name, last_name, phone, id_number, email, limit = 50 } = req.query;
+    const { first_name, last_name, phone, id_number, email, limit = 50, include_images } = req.query;
+    // Images are bytea blobs, so we only pull them into the general search
+    // when the caller actually renders them (the full search-results dialog),
+    // not on every inline-dropdown keystroke — keeps live-typing search fast.
+    const imageColumns = include_images === 'true'
+      ? `, image, id_image_front, id_image_back, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth`
+      : '';
 
     // If all search terms are the same, use OR logic for general search
     const isSameSearchTerm = first_name === last_name && last_name === phone && phone === email;
@@ -10565,16 +10571,36 @@ app.get('/api/customers/search', async (req, res) => {
       // included and phone is matched digit-only (stripping formatting like
       // dashes/parens on both sides) so "5551234567" finds a customer stored
       // as "(555) 123-4567" — a plain LIKE on the raw phone column can't do that.
-      const searchTerm = first_name.toLowerCase();
+      const searchTerm = first_name.toLowerCase().trim();
       const digitsOnly = first_name.replace(/\D/g, '');
-      const params = [`%${searchTerm}%`, searchTerm, limit];
+      const params = [`%${searchTerm}%`, searchTerm];
       let phoneClause = '';
       if (digitsOnly) {
-        phoneClause = ` OR regexp_replace(phone, '[^0-9]', '', 'g') LIKE $${params.length + 1}`;
         params.push(`%${digitsOnly}%`);
+        phoneClause = ` OR regexp_replace(phone, '[^0-9]', '', 'g') LIKE $${params.length}`;
       }
+
+      // "a space splits the query into a first-name prefix and a last-name prefix, so a 
+      // common surname can be narrowed down by first initial/name instead of only 
+      // matching the whole "first last" string as one substring.
+      let nameClause = '';
+      let namePriorityClause = '';
+      const nameParts = searchTerm.split(/\s+/).filter(Boolean);
+      if (nameParts.length > 1) {
+        const firstPart = nameParts[0];
+        const lastPart = nameParts.slice(1).join(' ');
+        params.push(`${firstPart}%`, `${lastPart}%`);
+        const firstIdx = params.length - 1;
+        const lastIdx = params.length;
+        nameClause = ` OR (LOWER(first_name) LIKE $${firstIdx} AND LOWER(last_name) LIKE $${lastIdx})`;
+        namePriorityClause = `WHEN LOWER(first_name) LIKE $${firstIdx} AND LOWER(last_name) LIKE $${lastIdx} THEN 1.5`;
+      }
+
+      params.push(limit);
+      const limitIdx = params.length;
+
       const query = `
-        SELECT id, first_name, last_name, email, phone, status, tax_exempt, created_at, id_number
+        SELECT id, first_name, last_name, email, phone, status, tax_exempt, created_at, id_number${imageColumns}
         FROM customers
         WHERE LOWER(first_name) LIKE $1
            OR LOWER(last_name) LIKE $1
@@ -10582,15 +10608,17 @@ app.get('/api/customers/search', async (req, res) => {
            OR LOWER(first_name || ' ' || last_name) LIKE $1
            OR CAST(id_number AS TEXT) ILIKE $1
            ${phoneClause}
+           ${nameClause}
         ORDER BY
           CASE
             WHEN LOWER(first_name) = $2 THEN 1
             WHEN LOWER(last_name) = $2 THEN 2
             WHEN LOWER(first_name || ' ' || last_name) = $2 THEN 3
+            ${namePriorityClause}
             ELSE 4
           END,
-          created_at DESC
-        LIMIT $3
+          LOWER(last_name), LOWER(first_name)
+        LIMIT $${limitIdx}
       `;
       const result = await client.query(query, params);
       res.json(result.rows);

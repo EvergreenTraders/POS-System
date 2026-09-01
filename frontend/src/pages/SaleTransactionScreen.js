@@ -1032,11 +1032,20 @@ export default function SaleTransactionScreen({
                                 }}
                               />
                             )}
-                            {!resolveImageValue(customerPickerResults[selectedResultIdx].image) &&
-                             !resolveImageValue(customerPickerResults[selectedResultIdx].id_image_front) && (
-                              <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', mt: 2 }}>
-                                No photo on file
-                              </Typography>
+                            {!resolveImageValue(customerPickerResults[selectedResultIdx].image) && (
+                              <Avatar
+                                variant="rounded"
+                                sx={{
+                                  width: 120, height: 120, fontSize: 36, fontWeight: 700, bgcolor: GREEN,
+                                  border: `2px solid ${GREEN}`, boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                                }}
+                              >
+                                {(() => {
+                                  const c = customerPickerResults[selectedResultIdx];
+                                  const initials = `${(c.first_name || '')[0] || ''}${(c.last_name || '')[0] || ''}`.toUpperCase();
+                                  return initials || <MuiIcons.Person sx={{ fontSize: 56 }} />;
+                                })()}
+                              </Avatar>
                             )}
                           </>
                         )}

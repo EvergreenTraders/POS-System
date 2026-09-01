@@ -33,6 +33,11 @@ function bufferToDataUrl(bufferObj) {
   return `data:image/jpeg;base64,${base64}`;
 }
 
+// Initials shown in place of a customer photo when none is on file
+function getCustomerInitials(c) {
+  return c ? `${(c.first_name || '')[0] || ''}${(c.last_name || '')[0] || ''}`.toUpperCase() : '';
+}
+
 // ── "scrap" search-bar shortcut parsing ──────────────────────────────────────
 // Recognizes a weight + purity (in any order, e.g. "5.6g 14k" or "14k 5.6g")
 // typed into the transactions search bar. rowKey matches one of
@@ -975,7 +980,7 @@ export default function ModernTransactions() {
     setSearchingDialog(true);
     try {
       const res = await axios.get(`${config.apiUrl}/customers/search`, {
-        params: { first_name: query, last_name: query, phone: query, email: query },
+        params: { first_name: query, last_name: query, phone: query, email: query, include_images: true },
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
       setDialogSearchResults(res.data);
@@ -2574,7 +2579,7 @@ export default function ModernTransactions() {
         {/* ── LEFT: Customer panel ── */}
         <Paper sx={{ width: 240, flexShrink: 0, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', alignSelf: 'flex-start', maxHeight: '100%' }}>
           <Box sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>CUSTOMER</Typography>
+            <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>{customer ? 'SELECTED CUSTOMER' : 'CUSTOMER'}</Typography>
           </Box>
 
           <Box sx={{ p: { md: 1.5, xl: 1 }, flex: 1, overflowY: 'auto' }}>
@@ -2719,11 +2724,16 @@ export default function ModernTransactions() {
                           <Box
                             key={c.id}
                             onMouseDown={() => handleSelectCustomer(c)}
-                            sx={{ px: 1.5, py: 1, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' }, borderBottom: '1px solid #f0f0f0' }}
+                            sx={{ px: 1.5, py: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 1, '&:hover': { bgcolor: '#f5f5f5' }, borderBottom: '1px solid #f0f0f0' }}
                           >
-                            <Typography fontSize={12} fontWeight={600}>{c.first_name} {c.last_name}</Typography>
-                            {c.phone && <Typography fontSize={11} color="text.secondary">{c.phone}</Typography>}
-                            {c.email && <Typography fontSize={11} color="text.secondary" noWrap>{c.email}</Typography>}
+                            <Avatar sx={{ width: 28, height: 28, fontSize: 11, fontWeight: 700, bgcolor: GREEN, flexShrink: 0 }}>
+                              {getCustomerInitials(c) || <MuiIcons.Person sx={{ fontSize: 16 }} />}
+                            </Avatar>
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography fontSize={12} fontWeight={600}>{c.first_name} {c.last_name}</Typography>
+                              {c.phone && <Typography fontSize={11} color="text.secondary">{c.phone}</Typography>}
+                              {c.email && <Typography fontSize={11} color="text.secondary" noWrap>{c.email}</Typography>}
+                            </Box>
                           </Box>
                         ))}
                       </Paper>
@@ -3175,7 +3185,7 @@ export default function ModernTransactions() {
             <>
               <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', minWidth: 700, gap: 0 }}>
                 <Box sx={{ minWidth: 140, maxWidth: 180, mr: 0, pl: 0, ml: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', pt: 1, gap: 2 }}>
-                  {dialogSearchResults[selectedDialogIdx]?.image && (
+                  {dialogSearchResults[selectedDialogIdx]?.image ? (
                     <img
                       src={
                         typeof dialogSearchResults[selectedDialogIdx].image === 'string'
@@ -3187,6 +3197,16 @@ export default function ModernTransactions() {
                       alt="Customer"
                       style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 8, margin: '0 auto', border: `2px solid ${GREEN}`, background: '#fafafa', boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)', display: 'block' }}
                     />
+                  ) : (
+                    <Avatar
+                      variant="rounded"
+                      sx={{
+                        width: 120, height: 120, fontSize: 36, fontWeight: 700, bgcolor: GREEN,
+                        border: `2px solid ${GREEN}`, boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                      }}
+                    >
+                      {getCustomerInitials(dialogSearchResults[selectedDialogIdx]) || <MuiIcons.Person sx={{ fontSize: 56 }} />}
+                    </Avatar>
                   )}
                   {dialogSearchResults[selectedDialogIdx]?.id_image_front && (
                     <img
