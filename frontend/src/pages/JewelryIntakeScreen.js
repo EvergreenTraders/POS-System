@@ -2086,7 +2086,15 @@ export default function JewelryIntakeScreen({
                       <Typography variant="body2">{hasWeight ? `$${meltValue.toFixed(2)}` : '—'}</Typography>
                     </TableCell>
                     <TableCell align="right">
-                      <Typography variant="body2" color="text.secondary">{hasWeight ? `${buyPctResolved.toFixed(1)}%` : '—'}</Typography>
+                      <TextField size="small" type="number"
+                        value={hasWeight ? buyPctResolved.toFixed(1) : ''}
+                        onChange={e => {
+                          const pct = parseFloat(e.target.value) || 0;
+                          updateScrapFixedRow(def.key, 'buyValue', (meltValue * pct / 100).toFixed(2));
+                        }}
+                        placeholder={hasWeight ? undefined : '—'}
+                        InputProps={{ endAdornment: <InputAdornment position="end" sx={{ ml: 0 }}>%</InputAdornment> }}
+                        sx={{ width: 68, '& .MuiInputBase-input': { color: 'text.secondary' } }} />
                     </TableCell>
                     <TableCell align="right">
                       <TextField size="small" type="number"
@@ -2167,7 +2175,16 @@ export default function JewelryIntakeScreen({
                     </TableCell>
                     <TableCell align="right"><Typography variant="body2">{hasWeight ? `$${meltValue.toFixed(2)}` : '—'}</Typography></TableCell>
                     <TableCell align="right">
-                      <Typography variant="body2" color="text.secondary">{hasWeight ? `${buyPctResolved.toFixed(1)}%` : '—'}</Typography>
+                      <TextField size="small" type="number"
+                        value={hasWeight ? buyPctResolved.toFixed(1) : ''}
+                        onChange={e => {
+                          const pct = parseFloat(e.target.value) || 0;
+                          updateScrapCustomRow(row.id, 'buyValue', (meltValue * pct / 100).toFixed(2));
+                        }}
+                        placeholder={hasWeight ? undefined : '—'}
+                        disabled={!row.metal}
+                        InputProps={{ endAdornment: <InputAdornment position="end" sx={{ ml: 0 }}>%</InputAdornment> }}
+                        sx={{ width: 64, '& .MuiInputBase-input': { color: 'text.secondary' } }} />
                     </TableCell>
                     <TableCell align="right">
                       <TextField size="small" type="number"
