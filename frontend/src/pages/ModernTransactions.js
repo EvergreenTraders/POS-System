@@ -1688,7 +1688,7 @@ export default function ModernTransactions() {
       setParkSnackbar({ severity: 'warning', message: 'Select a customer before parking.' });
       return;
     }
-    if (workspaceTransactions.length === 0) {
+    if (!hasUnparkedTransactions) {
       setParkSnackbar({ severity: 'warning', message: 'Workspace is empty — nothing to park.' });
       return;
     }
@@ -1706,17 +1706,22 @@ export default function ModernTransactions() {
   // Anything sitting in the workspace that hasn't been explicitly Parked is
   // considered "unsaved" — switching customers or navigating away (via the
   // Sidebar) triggers this dialog instead of silently carrying it along or
-  // silently discarding it.
+  // silently discarding it. HISTORICAL cards (added by "View Workspace" from
+  // TransactionJournals.js, or a ticket-number search) are already-committed,
+  // read-only lookups — not unsaved work — so they're excluded here; without
+  // this, just viewing a past ticket and closing it would wrongly prompt to
+  // park/delete it.
   const [leaveWarningOpen, setLeaveWarningOpen] = useState(false);
   const leaveResolveRef = useRef(null);
+  const hasUnparkedTransactions = workspaceTransactions.some(tx => tx.type !== 'HISTORICAL');
 
   const confirmLeaveWorkspace = useCallback(() => {
-    if (workspaceTransactions.length === 0) return Promise.resolve(true);
+    if (!hasUnparkedTransactions) return Promise.resolve(true);
     return new Promise(resolve => {
       leaveResolveRef.current = resolve;
       setLeaveWarningOpen(true);
     });
-  }, [workspaceTransactions.length]);
+  }, [hasUnparkedTransactions]);
 
   const resolveLeaveWarning = (proceed) => {
     setLeaveWarningOpen(false);
@@ -1754,11 +1759,11 @@ export default function ModernTransactions() {
   // permission before navigating away from this page.
   useEffect(() => {
     const unregister = registerGuard({
-      hasUnparkedWork: workspaceTransactions.length > 0,
+      hasUnparkedWork: hasUnparkedTransactions,
       confirmLeave: confirmLeaveWorkspace,
     });
     return unregister;
-  }, [registerGuard, workspaceTransactions.length, confirmLeaveWorkspace]);
+  }, [registerGuard, hasUnparkedTransactions, confirmLeaveWorkspace]);
 
 
   const handleCheckoutAll = () => {
@@ -2652,7 +2657,7 @@ export default function ModernTransactions() {
           variant="outlined"
           startIcon={<MuiIcons.LocalParking />}
           onClick={handleParkTransaction}
-          disabled={!customer || workspaceTransactions.length === 0}
+          disabled={!customer || !hasUnparkedTransactions}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}
         >
           Park Transaction
@@ -2881,6 +2886,13 @@ export default function ModernTransactions() {
                 </Badge>
                 <Typography variant="caption" color="text.secondary">Add, edit or remove transactions before checkout.</Typography>
               </Box>
+              {workspaceTransactions.some(tx => tx.type === 'HISTORICAL') && (
+                <Button size="small" variant="outlined" startIcon={<MuiIcons.Close fontSize="small" />}
+                  onClick={handleClearCustomer}
+                  sx={{ borderRadius: 2, fontSize: 11 }}>
+                  Close Workspace
+                </Button>
+              )}
             </Paper>
           )}
 
