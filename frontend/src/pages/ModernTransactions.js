@@ -23,6 +23,7 @@ import { openPawnReceiptPDF, openBuySaleReceiptPDF, openTransactionReceiptPDF } 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 const BUY_BLUE = '#0284c7';
+const AZ_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
 // Converts a Buffer-like object (from backend) to a base64 data URL for image preview
 function bufferToDataUrl(bufferObj) {
@@ -975,12 +976,19 @@ export default function ModernTransactions() {
 
   const handleOpenSearchDialog = async () => {
     const query = customerSearch.trim();
-    if (!query) return;
     setShowResults(false);
     setSearchingDialog(true);
     try {
+      // Blank search ("just hit Enter") browses every customer, sorted by
+      // last name then first name (server.js ORDER BY) — a much bigger
+      // result set than a real search, so skip the image blobs here (fetched
+      // lazily per row on selection, see handleSelectDialogRow) rather than
+      // downloading every customer's photo up front.
+      const params = query
+        ? { first_name: query, last_name: query, phone: query, email: query, include_images: true }
+        : { first_name: '', last_name: '', phone: '', email: '', limit: 2000, include_images: false };
       const res = await axios.get(`${config.apiUrl}/customers/search`, {
-        params: { first_name: query, last_name: query, phone: query, email: query, include_images: true },
+        params,
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
       setDialogSearchResults(res.data);
@@ -997,6 +1005,45 @@ export default function ModernTransactions() {
     setSearchDialogOpen(false);
     setDialogSearchResults([]);
     setSelectedDialogIdx(-1);
+  };
+
+  // Highlights a row immediately; if it was loaded without image data (the
+  // include_images=false browse-all list), lazily fetch the full customer
+  // record so the photo panel can show their real photo.
+  const handleSelectDialogRow = async (index) => {
+    setSelectedDialogIdx(index);
+    const row = dialogSearchResults[index];
+    if (!row || 'image' in row) return;
+    try {
+      const res = await axios.get(`${config.apiUrl}/customers/${row.id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setDialogSearchResults(prev => prev.map((c, i) => i === index ? { ...c, ...res.data } : c));
+    } catch (err) {
+      console.error('Failed to load customer photo:', err);
+    }
+  };
+
+  // Maps each A–Z letter to the index of the first dialog result whose last
+  // name starts with it (results are sorted by last name, first name), so
+  // the jump strip can scroll straight there. Letters with no match are
+  // disabled.
+  const dialogLetterIndex = React.useMemo(() => {
+    const map = {};
+    dialogSearchResults.forEach((c, idx) => {
+      const letter = (c.last_name || c.first_name || '').trim()[0]?.toUpperCase();
+      if (letter && /[A-Z]/.test(letter) && map[letter] === undefined) {
+        map[letter] = idx;
+      }
+    });
+    return map;
+  }, [dialogSearchResults]);
+
+  const handleJumpToDialogLetter = (letter) => {
+    const idx = dialogLetterIndex[letter];
+    if (idx === undefined) return;
+    handleSelectDialogRow(idx);
+    document.getElementById(`workspace-cust-row-${idx}`)?.scrollIntoView({ block: 'start' });
   };
 
   useEffect(() => {
@@ -3153,12 +3200,12 @@ export default function ModernTransactions() {
           if (e.key === 'ArrowDown') {
             e.preventDefault();
             if (dialogSearchResults.length > 0) {
-              setSelectedDialogIdx(Math.min(selectedDialogIdx + 1, dialogSearchResults.length - 1));
+              handleSelectDialogRow(Math.min(selectedDialogIdx + 1, dialogSearchResults.length - 1));
             }
           } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             if (dialogSearchResults.length > 0 && selectedDialogIdx > 0) {
-              setSelectedDialogIdx(selectedDialogIdx - 1);
+              handleSelectDialogRow(selectedDialogIdx - 1);
             }
           } else if (e.key === 'Enter' && selectedDialogIdx >= 0 && dialogSearchResults[selectedDialogIdx]) {
             handleSelectCustomer(dialogSearchResults[selectedDialogIdx]);
@@ -3222,7 +3269,7 @@ export default function ModernTransactions() {
                     />
                   )}
                 </Box>
-                <Box sx={{ flex: 1, position: 'relative', display: 'flex' }}>
+                <Box sx={{ flex: 1, position: 'relative', display: 'flex', gap: 0.5 }}>
                   <TableContainer component={Paper} sx={{ mb: 0, maxHeight: 300, overflowY: 'auto', p: 0, m: 0, flex: '1 1 auto' }}>
                     <Table size="small">
                       <TableHead>
@@ -3235,8 +3282,8 @@ export default function ModernTransactions() {
                       </TableHead>
                       <TableBody>
                         {dialogSearchResults.map((c, index) => (
-                          <TableRow key={c.id} hover selected={selectedDialogIdx === index} sx={{ cursor: 'pointer' }}
-                            onClick={() => setSelectedDialogIdx(index)}
+                          <TableRow key={c.id} id={`workspace-cust-row-${index}`} hover selected={selectedDialogIdx === index} sx={{ cursor: 'pointer' }}
+                            onClick={() => handleSelectDialogRow(index)}
                             onDoubleClick={() => { handleSelectCustomer(c); handleCloseSearchDialog(); }}>
                             <TableCell sx={{ width: 140, maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.first_name} {c.last_name}</TableCell>
                             <TableCell>{c.date_of_birth ? c.date_of_birth.substring(0, 10) : ''}</TableCell>
@@ -3247,6 +3294,32 @@ export default function ModernTransactions() {
                       </TableBody>
                     </Table>
                   </TableContainer>
+                  {/* A–Z jump strip — only useful once the list is long enough to
+                      need it, e.g. the blank-search browse-all */}
+                  {dialogSearchResults.length > 8 && (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', maxHeight: 300, overflowY: 'auto', flexShrink: 0 }}>
+                      {AZ_LETTERS.map(letter => {
+                        const idx = dialogLetterIndex[letter];
+                        const available = idx !== undefined;
+                        return (
+                          <Box
+                            key={letter}
+                            onClick={() => available && handleJumpToDialogLetter(letter)}
+                            sx={{
+                              fontSize: 9, lineHeight: 1.4, textAlign: 'center', px: 0.4,
+                              cursor: available ? 'pointer' : 'default',
+                              color: available ? GREEN : '#d0d0d0',
+                              fontWeight: available ? 700 : 400,
+                              borderRadius: 0.5,
+                              '&:hover': available ? { bgcolor: '#e8f5e9' } : {},
+                            }}
+                          >
+                            {letter}
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  )}
                 </Box>
               </Box>
 

@@ -10626,11 +10626,15 @@ app.get('/api/customers/search', async (req, res) => {
     }
 
     // Original logic for specific field searches (AND logic)
-    // Return all customer fields including images for the search dialog
+    // Return all customer fields including images for the search dialog —
+    // unless the caller explicitly opts out (include_images=false), which a
+    // blank "browse all customers" search uses to avoid pulling hundreds of
+    // image blobs into one response just to render a name list.
+    const andImageColumns = include_images === 'false' ? '' : ', image, id_image_front, id_image_back';
     let query = `SELECT
       id, first_name, last_name, email, phone, status, tax_exempt,
       TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth,
-      id_number, image, id_image_front, id_image_back
+      id_number${andImageColumns}
       FROM customers WHERE 1=1`;
     const params = [];
     let paramCount = 1;
@@ -10665,7 +10669,7 @@ app.get('/api/customers/search', async (req, res) => {
       paramCount++;
     }
 
-    query += ` ORDER BY created_at DESC LIMIT $${paramCount}`;
+    query += ` ORDER BY LOWER(last_name), LOWER(first_name) LIMIT $${paramCount}`;
     params.push(limit);
 
     const result = await client.query(query, params);
@@ -10713,7 +10717,7 @@ app.get('/api/customers/search', async (req, res) => {
 
       if (fuzzyConditions.length > 0) {
         fuzzyQuery += fuzzyConditions.join(' OR ');
-        fuzzyQuery += ` ORDER BY created_at DESC LIMIT $${fuzzyParamCount}`;
+        fuzzyQuery += ` ORDER BY LOWER(last_name), LOWER(first_name) LIMIT $${fuzzyParamCount}`;
         fuzzyParams.push(limit);
 
         const fuzzyResult = await client.query(fuzzyQuery, fuzzyParams);
