@@ -6,8 +6,8 @@ import {
   Box, Typography, Paper, Grid, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Badge, Tooltip, Stack, Snackbar, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  List, ListItem, ListItemText, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Menu, FormControlLabel, Checkbox, Popper,
+  List, ListItem, ListItemText, ListItemIcon, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Menu, MenuItem, FormControlLabel, Checkbox, Popper,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
@@ -1083,6 +1083,7 @@ export default function ModernTransactions() {
   const showStatsCard = currentEmployee?.show_stats_card !== false;
 
   const [cardPrefsAnchor, setCardPrefsAnchor] = useState(null);
+  const [addTicketMenuAnchor, setAddTicketMenuAnchor] = useState(null);
   const handleToggleCardPref = async (field, currentValue) => {
     const nextValue = !currentValue;
     setEmployees(prev => prev.map(e => e.employee_id === currentUser?.id ? { ...e, [field]: nextValue } : e));
@@ -2876,25 +2877,53 @@ export default function ModernTransactions() {
 
         {/* ── MIDDLE: Transaction workspace ── */}
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, overflow: 'hidden', minWidth: 0 }}>
-          {/* Workspace header */}
-          {workspaceTransactions.length > 0 && (
-            <Paper sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>TRANSACTION WORKSPACE</Typography>
-                <Badge badgeContent={workspaceTransactions.length} color="primary" sx={{ '& .MuiBadge-badge': { position: 'relative', transform: 'none', ml: 0.5 } }}>
-                  <Box />
-                </Badge>
-                <Typography variant="caption" color="text.secondary">Add, edit or remove transactions before checkout.</Typography>
-              </Box>
+          {/* Workspace header — always visible (not just once a card is added)
+              so a new employee can identify this panel on sight, styled to
+              match the green banner on the Customer/Summary panels. */}
+          <Paper sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, borderRadius: 2, bgcolor: GREEN, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>
+                {currentEmployee ? `${currentEmployee.first_name}'S WORKSPACE` : 'WORKSPACE'}
+              </Typography>
+              <Badge badgeContent={workspaceTransactions.length} color="primary" sx={{ '& .MuiBadge-badge': { position: 'relative', transform: 'none', ml: 0.5 } }}>
+                <Box />
+              </Badge>
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.85)' }}>Add, edit or remove transactions before checkout.</Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Button size="small" variant="outlined" startIcon={<MuiIcons.Add fontSize="small" />} endIcon={<MuiIcons.ArrowDropDown fontSize="small" />}
+                onClick={(e) => setAddTicketMenuAnchor(e.currentTarget)}
+                sx={{ borderRadius: 2, fontSize: 11, color: '#fff', borderColor: 'rgba(255,255,255,0.6)', '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.1)' } }}>
+                Add Ticket
+              </Button>
+              <Menu anchorEl={addTicketMenuAnchor} open={Boolean(addTicketMenuAnchor)} onClose={() => setAddTicketMenuAnchor(null)}>
+                {/* Mirrors the ADD TRANSACTION row at the bottom of the screen —
+                    same types, same order, same customer/lookup-context gating. */}
+                {transactionTypes.map(t => {
+                  const IconComponent = MuiIcons[t.icon] ?? MuiIcons.Add;
+                  const allowedTypes = lookupContext === 'PAWN' ? ['payment', 'redeem']
+                    : lookupContext === 'SALE' ? ['pawn', 'refund']
+                    : lookupContext === 'BUY' ? []
+                    : null;
+                  const isDisabled = allowedTypes ? !allowedTypes.includes(t.type) : false;
+                  return (
+                    <MenuItem key={t.id} disabled={isDisabled}
+                      onClick={() => { setAddTicketMenuAnchor(null); handleTransactionTypeClick(t.type); }}>
+                      <ListItemIcon><IconComponent fontSize="small" sx={{ color: t.color ?? '#607d8b' }} /></ListItemIcon>
+                      <ListItemText>{t.type.charAt(0).toUpperCase() + t.type.slice(1)}</ListItemText>
+                    </MenuItem>
+                  );
+                })}
+              </Menu>
               {workspaceTransactions.some(tx => tx.type === 'HISTORICAL') && (
                 <Button size="small" variant="outlined" startIcon={<MuiIcons.Close fontSize="small" />}
                   onClick={handleClearCustomer}
-                  sx={{ borderRadius: 2, fontSize: 11 }}>
+                  sx={{ borderRadius: 2, fontSize: 11, color: '#fff', borderColor: 'rgba(255,255,255,0.6)', '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.1)' } }}>
                   Close Workspace
                 </Button>
               )}
-            </Paper>
-          )}
+            </Box>
+          </Paper>
 
           {/* Transaction cards grid */}
           <Box sx={{ flex: 1, overflowY: 'auto' }}>
