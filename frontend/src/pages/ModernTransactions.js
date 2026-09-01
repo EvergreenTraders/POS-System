@@ -6,8 +6,8 @@ import {
   Box, Typography, Paper, Grid, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Badge, Tooltip, Stack, Snackbar, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  List, ListItem, ListItemText, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Menu, FormControlLabel, Checkbox, Popper,
+  List, ListItem, ListItemText, ListItemIcon, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Menu, MenuItem, FormControlLabel, Checkbox, Popper,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
@@ -19,10 +19,12 @@ import RedeemTransactionScreen from './RedeemTransactionScreen';
 import { useWorkspaceGuard } from '../context/WorkspaceGuardContext';
 import { useAuth } from '../context/AuthContext';
 import { openPawnReceiptPDF, openBuySaleReceiptPDF, openTransactionReceiptPDF } from '../utils/ticketReceiptUtils';
+import { parseQuickScrapEntry } from '../utils/quickScrapEntry';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 const BUY_BLUE = '#0284c7';
+const AZ_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
 // Converts a Buffer-like object (from backend) to a base64 data URL for image preview
 function bufferToDataUrl(bufferObj) {
@@ -33,75 +35,9 @@ function bufferToDataUrl(bufferObj) {
   return `data:image/jpeg;base64,${base64}`;
 }
 
-// ── "scrap" search-bar shortcut parsing ──────────────────────────────────────
-// Recognizes a weight + purity (in any order, e.g. "5.6g 14k" or "14k 5.6g")
-// typed into the transactions search bar. rowKey matches one of
-// JewelryIntakeScreen's SCRAP_FIXED_ROWS keys — one row per common
-// karat/fineness, purity baked in. Platinum/palladium and uncommon purities
-// have no fixed row (Custom Rows only), so they resolve to no rowKey and the
-// text falls through to the unique-item-prefill path instead of bulk scrap.
-const SCRAP_PURITY_BY_DECIMAL = [
-  { rowKey: 'gold10k',   value: 0.417, metal: 'Gold',   karat: 10 },
-  { rowKey: 'gold14k',   value: 0.585, metal: 'Gold',   karat: 14 },
-  { rowKey: 'gold18k',   value: 0.750, metal: 'Gold',   karat: 18 },
-  { rowKey: 'gold22k',   value: 0.917, metal: 'Gold',   karat: 22 },
-  { rowKey: 'silver925', value: 0.925, metal: 'Silver', karat: null },
-];
-const SCRAP_METAL_WORDS = { gold: 'Gold', silver: 'Silver', platinum: 'Platinum', palladium: 'Palladium' };
-
-function parseQuickScrapEntry(text) {
-  const tokens = text.trim().split(/\s+/).filter(Boolean);
-  let hasScrapWord = false;
-  let weightG = null;
-  let karat = null;
-  let purityValue = null;
-  let metal = null;
-  const leftover = [];
-
-  for (const tok of tokens) {
-    const lower = tok.toLowerCase();
-    let m;
-    if (lower === 'scrap') { hasScrapWord = true; continue; }
-    if (SCRAP_METAL_WORDS[lower]) { metal = SCRAP_METAL_WORDS[lower]; continue; }
-    if (weightG === null && (m = lower.match(/^(\d+(?:\.\d+)?)g$/))) {
-      weightG = parseFloat(m[1]);
-      continue;
-    }
-    if (purityValue === null && (m = lower.match(/^(\d+)k$/))) {
-      const k = parseInt(m[1], 10);
-      karat = k;
-      purityValue = Math.round((k / 24) * 1000) / 1000;
-      metal = metal || 'Gold';
-      continue;
-    }
-    if (purityValue === null && (m = lower.match(/^0?(\.\d+)$/))) {
-      const dec = parseFloat(`0${m[1]}`);
-      const nearest = SCRAP_PURITY_BY_DECIMAL.reduce((best, c) =>
-        Math.abs(c.value - dec) < Math.abs(best.value - dec) ? c : best, SCRAP_PURITY_BY_DECIMAL[0]);
-      if (Math.abs(nearest.value - dec) <= 0.01) {
-        purityValue = nearest.value;
-        karat = nearest.karat;
-        metal = metal || nearest.metal;
-      } else {
-        purityValue = dec;
-        metal = metal || 'Gold';
-      }
-      continue;
-    }
-    leftover.push(tok);
-  }
-
-  // rowKey only resolves for a known common karat/fineness with a fixed row —
-  // platinum, palladium, and uncommon purities have none.
-  const rowMatch = purityValue != null
-    ? SCRAP_PURITY_BY_DECIMAL.find(c => Math.abs(c.value - purityValue) <= 0.01 && (!metal || c.metal === metal))
-    : null;
-  const rowKey = rowMatch?.rowKey ?? null;
-  const hasWeightAndPurity = weightG != null && purityValue != null;
-  const isBulkScrap = hasScrapWord || (hasWeightAndPurity && leftover.length === 0);
-  const isUniqueWithPrefill = !isBulkScrap && hasWeightAndPurity;
-
-  return { hasScrapWord, weightG, karat, purityValue, metal, rowKey, leftover, isBulkScrap, isUniqueWithPrefill };
+// Initials shown in place of a customer photo when none is on file
+function getCustomerInitials(c) {
+  return c ? `${(c.first_name || '')[0] || ''}${(c.last_name || '')[0] || ''}`.toUpperCase() : '';
 }
 
 // ── Dashboard-style placeholder cards shown when the workspace is empty ──────
@@ -543,25 +479,35 @@ function RedeemTransactionCard({ tx, redeemIcon, redeemColor, onOpen, onVoid }) 
   );
 }
 
-function TransactionTypeButton({ label, icon, color, onClick, count, disabled = false }) {
+function TransactionTypeButton({ label, icon, color, onClick, count, disabled = false, size = 'default', fitRow = false }) {
   const effectiveColor = disabled ? '#bdbdbd' : color;
+  const isLarge = size === 'large';
   return (
     <Badge badgeContent={count || 0} color="primary" overlap="rectangular"
-      sx={{ '& .MuiBadge-badge': { fontSize: 9, minWidth: 16, height: 16, top: 4, right: 4 } }}>
+      sx={{
+        ...(fitRow ? { flex: '1 1 0', minWidth: 0 } : {}),
+        '& .MuiBadge-badge': isLarge
+          ? { fontSize: 9.5, minWidth: 17, height: 17, top: 5, right: 5 }
+          : { fontSize: 8, minWidth: 14, height: 14, top: 3, right: 3 },
+      }}>
       <Paper
         variant="outlined"
         onClick={disabled ? undefined : onClick}
         sx={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          p: { md: 1, xl: 0.75 }, cursor: disabled ? 'default' : 'pointer', borderRadius: 2, borderColor: '#e0e0e0',
-          minWidth: { md: 70, xl: 60 },
+          p: isLarge ? { md: 1.25, xl: 1 } : { md: 0.75, xl: 0.6 },
+          cursor: disabled ? 'default' : 'pointer', borderRadius: isLarge ? 2.25 : 2, borderColor: '#e0e0e0',
+          borderWidth: isLarge ? 1.1 : 1,
+          width: fitRow ? '100%' : undefined,
+          minWidth: fitRow ? 0 : (isLarge ? { md: 78, xl: 70 } : { md: 58, xl: 50 }),
           opacity: disabled ? 0.4 : 1,
           ...(disabled ? {} : { '&:hover': { bgcolor: '#f5f5f5', borderColor: color } }),
           transition: 'all 0.15s',
         }}
       >
-        <Box sx={{ color: effectiveColor, mb: 0.25, '& svg': { fontSize: { md: 24, xl: 20 } } }}>{icon}</Box>
-        <Typography align="center" fontWeight={500} sx={{ fontSize: { md: 10, xl: 9 }, color: effectiveColor }}>{label}</Typography>
+        <Box sx={{ color: effectiveColor, mb: isLarge ? 0.3 : 0.2, '& svg': { fontSize: isLarge ? { md: 23, xl: 21 } : { md: 19, xl: 16 } } }}>{icon}</Box>
+        <Typography align="center" fontWeight={isLarge ? 700 : 500} noWrap={fitRow}
+          sx={{ fontSize: isLarge ? { md: 11, xl: 10 } : { md: 9, xl: 8 }, color: effectiveColor, maxWidth: '100%' }}>{label}</Typography>
       </Paper>
     </Badge>
   );
@@ -970,12 +916,19 @@ export default function ModernTransactions() {
 
   const handleOpenSearchDialog = async () => {
     const query = customerSearch.trim();
-    if (!query) return;
     setShowResults(false);
     setSearchingDialog(true);
     try {
+      // Blank search ("just hit Enter") browses every customer, sorted by
+      // last name then first name (server.js ORDER BY) — a much bigger
+      // result set than a real search, so skip the image blobs here (fetched
+      // lazily per row on selection, see handleSelectDialogRow) rather than
+      // downloading every customer's photo up front.
+      const params = query
+        ? { first_name: query, last_name: query, phone: query, email: query, include_images: true }
+        : { first_name: '', last_name: '', phone: '', email: '', limit: 2000, include_images: false };
       const res = await axios.get(`${config.apiUrl}/customers/search`, {
-        params: { first_name: query, last_name: query, phone: query, email: query },
+        params,
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
       setDialogSearchResults(res.data);
@@ -992,6 +945,45 @@ export default function ModernTransactions() {
     setSearchDialogOpen(false);
     setDialogSearchResults([]);
     setSelectedDialogIdx(-1);
+  };
+
+  // Highlights a row immediately; if it was loaded without image data (the
+  // include_images=false browse-all list), lazily fetch the full customer
+  // record so the photo panel can show their real photo.
+  const handleSelectDialogRow = async (index) => {
+    setSelectedDialogIdx(index);
+    const row = dialogSearchResults[index];
+    if (!row || 'image' in row) return;
+    try {
+      const res = await axios.get(`${config.apiUrl}/customers/${row.id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setDialogSearchResults(prev => prev.map((c, i) => i === index ? { ...c, ...res.data } : c));
+    } catch (err) {
+      console.error('Failed to load customer photo:', err);
+    }
+  };
+
+  // Maps each A–Z letter to the index of the first dialog result whose last
+  // name starts with it (results are sorted by last name, first name), so
+  // the jump strip can scroll straight there. Letters with no match are
+  // disabled.
+  const dialogLetterIndex = React.useMemo(() => {
+    const map = {};
+    dialogSearchResults.forEach((c, idx) => {
+      const letter = (c.last_name || c.first_name || '').trim()[0]?.toUpperCase();
+      if (letter && /[A-Z]/.test(letter) && map[letter] === undefined) {
+        map[letter] = idx;
+      }
+    });
+    return map;
+  }, [dialogSearchResults]);
+
+  const handleJumpToDialogLetter = (letter) => {
+    const idx = dialogLetterIndex[letter];
+    if (idx === undefined) return;
+    handleSelectDialogRow(idx);
+    document.getElementById(`workspace-cust-row-${idx}`)?.scrollIntoView({ block: 'start' });
   };
 
   useEffect(() => {
@@ -1021,6 +1013,7 @@ export default function ModernTransactions() {
   const showStatsCard = currentEmployee?.show_stats_card !== false;
 
   const [cardPrefsAnchor, setCardPrefsAnchor] = useState(null);
+  const [addTicketMenuAnchor, setAddTicketMenuAnchor] = useState(null);
   const handleToggleCardPref = async (field, currentValue) => {
     const nextValue = !currentValue;
     setEmployees(prev => prev.map(e => e.employee_id === currentUser?.id ? { ...e, [field]: nextValue } : e));
@@ -1371,6 +1364,30 @@ export default function ModernTransactions() {
       .catch(err => console.error('Failed to refresh customer after redeem checkout back:', err));
   }, [location.state]);
 
+  // Restore the selected customer (and any workspace cards) after returning
+  // from CustomerEditor when Edit Customer was clicked directly from the main
+  // customer panel — i.e. no Pawn/Sale/Buy/Trade/Payment/Redeem screen was
+  // open, so none of the pending*State restores above apply. Without this,
+  // navigating to /customer-editor and back (whether Saved or Cancelled)
+  // unmounts this whole page and both customer and workspaceTransactions
+  // reset to empty.
+  useEffect(() => {
+    if (!location.state?.customerUpdated) return;
+    const raw = sessionStorage.getItem('pendingWorkspaceCustomerState');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingWorkspaceCustomerState');
+    const { customerId, workspaceTransactions: savedWorkspaceTransactions } = pending;
+    if (!customerId) return;
+    pendingResumeWorkspaceRef.current = savedWorkspaceTransactions || [];
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after edit:', err));
+  }, [location.state]);
+
   const handleCustomerSearch = async (query) => {
     setCustomerSearch(query);
     if (!query.trim()) { setCustomerResults([]); setShowResults(false); return; }
@@ -1602,7 +1619,7 @@ export default function ModernTransactions() {
       setParkSnackbar({ severity: 'warning', message: 'Select a customer before parking.' });
       return;
     }
-    if (workspaceTransactions.length === 0) {
+    if (!hasUnparkedTransactions) {
       setParkSnackbar({ severity: 'warning', message: 'Workspace is empty — nothing to park.' });
       return;
     }
@@ -1620,17 +1637,22 @@ export default function ModernTransactions() {
   // Anything sitting in the workspace that hasn't been explicitly Parked is
   // considered "unsaved" — switching customers or navigating away (via the
   // Sidebar) triggers this dialog instead of silently carrying it along or
-  // silently discarding it.
+  // silently discarding it. HISTORICAL cards (added by "View Workspace" from
+  // TransactionJournals.js, or a ticket-number search) are already-committed,
+  // read-only lookups — not unsaved work — so they're excluded here; without
+  // this, just viewing a past ticket and closing it would wrongly prompt to
+  // park/delete it.
   const [leaveWarningOpen, setLeaveWarningOpen] = useState(false);
   const leaveResolveRef = useRef(null);
+  const hasUnparkedTransactions = workspaceTransactions.some(tx => tx.type !== 'HISTORICAL');
 
   const confirmLeaveWorkspace = useCallback(() => {
-    if (workspaceTransactions.length === 0) return Promise.resolve(true);
+    if (!hasUnparkedTransactions) return Promise.resolve(true);
     return new Promise(resolve => {
       leaveResolveRef.current = resolve;
       setLeaveWarningOpen(true);
     });
-  }, [workspaceTransactions.length]);
+  }, [hasUnparkedTransactions]);
 
   const resolveLeaveWarning = (proceed) => {
     setLeaveWarningOpen(false);
@@ -1668,11 +1690,11 @@ export default function ModernTransactions() {
   // permission before navigating away from this page.
   useEffect(() => {
     const unregister = registerGuard({
-      hasUnparkedWork: workspaceTransactions.length > 0,
+      hasUnparkedWork: hasUnparkedTransactions,
       confirmLeave: confirmLeaveWorkspace,
     });
     return unregister;
-  }, [registerGuard, workspaceTransactions.length, confirmLeaveWorkspace]);
+  }, [registerGuard, hasUnparkedTransactions, confirmLeaveWorkspace]);
 
 
   const handleCheckoutAll = () => {
@@ -1969,6 +1991,14 @@ export default function ModernTransactions() {
     } else if (type === 'redeem') {
       if (!customer) { setNoCustomerWarning('redeem ticket'); return; }
       setRedeemOpen(true);
+    } else {
+      // consignment / layaway / repair / refund — no dedicated ticket screen
+      // exists yet, so this used to silently do nothing on click (no warning,
+      // no screen). Still enforce the same customer requirement as every
+      // other transaction type, and tell the user explicitly rather than the
+      // button appearing dead.
+      if (!customer) { setNoCustomerWarning(`${type} ticket`); return; }
+      setParkSnackbar({ severity: 'info', message: `${type.charAt(0).toUpperCase() + type.slice(1)} tickets aren't available yet.` });
     }
   };
 
@@ -2558,7 +2588,7 @@ export default function ModernTransactions() {
           variant="outlined"
           startIcon={<MuiIcons.LocalParking />}
           onClick={handleParkTransaction}
-          disabled={!customer || workspaceTransactions.length === 0}
+          disabled={!customer || !hasUnparkedTransactions}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}
         >
           Park Transaction
@@ -2574,7 +2604,7 @@ export default function ModernTransactions() {
         {/* ── LEFT: Customer panel ── */}
         <Paper sx={{ width: 240, flexShrink: 0, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', alignSelf: 'flex-start', maxHeight: '100%' }}>
           <Box sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>CUSTOMER</Typography>
+            <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>{customer ? 'SELECTED CUSTOMER' : 'CUSTOMER'}</Typography>
           </Box>
 
           <Box sx={{ p: { md: 1.5, xl: 1 }, flex: 1, overflowY: 'auto' }}>
@@ -2656,17 +2686,28 @@ export default function ModernTransactions() {
                 <Stack spacing={0.75}>
                   <Button fullWidth variant="outlined" size="small"
                     startIcon={<MuiIcons.Edit fontSize="small" />}
-                    onClick={() => navigate('/customer-editor', {
-                      state: {
-                        customer: {
-                          ...customer,
-                          id_expiry_date: customer.id_expiry_date ? new Date(customer.id_expiry_date).toISOString().substring(0, 10) : '',
-                          date_of_birth:  customer.date_of_birth  ? new Date(customer.date_of_birth).toISOString().substring(0, 10)  : '',
+                    onClick={() => {
+                      // Navigating to /customer-editor unmounts this whole page, so
+                      // both the selected customer and the workspace cards would
+                      // otherwise be lost on the way back — whether Saved or
+                      // Cancelled. Stash them and restore in the customerUpdated
+                      // effect above.
+                      sessionStorage.setItem('pendingWorkspaceCustomerState', JSON.stringify({
+                        customerId: customer.id,
+                        workspaceTransactions: stripImages(workspaceTransactions),
+                      }));
+                      navigate('/customer-editor', {
+                        state: {
+                          customer: {
+                            ...customer,
+                            id_expiry_date: customer.id_expiry_date ? new Date(customer.id_expiry_date).toISOString().substring(0, 10) : '',
+                            date_of_birth:  customer.date_of_birth  ? new Date(customer.date_of_birth).toISOString().substring(0, 10)  : '',
+                          },
+                          mode: 'edit',
+                          returnTo: location.pathname,
                         },
-                        mode: 'edit',
-                        returnTo: location.pathname,
-                      },
-                    })}
+                      });
+                    }}
                     sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
                     Edit Customer
                   </Button>
@@ -2719,11 +2760,16 @@ export default function ModernTransactions() {
                           <Box
                             key={c.id}
                             onMouseDown={() => handleSelectCustomer(c)}
-                            sx={{ px: 1.5, py: 1, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' }, borderBottom: '1px solid #f0f0f0' }}
+                            sx={{ px: 1.5, py: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 1, '&:hover': { bgcolor: '#f5f5f5' }, borderBottom: '1px solid #f0f0f0' }}
                           >
-                            <Typography fontSize={12} fontWeight={600}>{c.first_name} {c.last_name}</Typography>
-                            {c.phone && <Typography fontSize={11} color="text.secondary">{c.phone}</Typography>}
-                            {c.email && <Typography fontSize={11} color="text.secondary" noWrap>{c.email}</Typography>}
+                            <Avatar sx={{ width: 28, height: 28, fontSize: 11, fontWeight: 700, bgcolor: GREEN, flexShrink: 0 }}>
+                              {getCustomerInitials(c) || <MuiIcons.Person sx={{ fontSize: 16 }} />}
+                            </Avatar>
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography fontSize={12} fontWeight={600}>{c.first_name} {c.last_name}</Typography>
+                              {c.phone && <Typography fontSize={11} color="text.secondary">{c.phone}</Typography>}
+                              {c.email && <Typography fontSize={11} color="text.secondary" noWrap>{c.email}</Typography>}
+                            </Box>
                           </Box>
                         ))}
                       </Paper>
@@ -2738,38 +2784,76 @@ export default function ModernTransactions() {
               </>
             )}
 
-            {/* Always visible */}
-            <Stack spacing={0.75} mt={1.5}>
-              <Divider />
-              <Button fullWidth variant="outlined" size="small"
-                startIcon={<MuiIcons.PersonAdd fontSize="small" />}
-                onClick={() => navigate('/customer-editor', { state: { mode: 'create', returnTo: location.pathname } })}
-                sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
-                New Customer
-              </Button>
-              <Button fullWidth variant="outlined" size="small"
-                startIcon={<MuiIcons.QrCode2 fontSize="small" />}
-                sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
-                Scan ID
-              </Button>
-            </Stack>
+            {/* Only shown before a customer is selected — once one is, Edit/Clear
+                Customer above cover it and these would just be clutter. */}
+            {!customer && (
+              <Stack spacing={0.75} mt={1.5}>
+                <Divider />
+                <Button fullWidth variant="outlined" size="small"
+                  startIcon={<MuiIcons.PersonAdd fontSize="small" />}
+                  onClick={() => navigate('/customer-editor', { state: { mode: 'create', returnTo: location.pathname } })}
+                  sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
+                  New Customer
+                </Button>
+                <Button fullWidth variant="outlined" size="small"
+                  startIcon={<MuiIcons.QrCode2 fontSize="small" />}
+                  sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
+                  Scan ID
+                </Button>
+              </Stack>
+            )}
           </Box>
         </Paper>
 
         {/* ── MIDDLE: Transaction workspace ── */}
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, overflow: 'hidden', minWidth: 0 }}>
-          {/* Workspace header */}
-          {workspaceTransactions.length > 0 && (
-            <Paper sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>TRANSACTION WORKSPACE</Typography>
-                <Badge badgeContent={workspaceTransactions.length} color="primary" sx={{ '& .MuiBadge-badge': { position: 'relative', transform: 'none', ml: 0.5 } }}>
-                  <Box />
-                </Badge>
-                <Typography variant="caption" color="text.secondary">Add, edit or remove transactions before checkout.</Typography>
-              </Box>
-            </Paper>
-          )}
+          {/* Workspace header — always visible (not just once a card is added)
+              so a new employee can identify this panel on sight, styled to
+              match the green banner on the Customer/Summary panels. */}
+          <Paper sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, borderRadius: 2, bgcolor: GREEN, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>
+                {currentEmployee ? `${currentEmployee.first_name}'S WORKSPACE` : 'WORKSPACE'}
+              </Typography>
+              <Badge badgeContent={workspaceTransactions.length} color="primary" sx={{ '& .MuiBadge-badge': { position: 'relative', transform: 'none', ml: 0.5 } }}>
+                <Box />
+              </Badge>
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.85)' }}>Add, edit or remove transactions before checkout.</Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Button size="small" variant="outlined" startIcon={<MuiIcons.Add fontSize="small" />} endIcon={<MuiIcons.ArrowDropDown fontSize="small" />}
+                onClick={(e) => setAddTicketMenuAnchor(e.currentTarget)}
+                sx={{ borderRadius: 2, fontSize: 11, color: '#fff', borderColor: 'rgba(255,255,255,0.6)', '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.1)' } }}>
+                Add Ticket
+              </Button>
+              <Menu anchorEl={addTicketMenuAnchor} open={Boolean(addTicketMenuAnchor)} onClose={() => setAddTicketMenuAnchor(null)}>
+                {/* Mirrors the ADD TRANSACTION row at the bottom of the screen —
+                    same types, same order, same customer/lookup-context gating. */}
+                {transactionTypes.map(t => {
+                  const IconComponent = MuiIcons[t.icon] ?? MuiIcons.Add;
+                  const allowedTypes = lookupContext === 'PAWN' ? ['payment', 'redeem']
+                    : lookupContext === 'SALE' ? ['pawn', 'refund']
+                    : lookupContext === 'BUY' ? []
+                    : null;
+                  const isDisabled = allowedTypes ? !allowedTypes.includes(t.type) : false;
+                  return (
+                    <MenuItem key={t.id} disabled={isDisabled}
+                      onClick={() => { setAddTicketMenuAnchor(null); handleTransactionTypeClick(t.type); }}>
+                      <ListItemIcon><IconComponent fontSize="small" sx={{ color: t.color ?? '#607d8b' }} /></ListItemIcon>
+                      <ListItemText>{t.type.charAt(0).toUpperCase() + t.type.slice(1)}</ListItemText>
+                    </MenuItem>
+                  );
+                })}
+              </Menu>
+              {workspaceTransactions.some(tx => tx.type === 'HISTORICAL') && (
+                <Button size="small" variant="outlined" startIcon={<MuiIcons.Close fontSize="small" />}
+                  onClick={handleClearCustomer}
+                  sx={{ borderRadius: 2, fontSize: 11, color: '#fff', borderColor: 'rgba(255,255,255,0.6)', '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.1)' } }}>
+                  Close Workspace
+                </Button>
+              )}
+            </Box>
+          </Paper>
 
           {/* Transaction cards grid */}
           <Box sx={{ flex: 1, overflowY: 'auto' }}>
@@ -3061,14 +3145,25 @@ export default function ModernTransactions() {
         </Paper>
       </Box>{/* end three-column row */}
 
-      {/* ── Full-width bottom bar: ADD TRANSACTION + ACTIONS ── */}
-      <Paper sx={{ p: { md: 1.5, xl: 1 }, borderRadius: 2, flexShrink: 0, display: 'flex', gap: { md: 2, xl: 1.5 }, alignItems: 'flex-start' }}>
-        {/* ADD TRANSACTION */}
-        <Box sx={{ flex: 1 }}>
-          <Typography fontWeight={700} color="text.secondary" letterSpacing={1} display="block" mb={{ md: 1, xl: 0.5 }} sx={{ fontSize: { md: 12, xl: 10 } }}>
+      {/* ── Full-width bottom bar: ADD TRANSACTION + ACTIONS ──
+          Vertically resizable/scrollable (drag the bottom edge, or scroll if
+          content ever exceeds the current height) so it never forces the
+          rest of the page to grow. */}
+      <Paper sx={{
+        p: { md: 2, xl: 1.5 }, borderRadius: 2, flexShrink: 0, display: 'flex', gap: { md: 2, xl: 1.5 }, alignItems: 'flex-start',
+        minHeight: { md: 96, xl: 84 }, maxHeight: { md: 260, xl: 220 },
+        resize: 'vertical', overflow: 'auto',
+      }}>
+        {/* ADD TRANSACTION — sized up so it reads as the primary action row.
+            All buttons stay on one line: fitRow lets each shrink evenly to
+            fill the available width instead of wrapping or scrolling. */}
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography fontWeight={800} color="text.secondary" letterSpacing={1.5} display="block" mb={{ md: 1.5, xl: 1 }} sx={{ fontSize: { md: 14, xl: 12 } }}>
             ADD TRANSACTION
           </Typography>
-          <Box sx={{ display: 'flex', gap: { md: 1, xl: 0.75 }, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: { md: 0.6, xl: 0.5 }, flexWrap: 'nowrap' }}>
+            {/* transactionTypes is already ordered by sort_order, which puts
+                quick_sale first. */}
             {transactionTypes.map(t => {
               const IconComponent = MuiIcons[t.icon] ?? MuiIcons.Add;
               const count = workspaceTransactions.filter(tx => tx.type === t.type.toUpperCase()).length;
@@ -3085,6 +3180,8 @@ export default function ModernTransactions() {
                   onClick={() => handleTransactionTypeClick(t.type)}
                   count={count}
                   disabled={allowedTypes ? !allowedTypes.includes(t.type) : false}
+                  fitRow
+                  size="large"
                 />
               );
             })}
@@ -3143,12 +3240,12 @@ export default function ModernTransactions() {
           if (e.key === 'ArrowDown') {
             e.preventDefault();
             if (dialogSearchResults.length > 0) {
-              setSelectedDialogIdx(Math.min(selectedDialogIdx + 1, dialogSearchResults.length - 1));
+              handleSelectDialogRow(Math.min(selectedDialogIdx + 1, dialogSearchResults.length - 1));
             }
           } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             if (dialogSearchResults.length > 0 && selectedDialogIdx > 0) {
-              setSelectedDialogIdx(selectedDialogIdx - 1);
+              handleSelectDialogRow(selectedDialogIdx - 1);
             }
           } else if (e.key === 'Enter' && selectedDialogIdx >= 0 && dialogSearchResults[selectedDialogIdx]) {
             handleSelectCustomer(dialogSearchResults[selectedDialogIdx]);
@@ -3175,7 +3272,7 @@ export default function ModernTransactions() {
             <>
               <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', minWidth: 700, gap: 0 }}>
                 <Box sx={{ minWidth: 140, maxWidth: 180, mr: 0, pl: 0, ml: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', pt: 1, gap: 2 }}>
-                  {dialogSearchResults[selectedDialogIdx]?.image && (
+                  {dialogSearchResults[selectedDialogIdx]?.image ? (
                     <img
                       src={
                         typeof dialogSearchResults[selectedDialogIdx].image === 'string'
@@ -3187,6 +3284,16 @@ export default function ModernTransactions() {
                       alt="Customer"
                       style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 8, margin: '0 auto', border: `2px solid ${GREEN}`, background: '#fafafa', boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)', display: 'block' }}
                     />
+                  ) : (
+                    <Avatar
+                      variant="rounded"
+                      sx={{
+                        width: 120, height: 120, fontSize: 36, fontWeight: 700, bgcolor: GREEN,
+                        border: `2px solid ${GREEN}`, boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                      }}
+                    >
+                      {getCustomerInitials(dialogSearchResults[selectedDialogIdx]) || <MuiIcons.Person sx={{ fontSize: 56 }} />}
+                    </Avatar>
                   )}
                   {dialogSearchResults[selectedDialogIdx]?.id_image_front && (
                     <img
@@ -3202,7 +3309,7 @@ export default function ModernTransactions() {
                     />
                   )}
                 </Box>
-                <Box sx={{ flex: 1, position: 'relative', display: 'flex' }}>
+                <Box sx={{ flex: 1, position: 'relative', display: 'flex', gap: 0.5 }}>
                   <TableContainer component={Paper} sx={{ mb: 0, maxHeight: 300, overflowY: 'auto', p: 0, m: 0, flex: '1 1 auto' }}>
                     <Table size="small">
                       <TableHead>
@@ -3215,8 +3322,8 @@ export default function ModernTransactions() {
                       </TableHead>
                       <TableBody>
                         {dialogSearchResults.map((c, index) => (
-                          <TableRow key={c.id} hover selected={selectedDialogIdx === index} sx={{ cursor: 'pointer' }}
-                            onClick={() => setSelectedDialogIdx(index)}
+                          <TableRow key={c.id} id={`workspace-cust-row-${index}`} hover selected={selectedDialogIdx === index} sx={{ cursor: 'pointer' }}
+                            onClick={() => handleSelectDialogRow(index)}
                             onDoubleClick={() => { handleSelectCustomer(c); handleCloseSearchDialog(); }}>
                             <TableCell sx={{ width: 140, maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.first_name} {c.last_name}</TableCell>
                             <TableCell>{c.date_of_birth ? c.date_of_birth.substring(0, 10) : ''}</TableCell>
@@ -3227,6 +3334,32 @@ export default function ModernTransactions() {
                       </TableBody>
                     </Table>
                   </TableContainer>
+                  {/* A–Z jump strip — only useful once the list is long enough to
+                      need it, e.g. the blank-search browse-all */}
+                  {dialogSearchResults.length > 8 && (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', maxHeight: 300, overflowY: 'auto', flexShrink: 0 }}>
+                      {AZ_LETTERS.map(letter => {
+                        const idx = dialogLetterIndex[letter];
+                        const available = idx !== undefined;
+                        return (
+                          <Box
+                            key={letter}
+                            onClick={() => available && handleJumpToDialogLetter(letter)}
+                            sx={{
+                              fontSize: 9, lineHeight: 1.4, textAlign: 'center', px: 0.4,
+                              cursor: available ? 'pointer' : 'default',
+                              color: available ? GREEN : '#d0d0d0',
+                              fontWeight: available ? 700 : 400,
+                              borderRadius: 0.5,
+                              '&:hover': available ? { bgcolor: '#e8f5e9' } : {},
+                            }}
+                          >
+                            {letter}
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  )}
                 </Box>
               </Box>
 

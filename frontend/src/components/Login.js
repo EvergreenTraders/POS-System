@@ -194,21 +194,38 @@ const Login = () => {
     };
 
     useEffect(() => {
+        // Keep re-asserting full screen on every interaction (not just the
+        // first) so it stays full screen for the session — only Esc (or the
+        // browser/OS's own F11) should be able to leave it. The Escape guard
+        // stops that same re-assert logic from immediately undoing an Esc
+        // the user just pressed on purpose.
+        //
+        // Listeners are attached in the CAPTURE phase (the `true` third arg),
+        // not bubble — buttons throughout the app call e.stopPropagation(),
+        // which would otherwise stop a bubble-phase document listener from
+        // ever seeing the click. Capture fires top-down before that.
+        let escJustPressed = false;
+
         const handleUserInteraction = () => {
+            if (escJustPressed) return;
             handleFullScreen();
-            // Remove event listeners after first interaction
-            document.removeEventListener('click', handleUserInteraction);
-            document.removeEventListener('keypress', handleUserInteraction);
         };
 
-        // Add event listeners for user interaction
-        document.addEventListener('click', handleUserInteraction);
-        document.addEventListener('keypress', handleUserInteraction);
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                escJustPressed = true;
+                setTimeout(() => { escJustPressed = false; }, 1000);
+            }
+        };
 
-        // Cleanup function
+        document.addEventListener('click', handleUserInteraction, true);
+        document.addEventListener('keypress', handleUserInteraction, true);
+        document.addEventListener('keydown', handleKeyDown, true);
+
         return () => {
-            document.removeEventListener('click', handleUserInteraction);
-            document.removeEventListener('keypress', handleUserInteraction);
+            document.removeEventListener('click', handleUserInteraction, true);
+            document.removeEventListener('keypress', handleUserInteraction, true);
+            document.removeEventListener('keydown', handleKeyDown, true);
         };
     }, []);
 

@@ -31,6 +31,7 @@ import ClearIcon from '@mui/icons-material/Clear';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import SecurityIcon from '@mui/icons-material/Security';
 import SaveIcon from '@mui/icons-material/Save';
+import PersonIcon from '@mui/icons-material/Person';
 
 // Helper function to convert buffer to data URL for image preview
 function bufferToDataUrl(bufferObj) {
@@ -4191,9 +4192,11 @@ const CustomerTicket = () => {
 
   // Determine image source
   const getImageSource = () => {
-    // Handle case where customer is undefined
-    if (!customer || !customer.image) return '/placeholder-profile.png';
-    
+    // Handle case where customer is undefined — return null (not a
+    // placeholder file path) so the Avatar falls back to initials instead
+    // of a broken-image icon.
+    if (!customer || !customer.image) return null;
+
     if (customer.image instanceof File || customer.image instanceof Blob) {
       return URL.createObjectURL(customer.image);
     } else if (typeof customer.image === 'string') {
@@ -4201,8 +4204,12 @@ const CustomerTicket = () => {
     } else if (customer.image && customer.image.data) {
       return bufferToDataUrl(customer.image);
     }
-    return '/placeholder-profile.png';
+    return null;
   };
+
+  // Initials shown in the Avatar when the customer has no photo on file
+  const getCustomerInitials = (c) =>
+    c ? `${(c.first_name || '')[0] || ''}${(c.last_name || '')[0] || ''}`.toUpperCase() : '';
 
   // Determine item image source
   const getItemImageSource = (item) => {
@@ -4287,10 +4294,12 @@ return (
                     alignItems: 'flex-start'
                   }}>
                     <Avatar
-                      sx={{ width: 100, height: 100 }}
-                      src={getImageSource()}
+                      sx={{ width: 100, height: 100, fontSize: 32, fontWeight: 700 }}
+                      src={getImageSource() || undefined}
                       alt={customer ? `${customer.first_name} ${customer.last_name}` : 'Customer'}
-                    />
+                    >
+                      {!getImageSource() && (getCustomerInitials(customer) || <PersonIcon sx={{ fontSize: 48 }} />)}
+                    </Avatar>
                   </Box>
                 </Grid>
                 
@@ -5860,9 +5869,9 @@ return (
                 <Box sx={{ width: 160, height: 230, display: 'flex', flexDirection: 'column', gap: 2, justifyContent: 'flex-start', alignItems: 'center' }}>
                   {selectedSearchIdx !== null && selectedSearchIdx >= 0 && searchResults[selectedSearchIdx] && (
                     <>
-                      {/* Customer Photo */}
-                      {searchResults[selectedSearchIdx]?.image && (
-                        <Box>
+                      {/* Customer Photo — falls back to initials when no photo is on file */}
+                      <Box>
+                        {searchResults[selectedSearchIdx]?.image ? (
                           <img
                             src={
                               typeof searchResults[selectedSearchIdx].image === 'string'
@@ -5886,8 +5895,18 @@ return (
                               display: 'block'
                             }}
                           />
-                        </Box>
-                      )}
+                        ) : (
+                          <Avatar
+                            variant="rounded"
+                            sx={{
+                              width: 120, height: 120, mx: 'auto', fontSize: 36, fontWeight: 700,
+                              border: '2px solid #4caf50', boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                            }}
+                          >
+                            {getCustomerInitials(searchResults[selectedSearchIdx]) || <PersonIcon sx={{ fontSize: 56 }} />}
+                          </Avatar>
+                        )}
+                      </Box>
                       
                       {/* ID Image Front */}
                       {searchResults[selectedSearchIdx]?.id_image_front && (

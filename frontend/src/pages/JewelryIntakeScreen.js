@@ -26,6 +26,16 @@ const SCRAP_FIXED_ROWS = [
   { key: 'gold22k',   metal: 'Gold',   purity: '22K',  purityValue: 0.917, label: '22K Gold' },
   { key: 'silver925', metal: 'Silver', purity: '.925', purityValue: 0.925, label: '.925 Silver' },
 ];
+// A Custom Row's purity dropdown shouldn't re-offer a purity that already
+// has its own fixed row above (e.g. 14K Gold) — only the ones not already
+// covered, plus the "Custom…" option for an exact decimal purity.
+function isPurityCoveredByFixedRow(metalTypeId, purityValue) {
+  const value = parseFloat(purityValue);
+  return SCRAP_FIXED_ROWS.some(r =>
+    METAL_TYPE_ID_BY_NAME[r.metal] === Number(metalTypeId) && Math.abs(r.purityValue - value) < 0.001);
+}
+const CUSTOM_PURITY_ID = 'custom';
+
 const emptyScrapRowData = () => ({
   pieces: '', grossWt: '', estStoneWt: '', notes: '', image: null, buyValue: '', pawnPct: '',
   // purity: raw purity only (e.g. "14K") — used for the metal_purity DB field.
@@ -1251,6 +1261,40 @@ export default function JewelryIntakeScreen({
     } : r));
   };
 
+  // Purity Select's onChange for a Custom Row — routes to a real purity pick
+  // (handleScrapCustomMetalChange) or switches the row into free-entry mode
+  // for the "Custom…" option.
+  const handleScrapCustomPuritySelect = (id, typeId, selection) => {
+    if (selection !== CUSTOM_PURITY_ID) {
+      handleScrapCustomMetalChange(id, typeId, selection);
+      return;
+    }
+    const type = preciousMetalTypes.find(t => String(t.id) === String(typeId));
+    if (!type) return;
+    setScrapCustomRows(prev => prev.map(r => r.id === id ? {
+      ...r,
+      metalTypeId: typeId,
+      metal: type.type,
+      purityId: CUSTOM_PURITY_ID,
+      purity: '',
+      purityLabel: `Custom ${type.type}`,
+      purityValue: 0,
+      pawnPct: getScrapPctDefault(typeId, 'pawn', 50),
+    } : r));
+  };
+
+  // Decimal purity typed in for a row currently set to "Custom…".
+  const handleScrapCustomPurityValueChange = (id, typeId, rawValue) => {
+    const type = preciousMetalTypes.find(t => String(t.id) === String(typeId));
+    const value = parseFloat(rawValue) || 0;
+    setScrapCustomRows(prev => prev.map(r => r.id === id ? {
+      ...r,
+      purity: rawValue,
+      purityLabel: type ? `${rawValue} ${type.type}` : rawValue,
+      purityValue: value,
+    } : r));
+  };
+
   const handleScrapRowPhoto = (file, onSet) => {
     if (!file) return;
     const reader = new FileReader();
@@ -2042,7 +2086,15 @@ export default function JewelryIntakeScreen({
                       <Typography variant="body2">{hasWeight ? `$${meltValue.toFixed(2)}` : '—'}</Typography>
                     </TableCell>
                     <TableCell align="right">
-                      <Typography variant="body2" color="text.secondary">{hasWeight ? `${buyPctResolved.toFixed(1)}%` : '—'}</Typography>
+                      <TextField size="small" type="number"
+                        value={hasWeight ? buyPctResolved.toFixed(1) : ''}
+                        onChange={e => {
+                          const pct = parseFloat(e.target.value) || 0;
+                          updateScrapFixedRow(def.key, 'buyValue', (meltValue * pct / 100).toFixed(2));
+                        }}
+                        placeholder={hasWeight ? undefined : '—'}
+                        InputProps={{ endAdornment: <InputAdornment position="end" sx={{ ml: 0 }}>%</InputAdornment> }}
+                        sx={{ width: 68, '& .MuiInputBase-input': { color: 'text.secondary' } }} />
                     </TableCell>
                     <TableCell align="right">
                       <TextField size="small" type="number"
@@ -2074,7 +2126,12 @@ export default function JewelryIntakeScreen({
                 const pawnPct = row.pawnPct !== '' ? row.pawnPct : getScrapPctDefault(row.metalTypeId, 'pawn', 50);
                 const { netWt, meltValue, buyTradeValue, buyPctResolved } = computeScrapRowValues(row.purityValue, row.metal, row.grossWt, row.estStoneWt, row.buyValue, pawnPct, buyPctDefault);
                 const hasWeight = parseFloat(row.grossWt) > 0;
-                const purityOptions = row.metalTypeId ? (allMetalPurities[row.metalTypeId] || []) : [];
+                // Excludes any purity that already has its own fixed row above
+                // (e.g. 14K Gold) — those are only offered via "Custom…".
+                const purityOptions = row.metalTypeId
+                  ? (allMetalPurities[row.metalTypeId] || []).filter(p => !isPurityCoveredByFixedRow(row.metalTypeId, p.value))
+                  : [];
+                const isCustomPurity = row.purityId === CUSTOM_PURITY_ID;
                 return (
                   <TableRow key={row.id} sx={{ bgcolor: i % 2 === 0 ? 'white' : '#fafafa' }}>
                     <TableCell>
@@ -2089,12 +2146,19 @@ export default function JewelryIntakeScreen({
                             {preciousMetalTypes.map(t => <MenuItem key={t.id} value={t.id}>{t.type}</MenuItem>)}
                           </Select>
                         </FormControl>
-                        <FormControl size="small" sx={{ width: 68 }} disabled={!row.metalTypeId}>
-                          <Select displayEmpty value={row.purityId} onChange={e => handleScrapCustomMetalChange(row.id, row.metalTypeId, e.target.value)}>
+                        <FormControl size="small" sx={{ width: isCustomPurity ? 56 : 68 }} disabled={!row.metalTypeId}>
+                          <Select displayEmpty value={row.purityId} onChange={e => handleScrapCustomPuritySelect(row.id, row.metalTypeId, e.target.value)}>
                             <MenuItem value=""><em>—</em></MenuItem>
                             {purityOptions.map(p => <MenuItem key={p.id} value={p.id}>{p.purity || p.value}</MenuItem>)}
+                            <MenuItem value={CUSTOM_PURITY_ID}><em>Custom…</em></MenuItem>
                           </Select>
                         </FormControl>
+                        {isCustomPurity && (
+                          <TextField size="small" type="number" placeholder="e.g. 0.583" autoFocus
+                            value={row.purity}
+                            onChange={e => handleScrapCustomPurityValueChange(row.id, row.metalTypeId, e.target.value)}
+                            sx={{ width: 68 }} inputProps={{ min: 0, max: 1, step: 0.001 }} />
+                        )}
                       </Box>
                     </TableCell>
                     <TableCell align="right">
@@ -2111,7 +2175,16 @@ export default function JewelryIntakeScreen({
                     </TableCell>
                     <TableCell align="right"><Typography variant="body2">{hasWeight ? `$${meltValue.toFixed(2)}` : '—'}</Typography></TableCell>
                     <TableCell align="right">
-                      <Typography variant="body2" color="text.secondary">{hasWeight ? `${buyPctResolved.toFixed(1)}%` : '—'}</Typography>
+                      <TextField size="small" type="number"
+                        value={hasWeight ? buyPctResolved.toFixed(1) : ''}
+                        onChange={e => {
+                          const pct = parseFloat(e.target.value) || 0;
+                          updateScrapCustomRow(row.id, 'buyValue', (meltValue * pct / 100).toFixed(2));
+                        }}
+                        placeholder={hasWeight ? undefined : '—'}
+                        disabled={!row.metal}
+                        InputProps={{ endAdornment: <InputAdornment position="end" sx={{ ml: 0 }}>%</InputAdornment> }}
+                        sx={{ width: 64, '& .MuiInputBase-input': { color: 'text.secondary' } }} />
                     </TableCell>
                     <TableCell align="right">
                       <TextField size="small" type="number"

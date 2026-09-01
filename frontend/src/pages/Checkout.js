@@ -2757,7 +2757,7 @@ const handleBackToEstimation = () => {
               {/* Amount field first */}
               <TextField
                 fullWidth
-                label="Payment Amount"
+                label="Partial or Full Payment Amount"
                 type="number"
                 value={paymentDetails.cashAmount}
                 onChange={handleInputChange('cashAmount')}

@@ -1006,6 +1006,9 @@ export default function TradeTransactionScreen({
 
             {/* Search / scan row */}
             <Box sx={{ px: 2, py: 1.25, borderBottom: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography fontSize={11} fontWeight={700} color="text.secondary" letterSpacing={0.5}>
+                ADD NEW ITEM
+              </Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <TextField
                   fullWidth size="small"
@@ -1208,7 +1211,11 @@ export default function TradeTransactionScreen({
             </Box>
 
             {/* Search row */}
-            <Box sx={{ px: 2, py: 1.25, borderBottom: '1px solid #e0e0e0', display: 'flex', gap: 1, position: 'relative' }}>
+            <Box sx={{ px: 2, py: 1.25, borderBottom: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography fontSize={11} fontWeight={700} color="text.secondary" letterSpacing={0.5}>
+                ADD NEW ITEM
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, position: 'relative' }}>
               <Box sx={{ flex: 1, position: 'relative' }}>
                 <TextField
                   fullWidth size="small"
@@ -1268,6 +1275,7 @@ export default function TradeTransactionScreen({
                 sx={{ borderRadius: 2, textTransform: 'none', fontSize: 12, flexShrink: 0, borderColor: TRADE_TEAL, color: TRADE_TEAL, '&:hover': { bgcolor: '#e0f2f1' } }}>
                 Add Existing Sale Ticket
               </Button>
+              </Box>
             </Box>
 
             {/* Sale items table */}

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Box, Typography, Grid, Paper, List, ListItem, ListItemText, Divider, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, IconButton, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Container
+  Box, Typography, Grid, Paper, List, ListItem, ListItemText, Divider, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, IconButton, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Container, Avatar
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
+import PersonIcon from '@mui/icons-material/Person';
 import { Add as AddIcon, Edit as EditIcon } from '@mui/icons-material';
 import DiamondIcon from '@mui/icons-material/Diamond';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
@@ -48,6 +49,11 @@ function bufferToDataUrl(bufferObj) {
   );
   // Default to jpeg, you may adjust if your backend provides type info
   return `data:image/jpeg;base64,${base64}`;
+}
+
+// Initials shown in place of a customer photo when none is on file
+function getCustomerInitials(c) {
+  return c ? `${(c.first_name || '')[0] || ''}${(c.last_name || '')[0] || ''}`.toUpperCase() : '';
 }
 
 const Home = () => {
@@ -865,9 +871,9 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                 <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', minWidth: 700, gap: 0 }}>
                   {/* Image previews to the left */}
                   <Box sx={{ minWidth: 140, maxWidth: 180, mr: 0, pl: 0, ml: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', pt: 1, gap: 2 }}>
-                    {/* Customer Photo */}
-                    {searchResults[selectedSearchIdx]?.image && (
-                      <Box>
+                    {/* Customer Photo — falls back to initials when no photo is on file */}
+                    <Box>
+                      {searchResults[selectedSearchIdx]?.image ? (
                         <img
                           src={
                             typeof searchResults[selectedSearchIdx].image === 'string'
@@ -891,8 +897,18 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                             display: 'block'
                           }}
                         />
-                      </Box>
-                    )}
+                      ) : (
+                        <Avatar
+                          variant="rounded"
+                          sx={{
+                            width: 120, height: 120, mx: 'auto', fontSize: 36, fontWeight: 700,
+                            border: '2px solid #4caf50', boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                          }}
+                        >
+                          {getCustomerInitials(searchResults[selectedSearchIdx]) || <PersonIcon sx={{ fontSize: 56 }} />}
+                        </Avatar>
+                      )}
+                    </Box>
                     
                     {/* ID Image Front */}
                     {searchResults[selectedSearchIdx]?.id_image_front && (

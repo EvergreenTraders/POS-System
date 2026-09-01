@@ -13,6 +13,7 @@ import {
 import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import { parseQuickScrapEntry } from '../utils/quickScrapEntry';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
 import HardgoodsIntakeScreen from './HardgoodsIntakeScreen';
 import FindMatchingItemScreen from './FindMatchingItemScreen';
@@ -133,9 +134,23 @@ export default function BuyTransactionScreen({
   const [buyStats, setBuyStats]         = useState(null);
   const [lastSoldItems, setLastSoldItems] = useState([]);
   const [scanInput, setScanInput]       = useState('');
-  const [intakeOpen, setIntakeOpen]     = useState(false);
+  // Seeded straight into the intake screen (not toggled on after mount via an
+  // effect) when arriving here via the workspace's "scrap"/weight+purity
+  // search-bar shortcut, so the empty Buy ticket table is never rendered for
+  // even one frame before flipping over to it.
+  const [intakeOpen, setIntakeOpen]     = useState(() => autoOpenScrap || autoOpenUnique);
   const [intakeEntry, setIntakeEntry]   = useState('');
-  const [parsedValues, setParsedValues] = useState(null);
+  const [parsedValues, setParsedValues] = useState(() => (autoOpenUnique ? uniqueParsedValues : null));
+  // "scrap"/weight+purity shortcuts typed directly into this screen's own
+  // scan/search bar (as opposed to autoOpenScrap, which only applies to how
+  // this screen was first opened) — see openIntake() below.
+  const [manualScrapMode, setManualScrapMode] = useState(false);
+  const [manualScrapPrefill, setManualScrapPrefill] = useState(null);
+  // True only when this screen was opened directly into scrap/unique intake
+  // via the workspace shortcut — used so Cancel/Back from that intake, with
+  // nothing added to the ticket yet, returns straight to the workspace
+  // instead of surfacing the otherwise-empty, unwanted Buy ticket table.
+  const cameFromQuickShortcut = useRef(autoOpenScrap || autoOpenUnique);
   const [editingIntakeItem, setEditingIntakeItem] = useState(null);
   const [hardgoodsIntakeOpen, setHardgoodsIntakeOpen] = useState(false);
   const [editingHardgoodsItem, setEditingHardgoodsItem] = useState(null);
@@ -181,23 +196,6 @@ export default function BuyTransactionScreen({
   useEffect(() => {
     if (existingBuyData?.ticketId) return;
     syncBuyTicketCounter().then(bumped => { if (bumped) setTicketId(generateBuyTicketId()); });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // "scrap"/weight+purity shortcuts from the transactions search bar — jump
-  // straight into the intake screen instead of landing on the buy ticket table.
-  useEffect(() => {
-    if (autoOpenScrap) {
-      setParsedValues(null);
-      setIntakeEntry('');
-      setEditingIntakeItem(null);
-      setIntakeOpen(true);
-    } else if (autoOpenUnique) {
-      setParsedValues(uniqueParsedValues);
-      setIntakeEntry('');
-      setEditingIntakeItem(null);
-      setIntakeOpen(true);
-    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -372,7 +370,42 @@ export default function BuyTransactionScreen({
   };
 
   const openIntake = () => {
-    const text  = scanInput.trim();
+    const text = scanInput.trim();
+
+    // "scrap" or a weight+purity shortcut (e.g. "5.6g 14k") — same parsing the
+    // workspace's top search bar uses, so it behaves identically whether you
+    // type it there or straight into this screen's own scan/search bar.
+    const parsedScrap = parseQuickScrapEntry(text);
+    if (parsedScrap.isBulkScrap) {
+      setScanInput('');
+      setEditingIntakeItem(null);
+      setParsedValues(null);
+      setIntakeEntry('');
+      setManualScrapMode(true);
+      setManualScrapPrefill(parsedScrap.rowKey && parsedScrap.weightG != null
+        ? { rowKey: parsedScrap.rowKey, grossWt: String(parsedScrap.weightG), purityValue: parsedScrap.purityValue, karat: parsedScrap.karat }
+        : null);
+      setIntakeOpen(true);
+      return;
+    }
+    if (parsedScrap.isUniqueWithPrefill) {
+      setScanInput('');
+      setEditingIntakeItem(null);
+      setManualScrapMode(false);
+      setManualScrapPrefill(null);
+      setParsedValues({
+        weight: parsedScrap.weightG,
+        metal: parsedScrap.metal,
+        purity: parsedScrap.karat != null ? `${parsedScrap.karat}K` : parsedScrap.purityValue,
+      });
+      setIntakeEntry('');
+      setIntakeOpen(true);
+      return;
+    }
+
+    setManualScrapMode(false);
+    setManualScrapPrefill(null);
+
     const parts = text.toUpperCase().split(/\s+/);
     if (parts[0] === 'H') {
       const rest = parts.slice(1).join(' ') || text;
@@ -434,6 +467,13 @@ export default function BuyTransactionScreen({
   };
 
   const handleIntakeBack = () => {
+    // Arrived here directly via the workspace's scrap/unique shortcut and
+    // haven't added anything yet — Cancel should return to the workspace,
+    // not surface an otherwise-empty, unwanted Buy ticket table.
+    if (cameFromQuickShortcut.current && buyItems.length === 0) {
+      onClose();
+      return;
+    }
     setIntakeOpen(false);
     setEditingIntakeItem(null);
   };
@@ -736,8 +776,8 @@ export default function BuyTransactionScreen({
         initialEntry={intakeEntry}
         parsedValues={editingIntakeItem ? null : parsedValues}
         editItem={editingIntakeItem}
-        initialMode={autoOpenScrap || editingIntakeItem?.mode === 'scrap' ? 'scrap' : 'unique'}
-        scrapPrefill={autoOpenScrap ? scrapPrefill : null}
+        initialMode={autoOpenScrap || manualScrapMode || editingIntakeItem?.mode === 'scrap' ? 'scrap' : 'unique'}
+        scrapPrefill={autoOpenScrap ? scrapPrefill : (manualScrapMode ? manualScrapPrefill : null)}
         onBack={handleIntakeBack}
         onSaveItem={handleIntakeSave}
         onSaveAndAddAnother={handleIntakeSaveAndAdd}
@@ -921,6 +961,9 @@ export default function BuyTransactionScreen({
 
             {/* Scan + Free-type row */}
             <Box sx={{ px: 2, py: 1.25, borderBottom: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography fontSize={11} fontWeight={700} color="text.secondary" letterSpacing={0.5}>
+                ADD NEW ITEM
+              </Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <TextField
                   fullWidth size="small"
