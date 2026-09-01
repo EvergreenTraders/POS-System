@@ -549,25 +549,35 @@ function RedeemTransactionCard({ tx, redeemIcon, redeemColor, onOpen, onVoid }) 
   );
 }
 
-function TransactionTypeButton({ label, icon, color, onClick, count, disabled = false }) {
+function TransactionTypeButton({ label, icon, color, onClick, count, disabled = false, size = 'default', fitRow = false }) {
   const effectiveColor = disabled ? '#bdbdbd' : color;
+  const isLarge = size === 'large';
   return (
     <Badge badgeContent={count || 0} color="primary" overlap="rectangular"
-      sx={{ '& .MuiBadge-badge': { fontSize: 9, minWidth: 16, height: 16, top: 4, right: 4 } }}>
+      sx={{
+        ...(fitRow ? { flex: '1 1 0', minWidth: 0 } : {}),
+        '& .MuiBadge-badge': isLarge
+          ? { fontSize: 9.5, minWidth: 17, height: 17, top: 5, right: 5 }
+          : { fontSize: 8, minWidth: 14, height: 14, top: 3, right: 3 },
+      }}>
       <Paper
         variant="outlined"
         onClick={disabled ? undefined : onClick}
         sx={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          p: { md: 1, xl: 0.75 }, cursor: disabled ? 'default' : 'pointer', borderRadius: 2, borderColor: '#e0e0e0',
-          minWidth: { md: 70, xl: 60 },
+          p: isLarge ? { md: 1.25, xl: 1 } : { md: 0.75, xl: 0.6 },
+          cursor: disabled ? 'default' : 'pointer', borderRadius: isLarge ? 2.25 : 2, borderColor: '#e0e0e0',
+          borderWidth: isLarge ? 1.1 : 1,
+          width: fitRow ? '100%' : undefined,
+          minWidth: fitRow ? 0 : (isLarge ? { md: 78, xl: 70 } : { md: 58, xl: 50 }),
           opacity: disabled ? 0.4 : 1,
           ...(disabled ? {} : { '&:hover': { bgcolor: '#f5f5f5', borderColor: color } }),
           transition: 'all 0.15s',
         }}
       >
-        <Box sx={{ color: effectiveColor, mb: 0.25, '& svg': { fontSize: { md: 24, xl: 20 } } }}>{icon}</Box>
-        <Typography align="center" fontWeight={500} sx={{ fontSize: { md: 10, xl: 9 }, color: effectiveColor }}>{label}</Typography>
+        <Box sx={{ color: effectiveColor, mb: isLarge ? 0.3 : 0.2, '& svg': { fontSize: isLarge ? { md: 23, xl: 21 } : { md: 19, xl: 16 } } }}>{icon}</Box>
+        <Typography align="center" fontWeight={isLarge ? 700 : 500} noWrap={fitRow}
+          sx={{ fontSize: isLarge ? { md: 11, xl: 10 } : { md: 9, xl: 8 }, color: effectiveColor, maxWidth: '100%' }}>{label}</Typography>
       </Paper>
     </Badge>
   );
@@ -3164,14 +3174,25 @@ export default function ModernTransactions() {
         </Paper>
       </Box>{/* end three-column row */}
 
-      {/* ── Full-width bottom bar: ADD TRANSACTION + ACTIONS ── */}
-      <Paper sx={{ p: { md: 1.5, xl: 1 }, borderRadius: 2, flexShrink: 0, display: 'flex', gap: { md: 2, xl: 1.5 }, alignItems: 'flex-start' }}>
-        {/* ADD TRANSACTION */}
-        <Box sx={{ flex: 1 }}>
-          <Typography fontWeight={700} color="text.secondary" letterSpacing={1} display="block" mb={{ md: 1, xl: 0.5 }} sx={{ fontSize: { md: 12, xl: 10 } }}>
+      {/* ── Full-width bottom bar: ADD TRANSACTION + ACTIONS ──
+          Vertically resizable/scrollable (drag the bottom edge, or scroll if
+          content ever exceeds the current height) so it never forces the
+          rest of the page to grow. */}
+      <Paper sx={{
+        p: { md: 2, xl: 1.5 }, borderRadius: 2, flexShrink: 0, display: 'flex', gap: { md: 2, xl: 1.5 }, alignItems: 'flex-start',
+        minHeight: { md: 96, xl: 84 }, maxHeight: { md: 260, xl: 220 },
+        resize: 'vertical', overflow: 'auto',
+      }}>
+        {/* ADD TRANSACTION — sized up so it reads as the primary action row.
+            All buttons stay on one line: fitRow lets each shrink evenly to
+            fill the available width instead of wrapping or scrolling. */}
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography fontWeight={800} color="text.secondary" letterSpacing={1.5} display="block" mb={{ md: 1.5, xl: 1 }} sx={{ fontSize: { md: 14, xl: 12 } }}>
             ADD TRANSACTION
           </Typography>
-          <Box sx={{ display: 'flex', gap: { md: 1, xl: 0.75 }, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: { md: 0.6, xl: 0.5 }, flexWrap: 'nowrap' }}>
+            {/* transactionTypes is already ordered by sort_order, which puts
+                quick_sale first. */}
             {transactionTypes.map(t => {
               const IconComponent = MuiIcons[t.icon] ?? MuiIcons.Add;
               const count = workspaceTransactions.filter(tx => tx.type === t.type.toUpperCase()).length;
@@ -3188,6 +3209,8 @@ export default function ModernTransactions() {
                   onClick={() => handleTransactionTypeClick(t.type)}
                   count={count}
                   disabled={allowedTypes ? !allowedTypes.includes(t.type) : false}
+                  fitRow
+                  size="large"
                 />
               );
             })}
