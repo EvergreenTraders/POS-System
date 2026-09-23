@@ -15868,12 +15868,14 @@ app.put('/api/categories/:id', async (req, res) => {
 // FIELD DEFINITIONS
 // ============================================================
 
+const FIELD_DATA_TYPES = ['TEXT', 'NUMBER', 'CURRENCY', 'ENUM', 'MULTISELECT', 'BOOLEAN', 'DATE', 'MEASUREMENT'];
+
 // GET /api/field-definitions  — list all
 app.get('/api/field-definitions', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, field_key, label, data_type, allowed_values,
-              unit_of_measure, normalizer, validation_rule
+              unit_of_measure, normalizer, validation_rule, allow_free_type
        FROM category_field_definitions
        ORDER BY field_key ASC`
     );
@@ -15887,20 +15889,25 @@ app.get('/api/field-definitions', async (req, res) => {
 // POST /api/field-definitions  — create
 app.post('/api/field-definitions', async (req, res) => {
   try {
-    const { field_key, label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule } = req.body;
+    const { field_key, label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule, allow_free_type } = req.body;
     if (!field_key || !label || !data_type) {
       return res.status(400).json({ error: 'field_key, label, and data_type are required' });
     }
-    const validTypes = ['TEXT', 'NUMBER', 'ENUM', 'BOOLEAN', 'DATE'];
-    if (!validTypes.includes(data_type)) {
-      return res.status(400).json({ error: `data_type must be one of: ${validTypes.join(', ')}` });
+    if (!FIELD_DATA_TYPES.includes(data_type)) {
+      return res.status(400).json({ error: `data_type must be one of: ${FIELD_DATA_TYPES.join(', ')}` });
     }
+    // pg serializes a raw JS array as a Postgres array literal ({a,b}), not
+    // JSON — invalid for a jsonb column. Must JSON.stringify it ourselves.
     const result = await pool.query(
       `INSERT INTO category_field_definitions
-         (field_key, label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (field_key, label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule, allow_free_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [field_key, label, data_type, allowed_values || null, unit_of_measure || null, normalizer || null, validation_rule || null]
+      [
+        field_key, label, data_type,
+        Array.isArray(allowed_values) ? JSON.stringify(allowed_values) : (allowed_values || null),
+        unit_of_measure || null, normalizer || null, validation_rule || null, !!allow_free_type,
+      ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -15912,23 +15919,49 @@ app.post('/api/field-definitions', async (req, res) => {
   }
 });
 
-// PUT /api/field-definitions/:id  — update
+// PUT /api/field-definitions/:id  — update.
+// Every field here is a direct SET, not COALESCE: the only caller (Category
+// Manager's Fields tab) always submits the complete desired state, including
+// explicit nulls (e.g. clearing allowed_values when switching a field away
+// from Dropdown/Multi-select) — COALESCE would silently keep the old value
+// instead of clearing it, and previously dropped data_type entirely since it
+// wasn't in the SET list at all.
 app.put('/api/field-definitions/:id', async (req, res) => {
   try {
-    const { label, allowed_values, unit_of_measure, normalizer, validation_rule } = req.body;
+    const { label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule, allow_free_type } = req.body;
+    if (data_type && !FIELD_DATA_TYPES.includes(data_type)) {
+      return res.status(400).json({ error: `data_type must be one of: ${FIELD_DATA_TYPES.join(', ')}` });
+    }
+    const existing = await pool.query('SELECT * FROM category_field_definitions WHERE id = $1', [req.params.id]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'Field definition not found' });
+    const current = existing.rows[0];
+    // pg parses a jsonb column back into a real JS array/object, and re-sending
+    // that raw array as a parameter hits the same array-vs-jsonb serialization
+    // issue as POST — always stringify whichever value (new or existing) wins.
+    const resolvedAllowedValues = allowed_values !== undefined ? allowed_values : current.allowed_values;
     const result = await pool.query(
       `UPDATE category_field_definitions
-       SET label           = COALESCE($1, label),
-           allowed_values  = COALESCE($2, allowed_values),
-           unit_of_measure = COALESCE($3, unit_of_measure),
-           normalizer      = COALESCE($4, normalizer),
-           validation_rule = COALESCE($5, validation_rule),
+       SET label           = $1,
+           data_type       = $2,
+           allowed_values  = $3,
+           unit_of_measure = $4,
+           normalizer      = $5,
+           validation_rule = $6,
+           allow_free_type = $7,
            updated_at      = CURRENT_TIMESTAMP
-       WHERE id = $6
+       WHERE id = $8
        RETURNING *`,
-      [label, allowed_values, unit_of_measure, normalizer, validation_rule, req.params.id]
+      [
+        label !== undefined ? label : current.label,
+        data_type !== undefined ? data_type : current.data_type,
+        Array.isArray(resolvedAllowedValues) ? JSON.stringify(resolvedAllowedValues) : resolvedAllowedValues,
+        unit_of_measure !== undefined ? unit_of_measure : current.unit_of_measure,
+        normalizer !== undefined ? normalizer : current.normalizer,
+        validation_rule !== undefined ? validation_rule : current.validation_rule,
+        allow_free_type !== undefined ? allow_free_type : current.allow_free_type,
+        req.params.id,
+      ]
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Field definition not found' });
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error updating field definition:', err);
@@ -15966,7 +15999,7 @@ app.get('/api/category-field-rules/:cat_id', async (req, res) => {
        FROM category_field_rules r
        JOIN category_field_definitions f ON f.id = r.field_definition_id
        WHERE r.category_id = $1
-       ORDER BY r.display_order ASC, f.field_key ASC`,
+       ORDER BY r.display_order ASC, r.id ASC`,
       [req.params.cat_id]
     );
     res.json(result.rows);
@@ -16058,6 +16091,294 @@ app.delete('/api/category-field-rules/:id', async (req, res) => {
 });
 
 // ============================================================
+// EFFECTIVE CATEGORY FIELDS — resolves parent-category inheritance for
+// the Category Manager "Fields" tab. A field is "effective" for a category
+// if some ancestor (or the category itself) ADDs it and nothing between
+// that ancestor and this category SUPPRESSes it; the nearest OVERRIDE
+// (at or below the ADD) wins for its settings, while the ADD's category
+// stays the field's "origin" for display (Source column).
+// ============================================================
+
+async function getCategoryAncestorChain(categoryId) {
+  const result = await pool.query(
+    `WITH RECURSIVE ancestors AS (
+       SELECT id, parent_category_id, division_id, name, 0 AS depth FROM categories WHERE id = $1
+       UNION ALL
+       SELECT c.id, c.parent_category_id, c.division_id, c.name, a.depth + 1
+       FROM categories c
+       JOIN ancestors a ON c.id = a.parent_category_id
+     )
+     SELECT id, name, division_id, depth FROM ancestors ORDER BY depth DESC`,
+    [categoryId]
+  );
+  return result.rows; // root-first ... selected-last
+}
+
+// Shared by category and division field-definition joins — same output shape
+// either way, so the rest of the resolution/UI code doesn't need to care
+// which table a row came from.
+const FIELD_RULE_SELECT_COLUMNS = `
+  f.field_key, f.label AS field_label, f.data_type, f.allowed_values,
+  f.unit_of_measure, f.allow_free_type`;
+
+async function resolveEffectiveFields(categoryId) {
+  const chain = await getCategoryAncestorChain(categoryId);
+  if (!chain.length) return { fields: [], suppressed: [] };
+  const chainIds = chain.map(c => c.id);
+  const nameById = Object.fromEntries(chain.map(c => [c.id, c.name]));
+
+  // A division is the "super-root" above every category in it — its own
+  // fields (division_field_rules) seed the merge first, exactly like an
+  // ancestor category's ADD rules would, so "Inherited from Hardgoods" works
+  // the same way "Inherited from Video Game Consoles" does.
+  const divisionId = chain[0].division_id;
+  const divisionRes = await pool.query(
+    `SELECT r.*, ${FIELD_RULE_SELECT_COLUMNS}
+     FROM division_field_rules r
+     JOIN category_field_definitions f ON f.id = r.field_definition_id
+     WHERE r.division_id = $1`,
+    [divisionId]
+  );
+  const divisionRow = await pool.query('SELECT name FROM divisions WHERE id = $1', [divisionId]);
+  const divisionName = divisionRow.rows[0]?.name || null;
+
+  const rulesRes = await pool.query(
+    `SELECT r.*, ${FIELD_RULE_SELECT_COLUMNS}
+     FROM category_field_rules r
+     JOIN category_field_definitions f ON f.id = r.field_definition_id
+     WHERE r.category_id = ANY($1)`,
+    [chainIds]
+  );
+  const rulesByCategory = {};
+  rulesRes.rows.forEach(r => {
+    (rulesByCategory[r.category_id] = rulesByCategory[r.category_id] || []).push(r);
+  });
+
+  const effective = new Map(); // field_definition_id -> { rule, originCategoryId, originDivisionName }
+  for (const r of divisionRes.rows) {
+    effective.set(r.field_definition_id, { rule: { ...r, category_id: null }, originCategoryId: null, originDivisionName: divisionName });
+  }
+  for (const cat of chain) {
+    for (const r of (rulesByCategory[cat.id] || [])) {
+      if (r.action === 'SUPPRESS') {
+        effective.delete(r.field_definition_id);
+      } else if (r.action === 'ADD') {
+        effective.set(r.field_definition_id, { rule: r, originCategoryId: cat.id, originDivisionName: null });
+      } else if (r.action === 'OVERRIDE') {
+        const existing = effective.get(r.field_definition_id);
+        effective.set(r.field_definition_id, {
+          rule: r,
+          originCategoryId: existing ? existing.originCategoryId : cat.id,
+          originDivisionName: existing ? existing.originDivisionName : null,
+        });
+      }
+    }
+  }
+
+  const fields = [...effective.values()]
+    .map(({ rule, originCategoryId, originDivisionName }) => ({
+      ...rule,
+      is_own: rule.category_id === categoryId,
+      origin_category_id: originCategoryId,
+      origin_category_name: originCategoryId ? nameById[originCategoryId] : originDivisionName,
+    }))
+    .sort((a, b) => (a.display_order - b.display_order) || a.id - b.id);
+
+  // Own SUPPRESS rows don't appear above (they're what removed a field from
+  // `effective`) — surfaced separately so the UI can offer to un-hide them.
+  const suppressed = (rulesByCategory[categoryId] || [])
+    .filter(r => r.action === 'SUPPRESS')
+    .map(r => ({ id: r.id, field_definition_id: r.field_definition_id, field_key: r.field_key, label: r.field_label }));
+
+  return { fields, suppressed };
+}
+
+// A division has no parent — every one of its own field rules is simply
+// "on", shaped to match resolveEffectiveFields' output so the same grid/
+// details-panel UI can render either.
+async function resolveDivisionFields(divisionId) {
+  const rulesRes = await pool.query(
+    `SELECT r.*, ${FIELD_RULE_SELECT_COLUMNS}
+     FROM division_field_rules r
+     JOIN category_field_definitions f ON f.id = r.field_definition_id
+     WHERE r.division_id = $1
+     ORDER BY r.display_order ASC, r.id ASC`,
+    [divisionId]
+  );
+  const fields = rulesRes.rows.map(r => ({
+    ...r,
+    is_own: true,
+    origin_category_id: null,
+    origin_category_name: null,
+  }));
+  return { fields, suppressed: [] };
+}
+
+// GET /api/categories/:id/effective-fields
+app.get('/api/categories/:id/effective-fields', async (req, res) => {
+  try {
+    const catRes = await pool.query('SELECT id FROM categories WHERE id = $1', [req.params.id]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+    res.json(await resolveEffectiveFields(parseInt(req.params.id, 10)));
+  } catch (err) {
+    console.error('Error resolving effective category fields:', err);
+    res.status(500).json({ error: 'Failed to resolve effective category fields' });
+  }
+});
+
+// PUT /api/categories/:id/field-rules  — replaces this category's OWN rule
+// set (ADD/OVERRIDE/SUPPRESS rows whose category_id is this category) with
+// the submitted list: rows with an id are updated, rows without one are
+// inserted, and existing own rows missing from the list are deleted (this
+// is how "restore inheritance" / "remove field" / "un-hide" are expressed —
+// the client just omits that row next Save).
+app.put('/api/categories/:id/field-rules', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    const incoming = Array.isArray(req.body.rules) ? req.body.rules : [];
+
+    await client.query('BEGIN');
+
+    const currentRes = await client.query('SELECT id FROM category_field_rules WHERE category_id = $1', [categoryId]);
+    const currentIds = new Set(currentRes.rows.map(r => r.id));
+    const incomingIds = new Set(incoming.filter(r => r.id).map(r => r.id));
+
+    // Delete first — a row being replaced (e.g. an OVERRIDE swapped for a
+    // SUPPRESS on the same field+scope) must be gone before the new row for
+    // that same field+scope is inserted, or the unique constraint collides.
+    const toDelete = [...currentIds].filter(id => !incomingIds.has(id));
+    if (toDelete.length > 0) {
+      await client.query('DELETE FROM category_field_rules WHERE id = ANY($1) AND category_id = $2', [toDelete, categoryId]);
+    }
+
+    for (const r of incoming) {
+      if (!r.field_definition_id || !r.action) continue;
+      if (r.id && currentIds.has(r.id)) {
+        await client.query(
+          `UPDATE category_field_rules
+           SET action = $1, scope = $2, required_at = $3, default_value = $4,
+               label_override = $5, help_text = $6, short_description = $7,
+               long_description = $8, search = $9, web_filter = $10,
+               display_order = $11, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $12 AND category_id = $13`,
+          [
+            r.action, r.scope || 'INVENTORY', r.required_at || 'OPTIONAL', r.default_value || null,
+            r.label_override || null, r.help_text || null, !!r.short_description,
+            !!r.long_description, !!r.search || !!r.web_filter, !!r.web_filter,
+            r.display_order || 0, r.id, categoryId,
+          ]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO category_field_rules
+             (category_id, field_definition_id, action, scope, required_at, default_value,
+              label_override, help_text, short_description, long_description, search, web_filter, display_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [
+            categoryId, r.field_definition_id, r.action, r.scope || 'INVENTORY', r.required_at || 'OPTIONAL',
+            r.default_value || null, r.label_override || null, r.help_text || null,
+            !!r.short_description, !!r.long_description, !!r.search || !!r.web_filter, !!r.web_filter,
+            r.display_order || 0,
+          ]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json(await resolveEffectiveFields(categoryId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'A rule for this field and scope already exists on this category' });
+    }
+    console.error('Error saving category field rules:', err);
+    res.status(500).json({ error: 'Failed to save category field rules' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/divisions/:id/effective-fields — a division's own fields (it has
+// no parent to inherit from, so this is just its field list, same response
+// shape as a category's for UI reuse).
+app.get('/api/divisions/:id/effective-fields', async (req, res) => {
+  try {
+    const divRes = await pool.query('SELECT id FROM divisions WHERE id = $1', [req.params.id]);
+    if (!divRes.rows.length) return res.status(404).json({ error: 'Division not found' });
+    res.json(await resolveDivisionFields(parseInt(req.params.id, 10)));
+  } catch (err) {
+    console.error('Error resolving division fields:', err);
+    res.status(500).json({ error: 'Failed to resolve division fields' });
+  }
+});
+
+// PUT /api/divisions/:id/field-rules — replaces this division's field set,
+// same replace-the-whole-set reconciliation as the category version.
+app.put('/api/divisions/:id/field-rules', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const divisionId = parseInt(req.params.id, 10);
+    const incoming = Array.isArray(req.body.rules) ? req.body.rules : [];
+
+    await client.query('BEGIN');
+
+    const currentRes = await client.query('SELECT id FROM division_field_rules WHERE division_id = $1', [divisionId]);
+    const currentIds = new Set(currentRes.rows.map(r => r.id));
+    const incomingIds = new Set(incoming.filter(r => r.id).map(r => r.id));
+
+    const toDelete = [...currentIds].filter(id => !incomingIds.has(id));
+    if (toDelete.length > 0) {
+      await client.query('DELETE FROM division_field_rules WHERE id = ANY($1) AND division_id = $2', [toDelete, divisionId]);
+    }
+
+    for (const r of incoming) {
+      if (!r.field_definition_id) continue;
+      if (r.id && currentIds.has(r.id)) {
+        await client.query(
+          `UPDATE division_field_rules
+           SET scope = $1, required_at = $2, default_value = $3, label_override = $4, help_text = $5,
+               short_description = $6, long_description = $7, search = $8, web_filter = $9,
+               display_order = $10, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $11 AND division_id = $12`,
+          [
+            r.scope || 'INVENTORY', r.required_at || 'OPTIONAL', r.default_value || null,
+            r.label_override || null, r.help_text || null, !!r.short_description,
+            !!r.long_description, !!r.search || !!r.web_filter, !!r.web_filter,
+            r.display_order || 0, r.id, divisionId,
+          ]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO division_field_rules
+             (division_id, field_definition_id, action, scope, required_at, default_value,
+              label_override, help_text, short_description, long_description, search, web_filter, display_order)
+           VALUES ($1,$2,'ADD',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [
+            divisionId, r.field_definition_id, r.scope || 'INVENTORY', r.required_at || 'OPTIONAL',
+            r.default_value || null, r.label_override || null, r.help_text || null,
+            !!r.short_description, !!r.long_description, !!r.search || !!r.web_filter, !!r.web_filter,
+            r.display_order || 0,
+          ]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json(await resolveDivisionFields(divisionId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'A rule for this field and scope already exists on this division' });
+    }
+    console.error('Error saving division field rules:', err);
+    res.status(500).json({ error: 'Failed to save division field rules' });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
 // CATEGORY DESCRIPTIONS (Item Title template + description/search/
 // web-filter behaviour) — powers Category Manager's Descriptions tab.
 // Only resolves this category's own field rules today, not inherited
@@ -16086,7 +16407,7 @@ async function fetchDescriptionConfig(categoryId) {
        FROM category_field_rules r
        JOIN category_field_definitions f ON f.id = r.field_definition_id
        WHERE r.category_id = $1 AND r.action != 'SUPPRESS'
-       ORDER BY r.display_order ASC, f.field_key ASC`,
+       ORDER BY r.display_order ASC, r.id ASC`,
       [categoryId]
     ),
   ]);
