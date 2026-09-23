@@ -16058,6 +16058,141 @@ app.delete('/api/category-field-rules/:id', async (req, res) => {
 });
 
 // ============================================================
+// CATEGORY DESCRIPTIONS (Item Title template + description/search/
+// web-filter behaviour) — powers Category Manager's Descriptions tab.
+// Only resolves this category's own field rules today, not inherited
+// parent-category rules (category-field-rules has the same limitation).
+// ============================================================
+
+const DEFAULT_DESCRIPTION_SETTINGS = {
+  title_template: ['category'],
+  category_in_short_description: true,
+  category_in_long_description: true,
+  search_index_title: true,
+  search_index_short_description: true,
+  search_index_long_description: false,
+  boost_title_matches: true,
+  web_search_title: true,
+  web_search_short_description: true,
+  web_search_long_description: true,
+};
+
+async function fetchDescriptionConfig(categoryId) {
+  const [settingsRes, fieldsRes] = await Promise.all([
+    pool.query('SELECT * FROM category_description_settings WHERE category_id = $1', [categoryId]),
+    pool.query(
+      `SELECT r.id, r.field_definition_id, r.short_description, r.long_description, r.search, r.web_filter,
+              f.field_key, f.label, r.label_override
+       FROM category_field_rules r
+       JOIN category_field_definitions f ON f.id = r.field_definition_id
+       WHERE r.category_id = $1 AND r.action != 'SUPPRESS'
+       ORDER BY r.display_order ASC, f.field_key ASC`,
+      [categoryId]
+    ),
+  ]);
+  const { category_id, updated_at, ...settingsRow } = settingsRes.rows[0] || {};
+  const settings = { ...DEFAULT_DESCRIPTION_SETTINGS, ...settingsRow };
+  return { settings, fields: fieldsRes.rows };
+}
+
+// GET /api/categories/:id/description-config
+app.get('/api/categories/:id/description-config', async (req, res) => {
+  try {
+    const catRes = await pool.query('SELECT id FROM categories WHERE id = $1', [req.params.id]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+    res.json(await fetchDescriptionConfig(req.params.id));
+  } catch (err) {
+    console.error('Error fetching category description config:', err);
+    res.status(500).json({ error: 'Failed to fetch category description config' });
+  }
+});
+
+// PUT /api/categories/:id/description-config
+app.put('/api/categories/:id/description-config', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const categoryId = req.params.id;
+    const s = { ...DEFAULT_DESCRIPTION_SETTINGS, ...req.body.settings };
+    const fields = Array.isArray(req.body.fields) ? req.body.fields : [];
+
+    await client.query('BEGIN');
+
+    await client.query(
+      `INSERT INTO category_description_settings
+         (category_id, title_template, category_in_short_description, category_in_long_description,
+          search_index_title, search_index_short_description, search_index_long_description,
+          boost_title_matches, web_search_title, web_search_short_description, web_search_long_description,
+          updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, CURRENT_TIMESTAMP)
+       ON CONFLICT (category_id) DO UPDATE SET
+         title_template                 = EXCLUDED.title_template,
+         category_in_short_description  = EXCLUDED.category_in_short_description,
+         category_in_long_description   = EXCLUDED.category_in_long_description,
+         search_index_title             = EXCLUDED.search_index_title,
+         search_index_short_description = EXCLUDED.search_index_short_description,
+         search_index_long_description  = EXCLUDED.search_index_long_description,
+         boost_title_matches            = EXCLUDED.boost_title_matches,
+         web_search_title               = EXCLUDED.web_search_title,
+         web_search_short_description   = EXCLUDED.web_search_short_description,
+         web_search_long_description    = EXCLUDED.web_search_long_description,
+         updated_at                     = CURRENT_TIMESTAMP`,
+      [
+        categoryId, JSON.stringify(s.title_template),
+        s.category_in_short_description, s.category_in_long_description,
+        s.search_index_title, s.search_index_short_description, s.search_index_long_description,
+        s.boost_title_matches, s.web_search_title, s.web_search_short_description, s.web_search_long_description,
+      ]
+    );
+
+    for (const f of fields) {
+      if (!f || !f.id) continue;
+      // Web Filter implies Search — a field can be searchable without being a
+      // web filter, but not the other way around.
+      const search = !!f.search || !!f.web_filter;
+      await client.query(
+        `UPDATE category_field_rules
+         SET short_description = $1, long_description = $2, search = $3, web_filter = $4, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $5 AND category_id = $6`,
+        [!!f.short_description, !!f.long_description, search, !!f.web_filter, f.id, categoryId]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json(await fetchDescriptionConfig(categoryId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error saving category description config:', err);
+    res.status(500).json({ error: 'Failed to save category description config' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/categories/:id/description-config/reset  — revert to defaults
+app.post('/api/categories/:id/description-config/reset', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const categoryId = req.params.id;
+    await client.query('BEGIN');
+    await client.query('DELETE FROM category_description_settings WHERE category_id = $1', [categoryId]);
+    await client.query(
+      `UPDATE category_field_rules
+       SET short_description = false, long_description = false, search = false, web_filter = false, updated_at = CURRENT_TIMESTAMP
+       WHERE category_id = $1`,
+      [categoryId]
+    );
+    await client.query('COMMIT');
+    res.json(await fetchDescriptionConfig(categoryId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error resetting category description config:', err);
+    res.status(500).json({ error: 'Failed to reset category description config' });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
 // HARDGOODS CRUD
 // ============================================================
 

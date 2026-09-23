@@ -39,6 +39,7 @@ const MIGRATION_FILES = [
   'trusted_pcs.sql',
   'customers.sql',
   'category_tree.sql',   // divisions, categories, field_definitions, category_field_rules
+  'category_descriptions.sql', // title template + description/search/web-filter flags
   'inventory_modes.sql', // inventory_modes, processing_statuses
   'hardgoods.sql',       // hardgoods, hardgoods_attributes
   'inventory.sql',
