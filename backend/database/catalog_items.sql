@@ -114,6 +114,28 @@ CREATE INDEX IF NOT EXISTS idx_catalog_aliases_item ON catalog_item_aliases(cata
 
 
 -- ============================================================
+-- SEARCH INDEXES (doc §9/§10) — no leading-wildcard LIKE scans.
+-- * Model-number prefix match: text_pattern_ops B-tree on normalized_value.
+-- * Keyword search: expression GIN full-text indexes over the title/make/model
+--   and aliases. 'simple' config (no stemming) so model names like "PS5" and
+--   "CFI-1215A" tokenize predictably. The search API must use these exact
+--   expressions for the planner to pick the indexes up.
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_catalog_identifiers_prefix
+    ON catalog_item_identifiers(normalized_value text_pattern_ops);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_items_title_fts
+    ON catalog_items USING GIN (
+      to_tsvector('simple',
+        coalesce(title_override, '') || ' ' || coalesce(generated_title, '') || ' ' ||
+        coalesce(make_brand, '') || ' ' || coalesce(model_name, ''))
+    );
+
+CREATE INDEX IF NOT EXISTS idx_catalog_aliases_fts
+    ON catalog_item_aliases USING GIN (to_tsvector('simple', alias));
+
+
+-- ============================================================
 -- 5. CATALOG FIELD VALUES (doc §2/§3) — current Catalog-scope value per
 -- Field Definition from the existing Field Library. Only fields effective
 -- for the item's Category with scope = CATALOG are accepted (API-enforced).

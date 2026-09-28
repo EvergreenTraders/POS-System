@@ -15,6 +15,9 @@ const CONDITION_OPTIONS = ['New', 'Like New', 'Good', 'Fair', 'Poor', 'Damaged']
 const COLOUR_OPTIONS = ['Black', 'White', 'Silver', 'Gold', 'Blue', 'Red', 'Green', 'Grey', 'Brown', 'Multi-color'];
 const PROCESSING_ROUTES = ['Hardgoods Processing', 'Repair Queue', 'Direct to Floor', 'Manager Review Queue'];
 const DEFAULT_VIEWS = ['Front', 'Back', 'Serial', 'Damage'];
+// Single-item intake creates Piece/Unit records; Stock and Bucket need stock SKU /
+// bucket records that intake doesn't create yet.
+const INTAKE_MODES = ['PIECE', 'UNIT'];
 const SUGGESTION_TYPES = [
   { key: 'buy',    label: 'Buy' },
   { key: 'pawn',   label: 'Pawn' },
@@ -50,28 +53,57 @@ export default function HardgoodsIntakeScreen({
   onChangeMatch,
 }) {
   const editAttr = (key) => editItem?.attributes?.find(a => a.field_key === key)?.field_value;
-  const matchAttr = (key) => matchPrefill?.attributes?.find(a => a.field_key === key)?.field_value;
 
-  const [itemName,     setItemName]     = useState(editItem?.item || editItem?.short_desc || matchPrefill?.short_desc || initialEntry || '');
-  const [brand,        setBrand]        = useState(editItem?.brand || editAttr('brand') || matchAttr('brand') || '');
-  const [model,        setModel]        = useState(editItem?.model || editAttr('model') || matchAttr('model') || '');
-  const [itemType,     setItemType]     = useState(editItem?.type || editAttr('type') || matchAttr('type') || '');
+  // matchPrefill is the full Catalog Item (GET /api/catalog-items/:id) chosen in
+  // Find Matching Item. Its current values PREFILL this intake; the employee may
+  // override anything for the item in front of them, and the saved inventory
+  // record keeps its own snapshot, linked back only by catalog_item_id.
+  const catalogSource = editItem ? null : matchPrefill;
+  const [linkedCatalog, setLinkedCatalog] = useState(() => {
+    if (editItem?.catalog_item_id) {
+      return { id: editItem.catalog_item_id, catalog_code: editItem.catalog_code, title: editItem.catalog_title, pricing: editItem.catalog_pricing || null };
+    }
+    if (catalogSource) {
+      return { id: catalogSource.id, catalog_code: catalogSource.catalog_code, title: catalogSource.title, pricing: catalogSource.pricing };
+    }
+    return null;
+  });
+  // field_key → value the catalog prefilled, so the UI can tell "from catalog"
+  // apart from "overridden for this item". Carried on the ticket item so an
+  // edit later still shows the same markers.
+  const [catalogPrefill, setCatalogPrefill] = useState(() => {
+    if (editItem) return editItem.catalog_prefill || {};
+    if (!catalogSource) return {};
+    const values = { item: catalogSource.title || '', brand: catalogSource.make_brand || '', model: catalogSource.model_name || '' };
+    (catalogSource.field_values || []).forEach(f => {
+      if (f.value !== null && f.value !== '') values[f.field_key] = f.value;
+    });
+    return values;
+  });
+
+  const [itemName,     setItemName]     = useState(editItem?.item || editItem?.short_desc || catalogSource?.title || initialEntry || '');
+  const [brand,        setBrand]        = useState(editItem?.brand || editAttr('brand') || catalogSource?.make_brand || '');
+  const [model,        setModel]        = useState(editItem?.model || editAttr('model') || catalogSource?.model_name || '');
+  const [itemType,     setItemType]     = useState(editItem?.type || editAttr('type') || '');
   const [serialNumber, setSerialNumber] = useState(editItem?.serial || editItem?.serial_number || '');
-  const [condition,    setCondition]    = useState(editItem?.condition || matchPrefill?.condition || '');
+  const [condition,    setCondition]    = useState(editItem?.condition || '');
+  // Catalog default_inventory_mode is the default, when intake supports it.
+  const [inventoryMode, setInventoryMode] = useState(() => {
+    const preferred = editItem?.mode || catalogSource?.default_inventory_mode;
+    return INTAKE_MODES.includes(preferred) ? preferred : 'PIECE';
+  });
+  const [inventoryModes, setInventoryModes] = useState([]);
   const [colour,       setColour]       = useState(editItem?.colour || '');
   const [year,         setYear]         = useState(editItem?.year || '');
   const [notes,        setNotes]        = useState(editItem?.notes || '');
   const [accessories,  setAccessories]  = useState(editItem?.accessories || []);
   const [newAccessory, setNewAccessory] = useState('');
   const [suggestCatalog, setSuggestCatalog] = useState(false);
-  // Reference photo shown in "Catalog Photo" — from the matched intake-history
-  // record when one was picked via Find Matching Item, otherwise it mirrors
-  // whatever intake photo gets taken (see catalogPhoto below).
-  const [matchedPhoto] = useState(matchPrefill?.image || null);
 
   const [categories, setCategories]   = useState([]);
-  const [category,   setCategory]     = useState(editItem?.category_id || matchPrefill?.category_id || '');
-  const [categoryPickerOpen, setCategoryPickerOpen] = useState(!editItem?.category_id && !matchPrefill?.category_id);
+  // A catalog-linked item takes its Category from the Catalog Item (structural).
+  const [category,   setCategory]     = useState(editItem?.category_id || catalogSource?.category_id || '');
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(!editItem?.category_id && !catalogSource?.category_id);
   const [categoryFields, setCategoryFields] = useState([]);
   const [categoryFieldValues, setCategoryFieldValues] = useState({});
 
@@ -95,11 +127,14 @@ export default function HardgoodsIntakeScreen({
   // price columns; the high end is just a suggestion aid.
   const [suggestions, setSuggestions] = useState(() => {
     const seed = (single) => ({ low: single != null ? String(single) : '', high: '' });
+    // Catalog Suggested Retail, when set, is the retail suggestion (doc §7).
+    // Buy/Pawn are NOT derived from Suggested Cost: that needs Category Buy%/
+    // Pawn% configuration, which doesn't exist yet.
     return {
-      buy:    seed(editItem?.buy_price ?? matchPrefill?.cost_price),
+      buy:    seed(editItem?.buy_price),
       pawn:   seed(editItem?.pawn_price),
       trade:  seed(editItem?.trade_price),
-      retail: seed(editItem?.retail_price ?? matchPrefill?.retail_price),
+      retail: seed(editItem?.retail_price ?? catalogSource?.pricing?.suggested_retail),
     };
   });
   const updateSuggestion = (key, field, value) => setSuggestions(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
@@ -135,6 +170,9 @@ export default function HardgoodsIntakeScreen({
       }
     };
     loadCategories();
+    axios.get(`${config.apiUrl}/inventory-modes`)
+      .then(res => setInventoryModes(res.data || []))
+      .catch(err => console.error('Error loading inventory modes:', err));
   }, []);
 
   // Hardgoods > Parent > ... > Selected — walked from the flat categories list via parent_category_id
@@ -148,12 +186,16 @@ export default function HardgoodsIntakeScreen({
     return ['Hardgoods', ...chain].join(' > ');
   })();
 
+  // Effective fields = division + ancestor-category inheritance, each tagged
+  // with its scope: CATALOG fields prefill from the Catalog Item, INVENTORY
+  // fields describe this physical item and are entered by the employee.
   const loadCategoryFields = useCallback(async (catId, prefillValues = {}) => {
     if (!catId) { setCategoryFields([]); setCategoryFieldValues({}); return; }
     try {
-      const res = await axios.get(`${config.apiUrl}/category-field-rules/${catId}`);
+      const res = await axios.get(`${config.apiUrl}/categories/${catId}/effective-fields`);
       // Brand / Model / Type are already surfaced as fixed core fields — don't duplicate them here.
-      const fields = (res.data || []).filter(f => !['brand', 'model', 'type'].includes(f.field_key));
+      const fields = (res.data?.fields || []).filter(f =>
+        !['brand', 'model', 'type'].includes(f.field_key) && f.required_at !== 'NOT_USED');
       setCategoryFields(fields);
       const valMap = {};
       for (const f of fields) {
@@ -169,12 +211,28 @@ export default function HardgoodsIntakeScreen({
 
   useEffect(() => {
     if (category) {
-      const prefill = {};
+      // Current catalog values first, then anything already saved on this
+      // ticket item (its own snapshot/overrides) on top.
+      const prefill = { ...catalogPrefill };
       (editItem?.attributes || []).forEach(a => { prefill[a.field_key] = a.field_value; });
       loadCategoryFields(category, prefill);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category]);
+
+  // "From catalog" / "Overridden" marker for a prefilled value.
+  const prefillNote = (key, value) => {
+    const prefilled = catalogPrefill[key];
+    if (!linkedCatalog || prefilled === undefined || prefilled === null || prefilled === '') return null;
+    return String(value ?? '') === String(prefilled) ? 'From catalog' : `Overridden (catalog: ${prefilled})`;
+  };
+
+  // Drop the catalog link: values stay as typed, but become plain intake
+  // entries and the category can be changed again.
+  const handleUnlinkCatalog = () => {
+    setLinkedCatalog(null);
+    setCatalogPrefill({});
+  };
 
   const handleCategoryChange = (catId) => {
     setCategory(catId);
@@ -183,15 +241,21 @@ export default function HardgoodsIntakeScreen({
   };
 
   const renderCategoryField = (field) => {
-    const label = field.label_override || field.label || field.field_key;
+    const label = field.label_override || field.field_label || field.label || field.field_key;
     const val   = categoryFieldValues[field.field_key] ?? '';
     const onChange = (newVal) => setCategoryFieldValues(prev => ({ ...prev, [field.field_key]: newVal }));
+    const note = prefillNote(field.field_key, val);
+    const noteSx = { color: note?.startsWith('Overridden') ? '#e65100' : GREEN };
 
     switch (field.data_type) {
       case 'NUMBER':
-        return <TextField key={field.field_key} label={label} type="number" value={val} onChange={e => onChange(e.target.value)} size="small" fullWidth disabled={readOnly} />;
+      case 'CURRENCY':
+        return <TextField key={field.field_key} label={label} type="number" value={val} onChange={e => onChange(e.target.value)} size="small" fullWidth disabled={readOnly}
+          helperText={note} FormHelperTextProps={{ sx: noteSx }} />;
       case 'ENUM': {
-        const opts = Array.isArray(field.allowed_values) ? field.allowed_values : [];
+        const opts = Array.isArray(field.allowed_values) ? [...field.allowed_values] : [];
+        // A prefilled/free-typed value outside the list must still display.
+        if (val && !opts.includes(val)) opts.push(val);
         return (
           <FormControl key={field.field_key} fullWidth size="small" disabled={readOnly}>
             <InputLabel>{label}</InputLabel>
@@ -199,20 +263,28 @@ export default function HardgoodsIntakeScreen({
               <MenuItem value=""><em>Not specified</em></MenuItem>
               {opts.map(v => <MenuItem key={v} value={v}>{v}</MenuItem>)}
             </Select>
+            {note && <FormHelperText sx={noteSx}>{note}</FormHelperText>}
           </FormControl>
         );
       }
       case 'BOOLEAN':
         return (
-          <FormControlLabel key={field.field_key} disabled={readOnly}
-            control={<Checkbox size="small" checked={val === 'true' || val === true} onChange={e => onChange(e.target.checked ? 'true' : 'false')} />}
-            label={<Typography variant="body2" fontSize={12}>{label}</Typography>}
-          />
+          <Box key={field.field_key}>
+            <FormControlLabel disabled={readOnly}
+              control={<Checkbox size="small" checked={val === 'true' || val === true} onChange={e => onChange(e.target.checked ? 'true' : 'false')} />}
+              label={<Typography variant="body2" fontSize={12}>{label}</Typography>}
+            />
+            {note && <FormHelperText sx={{ ...noteSx, mt: -0.5 }}>{note}</FormHelperText>}
+          </Box>
         );
       default:
-        return <TextField key={field.field_key} label={label} value={val} onChange={e => onChange(e.target.value)} size="small" fullWidth disabled={readOnly} />;
+        return <TextField key={field.field_key} label={label} value={val} onChange={e => onChange(e.target.value)} size="small" fullWidth disabled={readOnly}
+          helperText={note} FormHelperTextProps={{ sx: noteSx }} />;
     }
   };
+
+  const catalogScopeFields   = categoryFields.filter(f => f.scope === 'CATALOG');
+  const inventoryScopeFields = categoryFields.filter(f => f.scope !== 'CATALOG');
 
   // ── Pricing Intelligence — real aggregates from existing hardgoods rows in the same category ──
   useEffect(() => {
@@ -262,7 +334,9 @@ export default function HardgoodsIntakeScreen({
     setAddViewOpen(false);
   };
 
-  const catalogPhoto = matchedPhoto ? { url: matchedPhoto } : (views.find(v => v.image)?.image || null);
+  // Catalog reference images are a later phase, so this mirrors the first
+  // intake photo. Intake photos belong to the inventory record only.
+  const catalogPhoto = views.find(v => v.image)?.image || null;
 
   // ── Accessories ────────────────────────────────────────────────────────────
   const handleAddAccessory = () => {
@@ -336,7 +410,16 @@ export default function HardgoodsIntakeScreen({
       processing_queue: processingRoute || null,
       sellable_status: flagNotes.length ? 'NOT_SELLABLE' : null,
       blocking_reason: flagNotes.length ? flagNotes.join(', ') : null,
-      suggest_catalog: suggestCatalog,
+      suggest_catalog: linkedCatalog ? false : suggestCatalog,
+      // Inventory snapshot: `attributes` holds the resolved values (catalog
+      // prefill + employee overrides + inventory fields) and is what gets
+      // saved on the inventory record. catalog_item_id only links back for
+      // grouping/history; later catalog edits never rewrite this item.
+      catalog_item_id: linkedCatalog?.id || null,
+      catalog_code:    linkedCatalog?.catalog_code || null,
+      catalog_title:   linkedCatalog?.title || null,
+      catalog_pricing: linkedCatalog?.pricing || null,
+      catalog_prefill: linkedCatalog ? catalogPrefill : {},
       attributes,
       images: views.filter(v => v.image).map((v, idx) => ({ url: v.image.url, file: v.image.file, isPrimary: idx === 0, label: v.label })),
       short_desc: shortDesc,
@@ -344,7 +427,7 @@ export default function HardgoodsIntakeScreen({
       original_entry: initialEntry,
       sourceEstimator: 'hardgoods',
       fromEstimator:   'hardgoods',
-      mode: 'PIECE',
+      mode: inventoryMode || 'PIECE',
     };
   };
 
@@ -387,14 +470,22 @@ export default function HardgoodsIntakeScreen({
       <Box sx={{ bgcolor: 'white', px: 2.5, py: 1.25, borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap', mb: readOnly ? 0 : 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
             <Typography variant="body2" color="text.secondary">Catalog Item:</Typography>
-            <Typography variant="body2" fontWeight={700}>{itemName.trim() || '—'}</Typography>
+            {linkedCatalog ? (
+              <>
+                <Chip size="small" label={linkedCatalog.catalog_code || `#${linkedCatalog.id}`}
+                  sx={{ height: 20, fontSize: 11, fontFamily: 'monospace', bgcolor: '#e3f2fd', color: '#1565c0', fontWeight: 700 }} />
+                <Typography variant="body2" fontWeight={700}>{linkedCatalog.title || '—'}</Typography>
+              </>
+            ) : (
+              <Typography variant="body2" fontWeight={700} color="text.secondary">Not linked (non-catalog item)</Typography>
+            )}
           </Box>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
             <Typography variant="body2" color="text.secondary">Category:</Typography>
-            {categoryPickerOpen ? (
+            {categoryPickerOpen && !linkedCatalog ? (
               <FormControl size="small" sx={{ minWidth: 240 }} error={!!formErrors.category} disabled={readOnly}>
                 <Select value={category} displayEmpty onChange={e => handleCategoryChange(e.target.value)} sx={{ borderRadius: 2 }}>
                   <MenuItem value=""><em>Select category…</em></MenuItem>
@@ -411,14 +502,28 @@ export default function HardgoodsIntakeScreen({
             <Typography variant="body2" fontWeight={700} fontFamily="monospace">"{initialEntry || '—'}"</Typography>
           </Box>
 
-          <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center' }}>
-            <FormControlLabel disabled={readOnly}
-              control={<Checkbox size="small" checked={suggestCatalog} onChange={e => setSuggestCatalog(e.target.checked)} sx={{ color: GREEN, '&.Mui-checked': { color: GREEN } }} />}
-              label={<Typography variant="body2" fontSize={12}>Suggest add to catalog</Typography>} />
-            <Tooltip title="Flags this item for staff to consider adding as a reusable catalog template">
-              <MuiIcons.InfoOutlined sx={{ fontSize: 15, color: 'text.secondary' }} />
-            </Tooltip>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+            <Typography variant="body2" color="text.secondary">Inventory Mode:</Typography>
+            <FormControl size="small" sx={{ minWidth: 110 }} disabled={readOnly}>
+              <Select value={inventoryMode} onChange={e => setInventoryMode(e.target.value)} sx={{ borderRadius: 2 }}>
+                {/* Stock / Bucket need stock SKU and bucket records, which intake doesn't create yet. */}
+                {inventoryModes.filter(m => INTAKE_MODES.includes(m.code)).map(m => (
+                  <MenuItem key={m.code} value={m.code}>{m.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Box>
+
+          {!linkedCatalog && (
+            <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center' }}>
+              <FormControlLabel disabled={readOnly}
+                control={<Checkbox size="small" checked={suggestCatalog} onChange={e => setSuggestCatalog(e.target.checked)} sx={{ color: GREEN, '&.Mui-checked': { color: GREEN } }} />}
+                label={<Typography variant="body2" fontSize={12}>Suggest add to catalog</Typography>} />
+              <Tooltip title="Flags this item for staff to consider adding as a reusable catalog template">
+                <MuiIcons.InfoOutlined sx={{ fontSize: 15, color: 'text.secondary' }} />
+              </Tooltip>
+            </Box>
+          )}
         </Box>
 
         {!readOnly && (
@@ -438,10 +543,24 @@ export default function HardgoodsIntakeScreen({
                 </span>
               </Tooltip>
             )}
-            <Button size="small" variant="outlined" startIcon={<MuiIcons.FolderOpen sx={{ fontSize: 15 }} />} onClick={() => setCategoryPickerOpen(true)}
-              sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12.5 }}>
-              Change Category
-            </Button>
+            <Tooltip title={linkedCatalog ? 'Category comes from the linked catalog item. Change the match or unlink it to pick another category.' : ''}>
+              <span>
+                <Button size="small" variant="outlined" startIcon={<MuiIcons.FolderOpen sx={{ fontSize: 15 }} />} onClick={() => setCategoryPickerOpen(true)}
+                  disabled={!!linkedCatalog}
+                  sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12.5 }}>
+                  Change Category
+                </Button>
+              </span>
+            </Tooltip>
+            {linkedCatalog && (
+              <Tooltip title="Keep the values entered so far but save this item without a catalog link">
+                <Button size="small" variant="outlined" color="inherit" startIcon={<MuiIcons.LinkOff sx={{ fontSize: 15 }} />}
+                  onClick={handleUnlinkCatalog}
+                  sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12.5 }}>
+                  Unlink Catalog
+                </Button>
+              </Tooltip>
+            )}
           </Box>
         )}
       </Box>
@@ -553,12 +672,21 @@ export default function HardgoodsIntakeScreen({
 
               {/* Left sub-column: Item / Brand / Model / Type + Accessories */}
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
-                <TextField label="Item *" value={itemName} onChange={e => { setItemName(e.target.value); setFormErrors(p => ({ ...p, itemName: false })); }}
-                  size="small" fullWidth disabled={readOnly} error={!!formErrors.itemName} sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }} />
-                <TextField label="Brand *" value={brand} onChange={e => { setBrand(e.target.value); setFormErrors(p => ({ ...p, brand: false })); }}
-                  size="small" fullWidth disabled={readOnly} error={!!formErrors.brand} sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }} />
-                <TextField label="Model *" value={model} onChange={e => { setModel(e.target.value); setFormErrors(p => ({ ...p, model: false })); }}
-                  size="small" fullWidth disabled={readOnly} error={!!formErrors.model} sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }} />
+                {[
+                  { key: 'item',  label: 'Item *',  value: itemName, set: setItemName, err: 'itemName' },
+                  { key: 'brand', label: 'Brand *', value: brand,    set: setBrand,    err: 'brand' },
+                  { key: 'model', label: 'Model *', value: model,    set: setModel,    err: 'model' },
+                ].map(f => {
+                  const note = prefillNote(f.key, f.value);
+                  return (
+                    <TextField key={f.key} label={f.label} value={f.value}
+                      onChange={e => { f.set(e.target.value); setFormErrors(p => ({ ...p, [f.err]: false })); }}
+                      size="small" fullWidth disabled={readOnly} error={!!formErrors[f.err]}
+                      helperText={note}
+                      FormHelperTextProps={{ sx: { color: note?.startsWith('Overridden') ? '#e65100' : GREEN } }}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }} />
+                  );
+                })}
                 <Autocomplete
                   freeSolo
                   disabled={readOnly}
@@ -591,8 +719,23 @@ export default function HardgoodsIntakeScreen({
                 </Box>
               </Box>
 
-              {/* Right sub-column: Required Intake Fields + Item Notes */}
+              {/* Right sub-column: Catalog Details + Required Intake Fields + Item Notes */}
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+                {catalogScopeFields.length > 0 && (
+                  <>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Typography variant="body2" fontWeight={600}>Catalog Details</Typography>
+                      <Tooltip title={linkedCatalog
+                        ? 'Prefilled from the catalog item. Changes here apply to this item only; the catalog is not updated.'
+                        : 'Catalog-level fields for this category.'}>
+                        <MuiIcons.InfoOutlined sx={{ fontSize: 14, color: 'text.secondary' }} />
+                      </Tooltip>
+                    </Box>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 1.25 }}>
+                      {catalogScopeFields.map(field => renderCategoryField(field))}
+                    </Box>
+                  </>
+                )}
                 <Typography variant="body2" fontWeight={600}>Required Intake Fields</Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 1.25 }}>
                   <TextField label="Serial Number *" value={serialNumber} onChange={e => setSerialNumber(e.target.value)}
@@ -611,7 +754,7 @@ export default function HardgoodsIntakeScreen({
                   </FormControl>
                   <TextField label="Year *" value={year} onChange={e => { setYear(e.target.value); setFormErrors(p => ({ ...p, year: false })); }}
                     size="small" fullWidth disabled={readOnly} error={!!formErrors.year} sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }} />
-                  {categoryFields.length > 0 && categoryFields.map(field => renderCategoryField(field))}
+                  {inventoryScopeFields.map(field => renderCategoryField(field))}
                 </Box>
 
                 <TextField label="Item Notes" value={notes} onChange={e => setNotes(e.target.value)}
@@ -658,6 +801,12 @@ export default function HardgoodsIntakeScreen({
             <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
               <Box sx={{ flex: 1, minWidth: 220 }}>
                 <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5 }}>Suggested Values</Typography>
+                {linkedCatalog?.pricing && (linkedCatalog.pricing.suggested_cost != null || linkedCatalog.pricing.suggested_retail != null) && (
+                  <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                    Catalog suggestions — Cost: {fmt(linkedCatalog.pricing.suggested_cost)} · Retail: {fmt(linkedCatalog.pricing.suggested_retail)}
+                    {linkedCatalog.pricing.retails_new_for != null && <> · New: {fmt(linkedCatalog.pricing.retails_new_for)}</>}
+                  </Typography>
+                )}
                 <Box sx={{ border: '1px solid #e0e0e0', borderRadius: 2, overflow: 'hidden' }}>
                   {SUGGESTION_TYPES.map(({ key, label }) => {
                     const { low, high } = suggestions[key];

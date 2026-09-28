@@ -17109,6 +17109,222 @@ app.post('/api/catalog-items', async (req, res) => {
   }
 });
 
+// ============================================================
+// CATALOG SEARCH (doc §9/§10/§13) — server-side, indexed, search-first.
+// Priority: 1) exact identifier (UPC/EAN/model/other, normalized)
+//           2) manufacturer-model prefix  3) ranked keyword (title + aliases)
+// No search text + a category / make filter = Category browse.
+// Returns a small, lightweight result set (no pricing/intelligence); the
+// client loads the full item via GET /api/catalog-items/:id after selection.
+// Active items only unless include_inactive=true (Draft/Merged never).
+// ============================================================
+
+const CATALOG_SEARCH_MAX_LIMIT = 25;
+
+// Must match the idx_catalog_items_title_fts expression exactly.
+const CATALOG_TITLE_TSVECTOR = `to_tsvector('simple',
+  coalesce(ci.title_override, '') || ' ' || coalesce(ci.generated_title, '') || ' ' ||
+  coalesce(ci.make_brand, '') || ' ' || coalesce(ci.model_name, ''))`;
+
+// Every typed word becomes a prefix term, all required ("ps5 disc" → ps5:* & disc:*).
+function buildCatalogTsQuery(q) {
+  const tokens = String(q).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).slice(0, 8);
+  return tokens.length ? tokens.map(t => `${t}:*`).join(' & ') : null;
+}
+
+async function catalogSearchScope(query) {
+  const categoryId = query.category_id ? parseInt(query.category_id, 10) : null;
+  const divisionId = query.division_id ? parseInt(query.division_id, 10) : null;
+  let categoryIds = null;
+  if (categoryId) {
+    // Browsing a category includes everything beneath it.
+    categoryIds = [categoryId, ...(await getDescendantCategoryIds(categoryId))];
+  } else if (divisionId) {
+    // e.g. Hardgoods intake only searches Hardgoods catalog items.
+    const divRes = await pool.query('SELECT id FROM categories WHERE division_id = $1', [divisionId]);
+    categoryIds = divRes.rows.map(r => r.id);
+  }
+  return {
+    companyId: await getDefaultCompanyId(pool),
+    statuses: query.include_inactive === 'true' ? ['ACTIVE', 'INACTIVE'] : ['ACTIVE'],
+    categoryIds,
+    makeBrand: trimOrNull(query.make_brand),
+  };
+}
+
+// WHERE fragment for the shared company/status/category/make filters on alias `ci`.
+function catalogScopeWhere(scope, params) {
+  params.push(scope.companyId);
+  let sql = `ci.company_id = $${params.length}`;
+  params.push(scope.statuses);
+  sql += ` AND ci.status = ANY($${params.length}::text[])`;
+  if (scope.categoryIds) {
+    params.push(scope.categoryIds);
+    sql += ` AND ci.category_id = ANY($${params.length}::int[])`;
+  }
+  if (scope.makeBrand) {
+    params.push(scope.makeBrand);
+    sql += ` AND lower(ci.make_brand) = lower($${params.length})`;
+  }
+  return sql;
+}
+
+async function hydrateCatalogSearchResults(ids) {
+  if (!ids.length) return [];
+  const result = await pool.query(
+    `SELECT ci.id, ci.catalog_code, ci.status, ci.make_brand, ci.model_name,
+            COALESCE(ci.title_override, ci.generated_title, ci.model_name) AS title,
+            ci.category_id, c.name AS category_name, ci.default_inventory_mode,
+            COALESCE((
+              SELECT json_agg(json_build_object('identifier_type', x.identifier_type, 'raw_value', x.raw_value))
+              FROM (
+                SELECT identifier_type, raw_value FROM catalog_item_identifiers
+                WHERE catalog_item_id = ci.id AND is_active = true
+                ORDER BY (identifier_type IN ('UPC', 'EAN')) DESC, id
+                LIMIT 3
+              ) x
+            ), '[]') AS identifiers
+     FROM catalog_items ci
+     JOIN categories c ON c.id = ci.category_id
+     WHERE ci.id = ANY($1::int[])`,
+    [ids]
+  );
+  const byId = Object.fromEntries(result.rows.map(r => [r.id, r]));
+  return ids.map(id => byId[id]).filter(Boolean);
+}
+
+// GET /api/catalog-items/search?q=&division_id=&category_id=&make_brand=&include_inactive=&limit=
+app.get('/api/catalog-items/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || CATALOG_SEARCH_MAX_LIMIT, 1), CATALOG_SEARCH_MAX_LIMIT);
+    const scope = await catalogSearchScope(req.query);
+
+    // Browse needs an explicit category or make — a bare division alone would
+    // just list the whole catalog, which Intake must never do.
+    if (!q && !req.query.category_id && !scope.makeBrand) return res.json({ match_type: null, results: [] });
+
+    let matchType = null;
+    let ids = [];
+
+    if (q) {
+      const normalized = normalizeCatalogIdentifier(q);
+
+      // 1) Exact identifier — UPC/EAN scans resolve here immediately.
+      if (normalized) {
+        const params = [normalized];
+        const where = catalogScopeWhere(scope, params);
+        params.push(limit);
+        const exact = await pool.query(
+          `SELECT i.catalog_item_id AS id, bool_or(i.identifier_type IN ('UPC', 'EAN')) AS is_barcode
+           FROM catalog_item_identifiers i
+           JOIN catalog_items ci ON ci.id = i.catalog_item_id
+           WHERE i.normalized_value = $1 AND i.is_active = true AND i.company_id = ci.company_id AND ${where}
+           GROUP BY i.catalog_item_id
+           ORDER BY is_barcode DESC, i.catalog_item_id
+           LIMIT $${params.length}`,
+          params
+        );
+        if (exact.rows.length) {
+          matchType = 'IDENTIFIER';
+          ids = exact.rows.map(r => r.id);
+        }
+      }
+
+      // 2) Controlled model-number prefix: only for model-number-looking input
+      //    (3+ chars containing a digit), via the text_pattern_ops index.
+      if (!ids.length && normalized.length >= 3 && /\d/.test(normalized)) {
+        const params = [`${normalized.replace(/[\\%_]/g, '\\$&')}%`];
+        const where = catalogScopeWhere(scope, params);
+        params.push(limit);
+        const prefix = await pool.query(
+          `SELECT DISTINCT i.catalog_item_id AS id
+           FROM catalog_item_identifiers i
+           JOIN catalog_items ci ON ci.id = i.catalog_item_id
+           WHERE i.identifier_type = 'MANUFACTURER_MODEL' AND i.is_active = true
+             AND i.normalized_value LIKE $1 AND ${where}
+           ORDER BY i.catalog_item_id
+           LIMIT $${params.length}`,
+          params
+        );
+        if (prefix.rows.length) {
+          matchType = 'MODEL_PREFIX';
+          ids = prefix.rows.map(r => r.id);
+        }
+      }
+
+      // 3) Ranked keyword search over title/make/model and aliases (full-text,
+      //    GIN-indexed). Title hits outrank alias hits.
+      const tsQuery = !ids.length ? buildCatalogTsQuery(q) : null;
+      if (tsQuery) {
+        const params = [tsQuery];
+        const where = catalogScopeWhere(scope, params);
+        params.push(limit);
+        const keyword = await pool.query(
+          `WITH hits AS (
+             SELECT ci.id, ts_rank(${CATALOG_TITLE_TSVECTOR}, to_tsquery('simple', $1)) * 2 AS rank
+             FROM catalog_items ci
+             WHERE ${CATALOG_TITLE_TSVECTOR} @@ to_tsquery('simple', $1) AND ${where}
+             UNION ALL
+             SELECT ci.id, ts_rank(to_tsvector('simple', a.alias), to_tsquery('simple', $1)) AS rank
+             FROM catalog_item_aliases a
+             JOIN catalog_items ci ON ci.id = a.catalog_item_id
+             WHERE a.is_active = true AND to_tsvector('simple', a.alias) @@ to_tsquery('simple', $1) AND ${where}
+           )
+           SELECT id, MAX(rank) AS rank FROM hits GROUP BY id
+           ORDER BY rank DESC, id
+           LIMIT $${params.length}`,
+          params
+        );
+        if (keyword.rows.length) {
+          matchType = 'KEYWORD';
+          ids = keyword.rows.map(r => r.id);
+        }
+      }
+    } else {
+      // Category → Make/Brand browse: only the filtered subset, limited.
+      const params = [];
+      const where = catalogScopeWhere(scope, params);
+      params.push(limit);
+      const browse = await pool.query(
+        `SELECT ci.id FROM catalog_items ci
+         WHERE ${where}
+         ORDER BY lower(COALESCE(ci.title_override, ci.generated_title, ci.model_name)), ci.id
+         LIMIT $${params.length}`,
+        params
+      );
+      matchType = 'BROWSE';
+      ids = browse.rows.map(r => r.id);
+    }
+
+    res.json({ match_type: matchType, results: await hydrateCatalogSearchResults(ids) });
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to search catalog items');
+  }
+});
+
+// GET /api/catalog-items/makes?category_id= — distinct Make/Brand values among
+// searchable items in the category subtree, for the browse Make filter.
+app.get('/api/catalog-items/makes', async (req, res) => {
+  try {
+    const scope = await catalogSearchScope({ ...req.query, make_brand: undefined });
+    const params = [];
+    const where = catalogScopeWhere(scope, params);
+    const result = await pool.query(
+      `SELECT MIN(ci.make_brand) AS make_brand
+       FROM catalog_items ci
+       WHERE ${where} AND ci.make_brand IS NOT NULL
+       GROUP BY lower(ci.make_brand)
+       ORDER BY lower(MIN(ci.make_brand))
+       LIMIT 200`,
+      params
+    );
+    res.json(result.rows.map(r => r.make_brand));
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to load catalog makes');
+  }
+});
+
 // GET /api/catalog-items/:id — item + identifiers, aliases, Catalog field values, pricing, status
 app.get('/api/catalog-items/:id', async (req, res) => {
   try {
@@ -17428,6 +17644,27 @@ app.post('/api/hardgoods', async (req, res) => {
 
     if (!item_id) return res.status(400).json({ error: 'item_id is required' });
 
+    // Inventory created from a Catalog Item keeps the catalog_item_id link and
+    // takes its Category from the Catalog Item (Category is structural, doc §4).
+    // Descriptive values arrive already snapshotted in `attributes` (catalog
+    // prefill + employee overrides) and are never read live from the catalog.
+    let resolvedCategoryId = category_id || null;
+    if (catalog_item_id) {
+      const catalogRes = await client.query(
+        'SELECT category_id, status FROM catalog_items WHERE id = $1',
+        [catalog_item_id]
+      );
+      if (!catalogRes.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Catalog item not found' });
+      }
+      if (catalogRes.rows[0].status === 'MERGED') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Catalog item has been merged; select the surviving catalog item' });
+      }
+      resolvedCategoryId = catalogRes.rows[0].category_id;
+    }
+
     const itemResult = await client.query(
       `INSERT INTO hardgoods (
          item_id, mode, category_id, catalog_item_id, stock_sku_id, vendor_id,
@@ -17445,7 +17682,7 @@ app.post('/api/hardgoods', async (req, res) => {
          $22,$23,$24,$25,$26,$27
        ) RETURNING *`,
       [
-        item_id, mode || 'PIECE', category_id || null, catalog_item_id || null,
+        item_id, mode || 'PIECE', resolvedCategoryId, catalog_item_id || null,
         stock_sku_id || null, vendor_id || null,
         long_desc || null, short_desc || null,
         condition || null, location || null, status || 'HOLD',
