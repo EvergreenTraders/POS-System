@@ -28,6 +28,7 @@ import Hardgoods from './pages/Hardgoods';
 import HardgoodsEdit from './pages/HardgoodsEdit';
 import HardgoodsEstimator from './pages/HardgoodsEstimator';
 import CategoryManager from './pages/CategoryManager';
+import CatalogItemEditor from './pages/CatalogItemEditor';
 import SystemConfig from './pages/SystemConfig';
 import Employees from './pages/Employees';
 import JewelEstimator from './pages/JewelEstimator';
@@ -625,6 +626,17 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <CategoryManager />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              {/* :id is a catalog item id, or "new" to create one */}
+              <Route
+                path="/catalog/items/:id"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CatalogItemEditor />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

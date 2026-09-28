@@ -273,6 +273,11 @@ function Sidebar() {
                 {isOpen && <ListItemText primary="Category Manager" />}
               </StyledListItem>
             </StyledLink>
+            <StyledLink to="/catalog/items/new">
+              <StyledListItem active={isActive('/catalog/items/new')} sx={{ pl: 4 }}>
+                {isOpen && <ListItemText primary="New Catalog Item" />}
+              </StyledListItem>
+            </StyledLink>
           </List>
         </Collapse>
       </List>
