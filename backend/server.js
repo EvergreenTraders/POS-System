@@ -16571,6 +16571,753 @@ app.post('/api/categories/:id/description-config/reset', async (req, res) => {
 });
 
 // ============================================================
+// CATALOG ITEMS (Phase 1) — reusable, company-wide product definitions.
+// A Catalog Item is NOT inventory: hardgoods/jewelry rows link to it via
+// catalog_item_id but keep their own snapshotted values, so nothing here
+// rewrites existing inventory descriptions. The one exception is Category,
+// which is structural — moving a Catalog Item reclassifies linked inventory.
+// Search, Merge/Split, Intake and intelligence are deliberately out of scope.
+// ============================================================
+
+// MERGED is only ever set by the (future) Merge workflow.
+const CATALOG_SETTABLE_STATUSES = ['DRAFT', 'ACTIVE', 'INACTIVE'];
+const CATALOG_IDENTIFIER_TYPES = ['UPC', 'EAN', 'MANUFACTURER_MODEL', 'OTHER'];
+const CATALOG_IDENTIFIER_SOURCES = ['MANUAL', 'MANUFACTURER_API', 'EXTERNAL_PROVIDER'];
+// Barcode identifiers that must not map to two ACTIVE Catalog Items in the same company.
+const CATALOG_UNIQUE_IDENTIFIER_TYPES = ['UPC', 'EAN'];
+// Scalar columns tracked in catalog_item_audit.
+const CATALOG_AUDITED_COLUMNS = [
+  'category_id', 'status', 'make_brand', 'model_name', 'generated_title', 'title_override',
+  'default_inventory_mode', 'suggested_cost', 'suggested_retail', 'retails_new_for', 'internal_notes',
+];
+const CATALOG_MONEY_COLUMNS = ['suggested_cost', 'suggested_retail', 'retails_new_for'];
+
+class CatalogValidationError extends Error {
+  constructor(message, status = 400, details = undefined) {
+    super(message);
+    this.status = status;
+    this.details = details;
+  }
+}
+
+// Removes harmless formatting (case, spaces, dashes, dots, slashes, underscores)
+// so "CFI-1215A" and "cfi 1215a" share one search key. Letters/digits are kept.
+const normalizeCatalogIdentifier = (raw) =>
+  String(raw ?? '').trim().toUpperCase().replace(/[\s\-_./]/g, '');
+
+const normalizeCatalogAlias = (raw) =>
+  String(raw ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+const trimOrNull = (v) => {
+  if (v === undefined || v === null) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
+};
+
+// Catalog pricing is nullable by design: blank/null means "no Catalog
+// default — use history/market logic", never zero.
+const parseCatalogMoney = (value, label) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) throw new CatalogValidationError(`${label} must be a non-negative number or blank`);
+  return Math.round(n * 100) / 100;
+};
+
+const parseEmployeeId = (v) => {
+  const n = parseInt(v, 10);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
+
+async function getDefaultCompanyId(client) {
+  const result = await client.query('SELECT id FROM companies WHERE is_active = true ORDER BY id LIMIT 1');
+  if (!result.rows.length) throw new CatalogValidationError('No active company is configured', 500);
+  return result.rows[0].id;
+}
+
+// Fields effective for the category (division + ancestor inheritance, via
+// resolveEffectiveFields) whose scope is CATALOG — the only fields a Catalog
+// Item stores values for. Inventory-scope fields live on the inventory record.
+async function getCatalogScopeFields(categoryId) {
+  const { fields } = await resolveEffectiveFields(categoryId);
+  return fields.filter(f => f.scope === 'CATALOG' && f.required_at !== 'NOT_USED');
+}
+
+// Field values are stored as TEXT (same as hardgoods_attributes); multi-select
+// arrays are stored as a JSON array string.
+function serializeCatalogFieldValue(value) {
+  if (value === undefined || value === null) return null;
+  if (Array.isArray(value)) return value.length ? JSON.stringify(value) : null;
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  const s = String(value).trim();
+  return s === '' ? null : s;
+}
+
+function displayCatalogFieldValue(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string' && value.startsWith('[')) {
+    try {
+      const arr = JSON.parse(value);
+      if (Array.isArray(arr)) return arr.join(', ');
+    } catch (e) { /* plain text that happens to start with "[" */ }
+  }
+  return String(value).trim();
+}
+
+// Generated title = Make/Brand + Model Name, followed by any Catalog field
+// values referenced by the category's existing Item Title template
+// (category_description_settings.title_template, "field:A|field:B" = A, else B).
+// The template's "category" token is skipped — Category is shown alongside
+// the title rather than repeated inside it. Blank values are skipped.
+async function buildCatalogGeneratedTitle(categoryId, makeBrand, modelName, valueByFieldId) {
+  const settingsRes = await pool.query(
+    'SELECT title_template FROM category_description_settings WHERE category_id = $1',
+    [categoryId]
+  );
+  const template = settingsRes.rows[0]?.title_template || DEFAULT_DESCRIPTION_SETTINGS.title_template;
+
+  const make = trimOrNull(makeBrand);
+  const model = trimOrNull(modelName);
+  const parts = [];
+  // Avoid "Apple Apple iPhone 13" when the model name already leads with the make.
+  if (make && !(model && model.toLowerCase().startsWith(make.toLowerCase()))) parts.push(make);
+  if (model) parts.push(model);
+
+  for (const token of template) {
+    if (typeof token !== 'string' || !token.startsWith('field:')) continue;
+    const resolved = token.split('|')
+      .map(t => parseInt(t.replace('field:', ''), 10))
+      .map(id => displayCatalogFieldValue(valueByFieldId[id]))
+      .find(v => v !== '');
+    if (resolved) parts.push(resolved);
+  }
+
+  const title = parts.join(' ').replace(/\s+/g, ' ').trim();
+  return title ? title.slice(0, 300) : null;
+}
+
+async function loadCatalogFieldValueMap(client, catalogItemId) {
+  const result = await client.query(
+    'SELECT field_definition_id, value FROM catalog_item_field_values WHERE catalog_item_id = $1',
+    [catalogItemId]
+  );
+  return Object.fromEntries(result.rows.map(r => [r.field_definition_id, r.value]));
+}
+
+// Replace-set semantics for the item's identifier list: submitted rows are
+// upserted by (type, normalized value); previously-active identifiers that
+// were omitted are deactivated rather than deleted so lineage survives.
+async function saveCatalogIdentifiers(client, catalogItemId, companyId, identifiers) {
+  if (!Array.isArray(identifiers)) throw new CatalogValidationError('identifiers must be an array');
+  const seen = new Set();
+  const keepKeys = [];
+  for (const raw of identifiers) {
+    const type = String(raw?.identifier_type || '').toUpperCase();
+    if (!CATALOG_IDENTIFIER_TYPES.includes(type)) {
+      throw new CatalogValidationError(`identifier_type must be one of: ${CATALOG_IDENTIFIER_TYPES.join(', ')}`);
+    }
+    const rawValue = trimOrNull(raw?.raw_value);
+    const normalized = normalizeCatalogIdentifier(rawValue);
+    if (!rawValue || !normalized) throw new CatalogValidationError('Identifier value is required');
+    if (rawValue.length > 100) throw new CatalogValidationError(`Identifier "${rawValue}" is too long`);
+    if (CATALOG_UNIQUE_IDENTIFIER_TYPES.includes(type) && !/^\d+$/.test(normalized)) {
+      throw new CatalogValidationError(`${type} "${rawValue}" must contain digits only`);
+    }
+    const source = raw?.source ? String(raw.source).toUpperCase() : 'MANUAL';
+    if (!CATALOG_IDENTIFIER_SOURCES.includes(source)) {
+      throw new CatalogValidationError(`source must be one of: ${CATALOG_IDENTIFIER_SOURCES.join(', ')}`);
+    }
+    const key = `${type}:${normalized}`;
+    if (seen.has(key)) throw new CatalogValidationError(`Duplicate identifier ${type} "${rawValue}"`);
+    seen.add(key);
+    const isActive = raw?.is_active === undefined ? true : !!raw.is_active;
+    if (isActive) keepKeys.push(key);
+
+    await client.query(
+      `INSERT INTO catalog_item_identifiers
+         (catalog_item_id, company_id, identifier_type, raw_value, normalized_value, is_active, source, provider)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (catalog_item_id, identifier_type, normalized_value) DO UPDATE SET
+         raw_value  = EXCLUDED.raw_value,
+         is_active  = EXCLUDED.is_active,
+         source     = EXCLUDED.source,
+         provider   = EXCLUDED.provider,
+         updated_at = CURRENT_TIMESTAMP`,
+      [catalogItemId, companyId, type, rawValue, normalized, isActive, source, trimOrNull(raw?.provider)]
+    );
+  }
+  await client.query(
+    `UPDATE catalog_item_identifiers
+     SET is_active = false, updated_at = CURRENT_TIMESTAMP
+     WHERE catalog_item_id = $1 AND is_active = true
+       AND NOT ((identifier_type || ':' || normalized_value) = ANY($2::text[]))`,
+    [catalogItemId, keepKeys]
+  );
+}
+
+// aliases: array of strings (or { alias }) = the complete set of staff-entered
+// SEARCH_TERM aliases. PREVIOUS_TITLE / MERGED_TITLE aliases are system-managed
+// and never removed here.
+async function saveCatalogAliases(client, catalogItemId, aliases) {
+  if (!Array.isArray(aliases)) throw new CatalogValidationError('aliases must be an array');
+  const keep = [];
+  for (const raw of aliases) {
+    const alias = trimOrNull(typeof raw === 'string' ? raw : raw?.alias);
+    if (!alias) continue;
+    if (alias.length > 300) throw new CatalogValidationError(`Alias "${alias.slice(0, 40)}…" is too long`);
+    const normalized = normalizeCatalogAlias(alias);
+    if (keep.includes(normalized)) continue;
+    keep.push(normalized);
+    await client.query(
+      `INSERT INTO catalog_item_aliases (catalog_item_id, alias, normalized_alias, alias_type)
+       VALUES ($1, $2, $3, 'SEARCH_TERM')
+       ON CONFLICT (catalog_item_id, normalized_alias) DO UPDATE SET is_active = true`,
+      [catalogItemId, alias, normalized]
+    );
+  }
+  await client.query(
+    `DELETE FROM catalog_item_aliases
+     WHERE catalog_item_id = $1 AND alias_type = 'SEARCH_TERM' AND NOT (normalized_alias = ANY($2::text[]))`,
+    [catalogItemId, keep]
+  );
+}
+
+// field_values: [{ field_definition_id, value }] — upserts each submitted value
+// (blank = remove). Only Catalog-scope fields effective for the category are
+// accepted. Values for fields not submitted are left untouched, and values for
+// fields that stop applying after a Category move are retained (not deleted).
+async function saveCatalogFieldValues(client, catalogItemId, categoryId, fieldValues) {
+  if (!Array.isArray(fieldValues)) throw new CatalogValidationError('field_values must be an array');
+  if (!fieldValues.length) return;
+  const catalogFields = await getCatalogScopeFields(categoryId);
+  const fieldById = Object.fromEntries(catalogFields.map(f => [f.field_definition_id, f]));
+
+  for (const fv of fieldValues) {
+    const fieldId = parseInt(fv?.field_definition_id, 10);
+    const field = fieldById[fieldId];
+    if (!field) {
+      throw new CatalogValidationError(`Field ${fv?.field_definition_id} is not a Catalog field for this category`);
+    }
+    const value = serializeCatalogFieldValue(fv.value);
+    const label = field.label_override || field.field_label;
+    if (value !== null && ['NUMBER', 'CURRENCY'].includes(field.data_type) && !Number.isFinite(Number(value))) {
+      throw new CatalogValidationError(`${label} must be a number`);
+    }
+    if (value !== null && field.data_type === 'ENUM' && !field.allow_free_type
+        && Array.isArray(field.allowed_values) && field.allowed_values.length
+        && !field.allowed_values.includes(value)) {
+      throw new CatalogValidationError(`${label} must be one of: ${field.allowed_values.join(', ')}`);
+    }
+
+    if (value === null) {
+      await client.query(
+        'DELETE FROM catalog_item_field_values WHERE catalog_item_id = $1 AND field_definition_id = $2',
+        [catalogItemId, fieldId]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO catalog_item_field_values (catalog_item_id, field_definition_id, value)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (catalog_item_id, field_definition_id) DO UPDATE SET
+           value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
+        [catalogItemId, fieldId, value]
+      );
+    }
+  }
+}
+
+// A UPC/EAN must not map to two ACTIVE Catalog Items in the same company —
+// that's a catalog-quality exception, so it's rejected when the item is (or
+// becomes) Active. Draft/Inactive items may overlap until resolved.
+async function assertNoActiveIdentifierConflicts(client, catalogItemId) {
+  const result = await client.query(
+    `SELECT i.identifier_type, i.raw_value, o.id AS conflicting_catalog_item_id, o.catalog_code AS conflicting_catalog_code
+     FROM catalog_item_identifiers i
+     JOIN catalog_item_identifiers x
+       ON x.company_id = i.company_id
+      AND x.identifier_type = i.identifier_type
+      AND x.normalized_value = i.normalized_value
+      AND x.catalog_item_id <> i.catalog_item_id
+      AND x.is_active = true
+     JOIN catalog_items o ON o.id = x.catalog_item_id AND o.status = 'ACTIVE'
+     WHERE i.catalog_item_id = $1 AND i.is_active = true AND i.identifier_type = ANY($2::text[])`,
+    [catalogItemId, CATALOG_UNIQUE_IDENTIFIER_TYPES]
+  );
+  if (result.rows.length) {
+    const first = result.rows[0];
+    throw new CatalogValidationError(
+      `${first.identifier_type} ${first.raw_value} is already used by active Catalog Item ${first.conflicting_catalog_code}`,
+      409,
+      result.rows
+    );
+  }
+}
+
+async function assertCategoryExists(client, categoryId) {
+  const result = await client.query('SELECT id, code, is_active FROM categories WHERE id = $1', [categoryId]);
+  if (!result.rows.length) throw new CatalogValidationError('Category not found');
+  return result.rows[0];
+}
+
+async function assertInventoryModeExists(client, mode) {
+  if (mode === null) return;
+  const result = await client.query('SELECT 1 FROM inventory_modes WHERE code = $1', [mode]);
+  if (!result.rows.length) throw new CatalogValidationError(`Unknown inventory mode "${mode}"`);
+}
+
+// Comparable snapshot of everything a PUT can change, for audit diffs.
+async function snapshotCatalogItem(client, catalogItemId) {
+  const [itemRes, identRes, aliasRes, valueRes] = await Promise.all([
+    client.query('SELECT * FROM catalog_items WHERE id = $1', [catalogItemId]),
+    client.query(
+      `SELECT identifier_type, raw_value FROM catalog_item_identifiers
+       WHERE catalog_item_id = $1 AND is_active = true ORDER BY identifier_type, normalized_value`,
+      [catalogItemId]
+    ),
+    client.query(
+      `SELECT alias FROM catalog_item_aliases
+       WHERE catalog_item_id = $1 AND alias_type = 'SEARCH_TERM' ORDER BY normalized_alias`,
+      [catalogItemId]
+    ),
+    client.query(
+      'SELECT field_definition_id, value FROM catalog_item_field_values WHERE catalog_item_id = $1 ORDER BY field_definition_id',
+      [catalogItemId]
+    ),
+  ]);
+  const item = itemRes.rows[0];
+  const snap = {};
+  for (const col of CATALOG_AUDITED_COLUMNS) {
+    const v = item[col];
+    snap[col] = CATALOG_MONEY_COLUMNS.includes(col) && v !== null ? Number(v) : v;
+  }
+  snap.identifiers = identRes.rows.map(r => `${r.identifier_type}:${r.raw_value}`);
+  snap.aliases = aliasRes.rows.map(r => r.alias);
+  snap.field_values = Object.fromEntries(valueRes.rows.map(r => [r.field_definition_id, r.value]));
+  return snap;
+}
+
+function diffCatalogSnapshots(before, after) {
+  const changes = {};
+  for (const key of Object.keys(after)) {
+    if (JSON.stringify(before?.[key] ?? null) !== JSON.stringify(after[key] ?? null)) {
+      changes[key] = { from: before?.[key] ?? null, to: after[key] ?? null };
+    }
+  }
+  return changes;
+}
+
+async function writeCatalogAudit(client, catalogItemId, action, changedFields, employeeId) {
+  await client.query(
+    `INSERT INTO catalog_item_audit (catalog_item_id, action, changed_fields, performed_by)
+     VALUES ($1, $2, $3, $4)`,
+    [catalogItemId, action, JSON.stringify(changedFields), employeeId]
+  );
+}
+
+// Full Catalog Item for the editor: item + category + identifiers + aliases +
+// Catalog-scope field definitions with their current values + pricing.
+// Historical intelligence (On Hand, averages, last sold…) is NOT included —
+// it's a separate, later concern and must never be mixed into catalog data.
+async function loadCatalogItem(catalogItemId) {
+  const itemRes = await pool.query(
+    `SELECT ci.*,
+            c.name AS category_name, c.code AS category_code, c.division_id,
+            d.name AS division_name, co.name AS company_name,
+            im.label AS default_inventory_mode_label,
+            NULLIF(TRIM(CONCAT(ce.first_name, ' ', ce.last_name)), '') AS created_by_name,
+            NULLIF(TRIM(CONCAT(ue.first_name, ' ', ue.last_name)), '') AS updated_by_name
+     FROM catalog_items ci
+     JOIN categories c  ON c.id = ci.category_id
+     JOIN divisions d   ON d.id = c.division_id
+     JOIN companies co  ON co.id = ci.company_id
+     LEFT JOIN inventory_modes im ON im.code = ci.default_inventory_mode
+     LEFT JOIN employees ce ON ce.employee_id = ci.created_by
+     LEFT JOIN employees ue ON ue.employee_id = ci.updated_by
+     WHERE ci.id = $1`,
+    [catalogItemId]
+  );
+  if (!itemRes.rows.length) return null;
+  const item = itemRes.rows[0];
+
+  const [identRes, aliasRes, valueMap, catalogFields, linkedRes] = await Promise.all([
+    pool.query(
+      `SELECT id, identifier_type, raw_value, normalized_value, is_active, source, provider, created_at, updated_at
+       FROM catalog_item_identifiers WHERE catalog_item_id = $1
+       ORDER BY is_active DESC, identifier_type, id`,
+      [catalogItemId]
+    ),
+    pool.query(
+      `SELECT id, alias, normalized_alias, alias_type, is_active, created_at
+       FROM catalog_item_aliases WHERE catalog_item_id = $1 ORDER BY id`,
+      [catalogItemId]
+    ),
+    loadCatalogFieldValueMap(pool, catalogItemId),
+    getCatalogScopeFields(item.category_id),
+    pool.query(
+      `SELECT (SELECT COUNT(*) FROM hardgoods WHERE catalog_item_id = $1)
+            + (SELECT COUNT(*) FROM jewelry   WHERE catalog_item_id = $1) AS n`,
+      [catalogItemId]
+    ),
+  ]);
+
+  const fieldValues = catalogFields.map(f => ({
+    field_definition_id: f.field_definition_id,
+    field_key: f.field_key,
+    label: f.label_override || f.field_label,
+    data_type: f.data_type,
+    allowed_values: f.allowed_values,
+    allow_free_type: f.allow_free_type,
+    unit_of_measure: f.unit_of_measure,
+    required_at: f.required_at,
+    default_value: f.default_value,
+    help_text: f.help_text,
+    display_order: f.display_order,
+    origin_category_name: f.origin_category_name,
+    value: valueMap[f.field_definition_id] ?? null,
+  }));
+
+  const { suggested_cost, suggested_retail, retails_new_for, ...rest } = item;
+  const toMoney = (v) => (v === null ? null : Number(v));
+  return {
+    ...rest,
+    title: item.title_override || item.generated_title,
+    pricing: {
+      suggested_cost: toMoney(suggested_cost),
+      suggested_retail: toMoney(suggested_retail),
+      retails_new_for: toMoney(retails_new_for),
+    },
+    identifiers: identRes.rows,
+    aliases: aliasRes.rows,
+    field_values: fieldValues,
+    summary: {
+      identifiers: identRes.rows.filter(r => r.is_active).length,
+      aliases: aliasRes.rows.filter(r => r.is_active).length,
+      fields_available: fieldValues.length,
+      fields_defined: fieldValues.filter(f => f.value !== null && f.value !== '').length,
+      linked_inventory: parseInt(linkedRes.rows[0].n, 10),
+    },
+  };
+}
+
+const sendCatalogError = (res, err, fallbackMessage) => {
+  if (err instanceof CatalogValidationError) {
+    return res.status(err.status).json({ error: err.message, ...(err.details ? { details: err.details } : {}) });
+  }
+  if (err.code === '23503') return res.status(400).json({ error: 'A referenced record (category, inventory mode or employee) does not exist' });
+  console.error(fallbackMessage, err);
+  return res.status(500).json({ error: fallbackMessage });
+};
+
+const parseCatalogItemId = (raw) => {
+  const id = parseInt(raw, 10);
+  if (!Number.isInteger(id) || id <= 0 || String(id) !== String(raw)) {
+    throw new CatalogValidationError('Invalid catalog item id');
+  }
+  return id;
+};
+
+// POST /api/catalog-items/generate-title — previews the generated title for
+// the editor's "Regenerate" button without saving. Body: { category_id,
+// make_brand, model_name, field_values?: [{ field_definition_id, value }] }
+app.post('/api/catalog-items/generate-title', async (req, res) => {
+  try {
+    const { category_id, make_brand, model_name, field_values } = req.body;
+    if (!category_id) return res.status(400).json({ error: 'category_id is required' });
+    await assertCategoryExists(pool, category_id);
+    const valueByFieldId = Object.fromEntries(
+      (Array.isArray(field_values) ? field_values : [])
+        .map(fv => [parseInt(fv.field_definition_id, 10), serializeCatalogFieldValue(fv.value)])
+    );
+    res.json({ generated_title: await buildCatalogGeneratedTitle(category_id, make_brand, model_name, valueByFieldId) });
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to generate catalog item title');
+  }
+});
+
+// POST /api/catalog-items — create. Body: { category_id, make_brand, model_name,
+// title_override?, status? (DRAFT default), default_inventory_mode?, pricing?:
+// { suggested_cost, suggested_retail, retails_new_for }, internal_notes?,
+// identifiers?, aliases?, field_values?, employee_id }
+app.post('/api/catalog-items', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const b = req.body;
+    const employeeId = parseEmployeeId(b.employee_id);
+    const categoryId = parseInt(b.category_id, 10);
+    const makeBrand = trimOrNull(b.make_brand);
+    const modelName = trimOrNull(b.model_name);
+    const status = b.status ? String(b.status).toUpperCase() : 'DRAFT';
+    const mode = trimOrNull(b.default_inventory_mode);
+    const pricing = b.pricing || {};
+
+    if (!categoryId) throw new CatalogValidationError('Category is required');
+    if (!makeBrand) throw new CatalogValidationError('Make / Brand is required');
+    if (!modelName) throw new CatalogValidationError('Model Name is required');
+    if (!CATALOG_SETTABLE_STATUSES.includes(status)) {
+      throw new CatalogValidationError(`status must be one of: ${CATALOG_SETTABLE_STATUSES.join(', ')}`);
+    }
+
+    await client.query('BEGIN');
+    const category = await assertCategoryExists(client, categoryId);
+    if (!category.is_active) throw new CatalogValidationError('Cannot create a Catalog Item in an inactive category');
+    await assertInventoryModeExists(client, mode);
+    const companyId = await getDefaultCompanyId(client);
+
+    // Reserve the id first so the display code can be stamped once, at
+    // creation, and never recomputed (moving category must not change it).
+    const idRes = await client.query(`SELECT nextval(pg_get_serial_sequence('catalog_items', 'id')) AS id`);
+    const catalogItemId = parseInt(idRes.rows[0].id, 10);
+    const catalogCode = `${category.code}-${String(catalogItemId).padStart(6, '0')}`;
+
+    await client.query(
+      `INSERT INTO catalog_items
+         (id, catalog_code, company_id, category_id, status, make_brand, model_name, title_override,
+          default_inventory_mode, suggested_cost, suggested_retail, retails_new_for, internal_notes,
+          created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)`,
+      [
+        catalogItemId, catalogCode, companyId, categoryId, status, makeBrand, modelName,
+        trimOrNull(b.title_override), mode,
+        parseCatalogMoney(pricing.suggested_cost, 'Suggested Cost') ?? null,
+        parseCatalogMoney(pricing.suggested_retail, 'Suggested Retail') ?? null,
+        parseCatalogMoney(pricing.retails_new_for, 'Retails New For') ?? null,
+        trimOrNull(b.internal_notes), employeeId,
+      ]
+    );
+
+    if (b.field_values !== undefined) await saveCatalogFieldValues(client, catalogItemId, categoryId, b.field_values);
+    if (b.identifiers !== undefined) await saveCatalogIdentifiers(client, catalogItemId, companyId, b.identifiers);
+    if (b.aliases !== undefined) await saveCatalogAliases(client, catalogItemId, b.aliases);
+
+    const generatedTitle = await buildCatalogGeneratedTitle(
+      categoryId, makeBrand, modelName, await loadCatalogFieldValueMap(client, catalogItemId)
+    );
+    await client.query('UPDATE catalog_items SET generated_title = $1 WHERE id = $2', [generatedTitle, catalogItemId]);
+
+    if (status === 'ACTIVE') await assertNoActiveIdentifierConflicts(client, catalogItemId);
+
+    await writeCatalogAudit(client, catalogItemId, 'CREATE',
+      diffCatalogSnapshots({}, await snapshotCatalogItem(client, catalogItemId)), employeeId);
+
+    await client.query('COMMIT');
+    res.status(201).json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to create catalog item');
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/catalog-items/:id — item + identifiers, aliases, Catalog field values, pricing, status
+app.get('/api/catalog-items/:id', async (req, res) => {
+  try {
+    const item = await loadCatalogItem(parseCatalogItemId(req.params.id));
+    if (!item) return res.status(404).json({ error: 'Catalog item not found' });
+    res.json(item);
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to fetch catalog item');
+  }
+});
+
+// GET /api/catalog-items/:id/history — audit trail, newest first
+app.get('/api/catalog-items/:id/history', async (req, res) => {
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const result = await pool.query(
+      `SELECT a.id, a.action, a.changed_fields, a.performed_by, a.performed_at,
+              NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS performed_by_name
+       FROM catalog_item_audit a
+       LEFT JOIN employees e ON e.employee_id = a.performed_by
+       WHERE a.catalog_item_id = $1
+       ORDER BY a.performed_at DESC, a.id DESC
+       LIMIT 200`,
+      [catalogItemId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to fetch catalog item history');
+  }
+});
+
+// PUT /api/catalog-items/:id — update. Like the Category Details PUT, every
+// provided key is a direct SET (undefined = keep current) so intentional
+// clears (e.g. blank pricing → NULL) work. identifiers / aliases are
+// replace-sets when provided; field_values upserts the submitted fields.
+// generated_title is server-owned: recomputed only when regenerate_title is
+// true (or it's still empty). Editing never touches linked inventory's
+// descriptive values; only a Category move reclassifies linked inventory.
+app.put('/api/catalog-items/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const b = req.body;
+    const employeeId = parseEmployeeId(b.employee_id);
+
+    await client.query('BEGIN');
+    const currentRes = await client.query('SELECT * FROM catalog_items WHERE id = $1 FOR UPDATE', [catalogItemId]);
+    if (!currentRes.rows.length) throw new CatalogValidationError('Catalog item not found', 404);
+    const current = currentRes.rows[0];
+    if (current.status === 'MERGED') throw new CatalogValidationError('Merged catalog items are read-only', 409);
+
+    const before = await snapshotCatalogItem(client, catalogItemId);
+    const pick = (key, value) => (value !== undefined ? value : current[key]);
+
+    const categoryId = b.category_id !== undefined ? parseInt(b.category_id, 10) : current.category_id;
+    if (!categoryId) throw new CatalogValidationError('Category is required');
+    const categoryChanged = categoryId !== current.category_id;
+    if (categoryChanged) {
+      const category = await assertCategoryExists(client, categoryId);
+      if (!category.is_active) throw new CatalogValidationError('Cannot move a Catalog Item into an inactive category');
+    }
+
+    const status = b.status !== undefined ? String(b.status).toUpperCase() : current.status;
+    if (status !== current.status && !CATALOG_SETTABLE_STATUSES.includes(status)) {
+      throw new CatalogValidationError(`status must be one of: ${CATALOG_SETTABLE_STATUSES.join(', ')}`);
+    }
+
+    const makeBrand = pick('make_brand', b.make_brand !== undefined ? trimOrNull(b.make_brand) : undefined);
+    const modelName = pick('model_name', b.model_name !== undefined ? trimOrNull(b.model_name) : undefined);
+    if (!makeBrand) throw new CatalogValidationError('Make / Brand is required');
+    if (!modelName) throw new CatalogValidationError('Model Name is required');
+
+    const mode = b.default_inventory_mode !== undefined ? trimOrNull(b.default_inventory_mode) : current.default_inventory_mode;
+    if (mode !== current.default_inventory_mode) await assertInventoryModeExists(client, mode);
+
+    const pricing = b.pricing || {};
+    const money = (key, label) => {
+      const parsed = parseCatalogMoney(pricing[key], label);
+      return parsed !== undefined ? parsed : current[key];
+    };
+
+    await client.query(
+      `UPDATE catalog_items
+       SET category_id            = $1,
+           status                 = $2,
+           make_brand             = $3,
+           model_name             = $4,
+           title_override         = $5,
+           default_inventory_mode = $6,
+           suggested_cost         = $7,
+           suggested_retail       = $8,
+           retails_new_for        = $9,
+           internal_notes         = $10
+       WHERE id = $11`,
+      [
+        categoryId, status, makeBrand, modelName,
+        b.title_override !== undefined ? trimOrNull(b.title_override) : current.title_override,
+        mode,
+        money('suggested_cost', 'Suggested Cost'),
+        money('suggested_retail', 'Suggested Retail'),
+        money('retails_new_for', 'Retails New For'),
+        b.internal_notes !== undefined ? trimOrNull(b.internal_notes) : current.internal_notes,
+        catalogItemId,
+      ]
+    );
+
+    if (b.field_values !== undefined) await saveCatalogFieldValues(client, catalogItemId, categoryId, b.field_values);
+    if (b.identifiers !== undefined) await saveCatalogIdentifiers(client, catalogItemId, current.company_id, b.identifiers);
+    if (b.aliases !== undefined) await saveCatalogAliases(client, catalogItemId, b.aliases);
+
+    if (b.regenerate_title === true || !current.generated_title) {
+      const generatedTitle = await buildCatalogGeneratedTitle(
+        categoryId, makeBrand, modelName, await loadCatalogFieldValueMap(client, catalogItemId)
+      );
+      await client.query('UPDATE catalog_items SET generated_title = $1 WHERE id = $2', [generatedTitle, catalogItemId]);
+    }
+
+    if (status === 'ACTIVE') await assertNoActiveIdentifierConflicts(client, catalogItemId);
+
+    const after = await snapshotCatalogItem(client, catalogItemId);
+    const changes = diffCatalogSnapshots(before, after);
+
+    if (Object.keys(changes).length) {
+      // The old display title stays findable: keep it as a PREVIOUS_TITLE alias.
+      const oldTitle = current.title_override || current.generated_title;
+      const newTitle = after.title_override || after.generated_title;
+      if (oldTitle && newTitle && normalizeCatalogAlias(oldTitle) !== normalizeCatalogAlias(newTitle)) {
+        await client.query(
+          `INSERT INTO catalog_item_aliases (catalog_item_id, alias, normalized_alias, alias_type)
+           VALUES ($1, $2, $3, 'PREVIOUS_TITLE')
+           ON CONFLICT (catalog_item_id, normalized_alias) DO NOTHING`,
+          [catalogItemId, oldTitle, normalizeCatalogAlias(oldTitle)]
+        );
+      }
+
+      // Category is structural: linked inventory follows the new classification.
+      // Descriptive/snapshotted inventory values are intentionally NOT touched.
+      if (categoryChanged) {
+        const hg = await client.query(
+          'UPDATE hardgoods SET category_id = $1, updated_at = CURRENT_TIMESTAMP WHERE catalog_item_id = $2',
+          [categoryId, catalogItemId]
+        );
+        const jw = await client.query(
+          'UPDATE jewelry SET category_id = $1 WHERE catalog_item_id = $2',
+          [categoryId, catalogItemId]
+        );
+        changes.reclassified_inventory = { from: null, to: hg.rowCount + jw.rowCount };
+      }
+
+      await client.query(
+        'UPDATE catalog_items SET updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+        [employeeId, catalogItemId]
+      );
+      const action = categoryChanged ? 'CATEGORY_CHANGE'
+        : (Object.keys(changes).length === 1 && changes.status) ? 'STATUS_CHANGE'
+        : 'UPDATE';
+      await writeCatalogAudit(client, catalogItemId, action, changes, employeeId);
+    }
+
+    await client.query('COMMIT');
+    res.json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to update catalog item');
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/catalog-items/:id/status — Body: { status: DRAFT|ACTIVE|INACTIVE, employee_id }.
+// Inactive keeps the item and all history (excluded from normal Intake search
+// later). MERGED can't be set or left here — that belongs to the Merge workflow.
+app.patch('/api/catalog-items/:id/status', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const status = String(req.body.status || '').toUpperCase();
+    const employeeId = parseEmployeeId(req.body.employee_id);
+    if (!CATALOG_SETTABLE_STATUSES.includes(status)) {
+      throw new CatalogValidationError(`status must be one of: ${CATALOG_SETTABLE_STATUSES.join(', ')}`);
+    }
+
+    await client.query('BEGIN');
+    const currentRes = await client.query('SELECT status FROM catalog_items WHERE id = $1 FOR UPDATE', [catalogItemId]);
+    if (!currentRes.rows.length) throw new CatalogValidationError('Catalog item not found', 404);
+    const currentStatus = currentRes.rows[0].status;
+    if (currentStatus === 'MERGED') throw new CatalogValidationError('Merged catalog items are read-only', 409);
+
+    if (currentStatus !== status) {
+      if (status === 'ACTIVE') await assertNoActiveIdentifierConflicts(client, catalogItemId);
+      await client.query(
+        'UPDATE catalog_items SET status = $1, updated_by = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+        [status, employeeId, catalogItemId]
+      );
+      await writeCatalogAudit(client, catalogItemId, 'STATUS_CHANGE',
+        { status: { from: currentStatus, to: status } }, employeeId);
+    }
+
+    await client.query('COMMIT');
+    res.json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to update catalog item status');
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
 // HARDGOODS CRUD
 // ============================================================
 
