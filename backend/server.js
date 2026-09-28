@@ -15727,23 +15727,25 @@ app.get('/api/divisions', async (req, res) => {
 // CATEGORIES
 // ============================================================
 
-// GET /api/categories?division_id=1  — flat list, optionally filtered by division
+// GET /api/categories?division_id=1  — flat list, optionally filtered by division.
+// Inactive categories are still returned (soft-deactivated, not deleted, per
+// the Details tab's Status field) — the caller decides how to display them.
 app.get('/api/categories', async (req, res) => {
   try {
     const { division_id } = req.query;
     const params = [];
-    let where = 'WHERE c.is_active = true';
+    let where = 'WHERE 1=1';
     if (division_id) {
       params.push(division_id);
       where += ` AND c.division_id = $${params.length}`;
     }
     const result = await pool.query(
       `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
-              c.description, c.is_active, d.code AS division_code, d.name AS division_name
+              c.description, c.is_active, c.display_order, d.code AS division_code, d.name AS division_name
        FROM categories c
        JOIN divisions d ON d.id = c.division_id
        ${where}
-       ORDER BY c.division_id, c.parent_category_id NULLS FIRST, c.name`,
+       ORDER BY c.division_id, c.parent_category_id NULLS FIRST, c.display_order, c.name`,
       params
     );
     res.json(result.rows);
@@ -15753,23 +15755,25 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// GET /api/categories/tree?division_id=1  — nested tree, optionally filtered by division
+// GET /api/categories/tree?division_id=1  — nested tree, optionally filtered by
+// division. Inactive categories still appear (see note above) so admins can
+// find and reactivate them; the frontend is responsible for graying them out.
 app.get('/api/categories/tree', async (req, res) => {
   try {
     const { division_id } = req.query;
     const params = [];
-    let where = 'WHERE c.is_active = true';
+    let where = 'WHERE 1=1';
     if (division_id) {
       params.push(division_id);
       where += ` AND c.division_id = $${params.length}`;
     }
     const result = await pool.query(
       `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
-              c.description, d.code AS division_code, d.name AS division_name
+              c.description, c.is_active, c.display_order, d.code AS division_code, d.name AS division_name
        FROM categories c
        JOIN divisions d ON d.id = c.division_id
        ${where}
-       ORDER BY c.division_id, c.name`,
+       ORDER BY c.division_id, c.display_order, c.name`,
       params
     );
 
@@ -15801,9 +15805,12 @@ app.get('/api/categories/:id', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
-              c.description, c.is_active, d.code AS division_code, d.name AS division_name
+              c.description, c.is_active, c.display_order, c.alternate_names, c.internal_notes,
+              d.code AS division_code, d.name AS division_name,
+              p.name AS parent_category_name
        FROM categories c
        JOIN divisions d ON d.id = c.division_id
+       LEFT JOIN categories p ON p.id = c.parent_category_id
        WHERE c.id = $1`,
       [req.params.id]
     );
@@ -15838,22 +15845,72 @@ app.post('/api/categories', async (req, res) => {
   }
 });
 
-// PUT /api/categories/:id  — update a category
+// Returns the ids of every descendant of categoryId (not including itself) —
+// used to keep a category from being re-parented onto itself or its own subtree.
+async function getDescendantCategoryIds(categoryId) {
+  const result = await pool.query(
+    `WITH RECURSIVE descendants AS (
+       SELECT id FROM categories WHERE parent_category_id = $1
+       UNION ALL
+       SELECT c.id FROM categories c JOIN descendants d ON c.parent_category_id = d.id
+     )
+     SELECT id FROM descendants`,
+    [categoryId]
+  );
+  return result.rows.map(r => r.id);
+}
+
+// PUT /api/categories/:id  — update a category. Every field is a direct SET
+// (via undefined-check, not COALESCE) since the Details tab always submits
+// the complete draft, including intentional nulls/clears (e.g. removing the
+// parent to make a category root-level, or clearing internal notes).
 app.put('/api/categories/:id', async (req, res) => {
   try {
-    const { name, code, description, is_active } = req.body;
+    const categoryId = parseInt(req.params.id, 10);
+    const { name, code, description, is_active, division_id, parent_category_id, display_order, alternate_names, internal_notes } = req.body;
+
+    if (parent_category_id !== undefined && parent_category_id !== null) {
+      const newParentId = parseInt(parent_category_id, 10);
+      if (newParentId === categoryId) {
+        return res.status(400).json({ error: 'A category cannot be its own parent' });
+      }
+      const descendantIds = await getDescendantCategoryIds(categoryId);
+      if (descendantIds.includes(newParentId)) {
+        return res.status(400).json({ error: 'Cannot move a category under one of its own subcategories' });
+      }
+    }
+
+    const existing = await pool.query('SELECT * FROM categories WHERE id = $1', [categoryId]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'Category not found' });
+    const current = existing.rows[0];
+
     const result = await pool.query(
       `UPDATE categories
-       SET name        = COALESCE($1, name),
-           code        = COALESCE($2, code),
-           description = COALESCE($3, description),
-           is_active   = COALESCE($4, is_active),
-           updated_at  = CURRENT_TIMESTAMP
-       WHERE id = $5
+       SET name              = $1,
+           code              = $2,
+           description       = $3,
+           is_active         = $4,
+           division_id       = $5,
+           parent_category_id = $6,
+           display_order     = $7,
+           alternate_names   = $8,
+           internal_notes    = $9,
+           updated_at        = CURRENT_TIMESTAMP
+       WHERE id = $10
        RETURNING *`,
-      [name, code ? code.toUpperCase() : null, description, is_active, req.params.id]
+      [
+        name !== undefined ? name : current.name,
+        code !== undefined ? code.toUpperCase() : current.code,
+        description !== undefined ? description : current.description,
+        is_active !== undefined ? is_active : current.is_active,
+        division_id !== undefined ? division_id : current.division_id,
+        parent_category_id !== undefined ? parent_category_id : current.parent_category_id,
+        display_order !== undefined ? display_order : current.display_order,
+        alternate_names !== undefined ? alternate_names : current.alternate_names,
+        internal_notes !== undefined ? internal_notes : current.internal_notes,
+        categoryId,
+      ]
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Category not found' });
     res.json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') {

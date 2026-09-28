@@ -109,6 +109,34 @@ function rowsFromFieldsSaved(saved, categoryId) {
   return [...activeRows, ...hiddenRows];
 }
 
+// Builds the Details tab's editable draft from a /api/categories/:id response.
+function detailsDraftFromCategory(cat) {
+  return {
+    name: cat.name || '',
+    code: cat.code || '',
+    is_active: cat.is_active !== false,
+    display_order: cat.display_order ?? 0,
+    parent_category_id: cat.parent_category_id ?? '',
+    division_id: cat.division_id,
+    alternate_names: (cat.alternate_names || []).join(', '),
+    internal_notes: cat.internal_notes || '',
+  };
+}
+
+// Flattens the tree state (divisions -> categories -> children) into one
+// array, for populating the Parent Category dropdown and walking descendants.
+function flattenCategoryTree(tree) {
+  const out = [];
+  const walk = (nodes) => {
+    nodes.forEach(n => {
+      out.push({ id: n.id, name: n.name, parent_category_id: n.parent_category_id, division_id: n.division_id, is_active: n.is_active });
+      if (n.children?.length) walk(n.children);
+    });
+  };
+  tree.forEach(div => walk(div.categories || []));
+  return out;
+}
+
 // ── Recursive tree node ────────────────────────────────────────────────
 function CategoryNode({ node, depth, selected, onSelect, onAddChild }) {
   const [open, setOpen] = useState(false);
@@ -137,8 +165,12 @@ function CategoryNode({ node, depth, selected, onSelect, onAddChild }) {
         </IconButton>
         {open ? <FolderOpenIcon fontSize="small" sx={{ mr: 0.8, opacity: 0.7 }} />
                : <FolderIcon fontSize="small" sx={{ mr: 0.8, opacity: 0.7 }} />}
-        <Typography variant="body2" sx={{ flex: 1, fontWeight: isSelected ? 600 : 400 }}>
-          {node.name}
+        <Typography variant="body2" sx={{
+          flex: 1, fontWeight: isSelected ? 600 : 400,
+          fontStyle: node.is_active === false ? 'italic' : 'normal',
+          opacity: node.is_active === false ? 0.6 : 1,
+        }}>
+          {node.name}{node.is_active === false ? ' (Inactive)' : ''}
         </Typography>
         <Tooltip title="Add subcategory">
           <IconButton
@@ -181,9 +213,12 @@ function CategoryManager() {
   const [loading, setLoading]         = useState(true);
   const [tab, setTab]                 = useState(0);
 
-  // Edit category in right panel
-  const [editMode, setEditMode] = useState(false);
-  const [editForm, setEditForm] = useState({});
+  // Details tab — detailsSaved is the last-saved server state (as a draft
+  // shape), detailsDraft is the locally-edited copy; nothing is persisted
+  // until Save Changes, matching the Fields/Descriptions tabs.
+  const [detailsSaved, setDetailsSaved] = useState(null);
+  const [detailsDraft, setDetailsDraft] = useState(null);
+  const [detailsSaving, setDetailsSaving] = useState(false);
 
   // Add Category dialog
   const [catDialogOpen, setCatDialogOpen]   = useState(false);
@@ -254,12 +289,58 @@ function CategoryManager() {
   const handleSelectCategory = async (cat) => {
     setSelectedDivision(null);
     setSelected(cat);
-    setEditMode(false);
-    setEditForm({ name: cat.name, code: cat.code || '', description: cat.description || '' });
     setTab(0);
     loadFields('category', cat.id);
     loadDescriptionConfig(cat.id);
+    loadCategoryDetails(cat.id);
   };
+
+  // ── Details tab ──────────────────────────────────────────────────────
+  const loadCategoryDetails = async (categoryId) => {
+    try {
+      const res = await axios.get(`${API}/categories/${categoryId}`);
+      setSelected(res.data); // richer than the tree node — includes parent_category_name etc.
+      const draft = detailsDraftFromCategory(res.data);
+      setDetailsSaved(draft);
+      setDetailsDraft(draft);
+    } catch {
+      enqueueSnackbar('Failed to load category details', { variant: 'error' });
+      setDetailsSaved(null);
+      setDetailsDraft(null);
+    }
+  };
+
+  const updateDetailsDraft = (patch) => setDetailsDraft(prev => ({ ...prev, ...patch }));
+
+  const handleSaveDetails = async () => {
+    try {
+      setDetailsSaving(true);
+      await axios.put(`${API}/categories/${selected.id}`, {
+        name: detailsDraft.name,
+        is_active: detailsDraft.is_active,
+        display_order: parseInt(detailsDraft.display_order, 10) || 0,
+        parent_category_id: detailsDraft.parent_category_id || null,
+        division_id: detailsDraft.division_id,
+        alternate_names: detailsDraft.alternate_names.split(',').map(s => s.trim()).filter(Boolean),
+        internal_notes: detailsDraft.internal_notes || null,
+      });
+      await loadCategoryDetails(selected.id);
+      loadAll(); // tree name/order/parent may have changed
+      enqueueSnackbar('Category details saved', { variant: 'success' });
+    } catch (err) {
+      enqueueSnackbar(err.response?.data?.error || 'Failed to save category details', { variant: 'error' });
+    } finally {
+      setDetailsSaving(false);
+    }
+  };
+
+  const handleCancelDetails = () => {
+    if (detailsSaved) setDetailsDraft(detailsSaved);
+  };
+
+  const detailsDirty = detailsSaved && detailsDraft
+    ? JSON.stringify(detailsDraft) !== JSON.stringify(detailsSaved)
+    : false;
 
   const handleSelectDivision = (div) => {
     setSelected(null);
@@ -615,21 +696,6 @@ function CategoryManager() {
       .trim();
   };
 
-  const handleSaveCategory = async () => {
-    try {
-      await axios.put(`${API}/categories/${selected.id}`, {
-        name:        editForm.name,
-        code:        editForm.code || null,
-        description: editForm.description || null,
-      });
-      enqueueSnackbar('Category saved', { variant: 'success' });
-      setEditMode(false);
-      setSelected(s => ({ ...s, name: editForm.name, code: editForm.code.toUpperCase(), description: editForm.description }));
-      loadAll();
-    } catch {
-      enqueueSnackbar('Failed to save category', { variant: 'error' });
-    }
-  };
 
   // ── Add category dialog ──────────────────────────────────────────────
   const openAddCategoryDialog = (parentInfo) => {
@@ -1078,91 +1144,158 @@ function CategoryManager() {
 
               {/* ── Tab 0: Details ──────────────────────────────────── */}
               {tab === 0 && (
-                <Box>
-                  {!editMode ? (
+                !detailsDraft ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                    <CircularProgress size={24} />
+                  </Box>
+                ) : (() => {
+                  const flatCategories = flattenCategoryTree(tree);
+                  const byParent = new Map();
+                  flatCategories.forEach(c => {
+                    const key = c.parent_category_id || null;
+                    if (!byParent.has(key)) byParent.set(key, []);
+                    byParent.get(key).push(c.id);
+                  });
+                  const descendantIds = [];
+                  const collect = (id) => {
+                    (byParent.get(id) || []).forEach(childId => {
+                      descendantIds.push(childId);
+                      collect(childId);
+                    });
+                  };
+                  collect(selected.id);
+                  const parentOptions = flatCategories.filter(c =>
+                    c.division_id === Number(detailsDraft.division_id)
+                    && c.id !== selected.id
+                    && !descendantIds.includes(c.id)
+                  );
+                  return (
                     <Box>
-                      <Paper elevation={0} sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2, mb: 2 }}>
-                        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
-                          <Box>
-                            <Typography variant="caption" color="text.secondary">Name</Typography>
-                            <Typography variant="body1">{selected.name}</Typography>
-                          </Box>
-                          <Box>
-                            <Typography variant="caption" color="text.secondary">Code</Typography>
-                            <Typography variant="body1" sx={{ fontFamily: 'monospace' }}>{selected.code}</Typography>
-                          </Box>
-                          <Box>
-                            <Typography variant="caption" color="text.secondary">Division</Typography>
-                            <Typography variant="body1">{selected.division_name}</Typography>
-                          </Box>
-                          <Box>
-                            <Typography variant="caption" color="text.secondary">Parent</Typography>
-                            <Typography variant="body1">{selected.parent_category_id ? `ID ${selected.parent_category_id}` : 'Root'}</Typography>
-                          </Box>
-                          <Box sx={{ gridColumn: '1/-1' }}>
-                            <Typography variant="caption" color="text.secondary">Description</Typography>
-                            <Typography variant="body1">{selected.description || '—'}</Typography>
-                          </Box>
-                        </Box>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Categories classify items and control default field behavior for items created in this category.
+                      </Typography>
+
+                      <Paper variant="outlined" sx={{ p: 2.5 }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>Category Details</Typography>
+                        <Grid container spacing={2.5}>
+                          <Grid item xs={12} sm={6} md={4}>
+                            <TextField
+                              label="Category Name" required fullWidth size="small"
+                              value={detailsDraft.name}
+                              onChange={e => updateDetailsDraft({ name: e.target.value })}
+                            />
+                          </Grid>
+                          <Grid item xs={12} sm={6} md={2.5}>
+                            <TextField
+                              label="Category Code" fullWidth size="small" disabled
+                              value={detailsDraft.code}
+                              helperText="Category codes cannot be changed."
+                              inputProps={{ style: { fontFamily: 'monospace' } }}
+                            />
+                          </Grid>
+                          <Grid item xs={12} sm={6} md={2.5}>
+                            <FormControl fullWidth size="small">
+                              <InputLabel>Status</InputLabel>
+                              <Select
+                                label="Status"
+                                value={detailsDraft.is_active ? 'active' : 'inactive'}
+                                onChange={e => updateDetailsDraft({ is_active: e.target.value === 'active' })}
+                              >
+                                <MenuItem value="active">Active</MenuItem>
+                                <MenuItem value="inactive">Inactive</MenuItem>
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                          <Grid item xs={12} sm={6} md={3}>
+                            <TextField
+                              label="Display Order" type="number" fullWidth size="small"
+                              value={detailsDraft.display_order}
+                              onChange={e => updateDetailsDraft({ display_order: e.target.value })}
+                              helperText="Lower numbers appear first."
+                              inputProps={{ min: 0 }}
+                            />
+                          </Grid>
+
+                          <Grid item xs={12} sm={6} md={4}>
+                            <FormControl fullWidth size="small">
+                              <InputLabel>Parent Category</InputLabel>
+                              <Select
+                                label="Parent Category"
+                                value={detailsDraft.parent_category_id}
+                                onChange={e => updateDetailsDraft({ parent_category_id: e.target.value })}
+                              >
+                                <MenuItem value=""><em>None (root category)</em></MenuItem>
+                                {parentOptions.map(c => (
+                                  <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                          <Grid item xs={12} sm={6} md={4}>
+                            <FormControl fullWidth size="small">
+                              <InputLabel>Division</InputLabel>
+                              <Select
+                                label="Division"
+                                value={detailsDraft.division_id || ''}
+                                onChange={e => updateDetailsDraft({ division_id: e.target.value, parent_category_id: '' })}
+                              >
+                                {divisions.map(d => (
+                                  <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                          <Grid item xs={12} md={4}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                              <Typography variant="caption" color="text.secondary">Alternate / Search Names</Typography>
+                              <Tooltip title="Comma-separated alternate names customers or staff might search for.">
+                                <InfoOutlinedIcon sx={{ fontSize: 14 }} color="action" />
+                              </Tooltip>
+                            </Box>
+                            <TextField
+                              fullWidth size="small" multiline minRows={2}
+                              value={detailsDraft.alternate_names}
+                              onChange={e => updateDetailsDraft({ alternate_names: e.target.value })}
+                              placeholder="e.g. PlayStation 5, PS5, Sony PS5, PS 5"
+                              helperText="Enter alternate names (comma separated) to improve search."
+                            />
+                          </Grid>
+
+                          <Grid item xs={12}>
+                            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, p: 1.5, bgcolor: '#fff8e1', border: '1px solid #ffe082', borderRadius: 1 }}>
+                              <Typography sx={{ fontSize: 18, lineHeight: 1 }}>⚠️</Typography>
+                              <Typography variant="body2">
+                                <strong>Changing the parent category will affect inherited field behavior.</strong><br />
+                                Items in this category inherit fields from their parent. Moving this category to a different parent may change which fields are inherited.
+                              </Typography>
+                            </Box>
+                          </Grid>
+
+                          <Grid item xs={12}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                              Internal Notes / Admin Notes
+                            </Typography>
+                            <TextField
+                              fullWidth size="small" multiline minRows={3}
+                              value={detailsDraft.internal_notes}
+                              onChange={e => updateDetailsDraft({ internal_notes: e.target.value })}
+                              helperText="These notes are for internal use only and are not visible on receipts or to customers."
+                            />
+                          </Grid>
+                        </Grid>
                       </Paper>
-                      <Button
-                        variant="outlined"
-                        startIcon={<EditIcon />}
-                        onClick={() => setEditMode(true)}
-                        size="small"
-                      >
-                        Edit
-                      </Button>
+
+                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 2 }}>
+                        <Button size="small" onClick={handleCancelDetails} disabled={detailsSaving || !detailsDirty}>
+                          Cancel Changes
+                        </Button>
+                        <Button size="small" variant="contained" onClick={handleSaveDetails} disabled={detailsSaving || !detailsDirty}>
+                          Save Changes
+                        </Button>
+                      </Box>
                     </Box>
-                  ) : (
-                    <Box sx={{ maxWidth: 500 }}>
-                      <Grid container spacing={2}>
-                        <Grid item xs={8}>
-                          <TextField
-                            label="Name"
-                            value={editForm.name}
-                            onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
-                            fullWidth size="small"
-                          />
-                        </Grid>
-                        <Grid item xs={4}>
-                          <TextField
-                            label="Code"
-                            value={editForm.code}
-                            onChange={e => setEditForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
-                            fullWidth size="small"
-                            inputProps={{ style: { fontFamily: 'monospace', textTransform: 'uppercase' } }}
-                            helperText="Unique within parent"
-                          />
-                        </Grid>
-                        <Grid item xs={12}>
-                          <TextField
-                            label="Description"
-                            value={editForm.description}
-                            onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
-                            fullWidth size="small" multiline minRows={2}
-                          />
-                        </Grid>
-                        <Grid item xs={12} sx={{ display: 'flex', gap: 1 }}>
-                          <Button
-                            variant="contained" size="small"
-                            startIcon={<SaveIcon />}
-                            onClick={handleSaveCategory}
-                          >
-                            Save
-                          </Button>
-                          <Button
-                            variant="outlined" size="small" color="inherit"
-                            startIcon={<CancelIcon />}
-                            onClick={() => setEditMode(false)}
-                          >
-                            Cancel
-                          </Button>
-                        </Grid>
-                      </Grid>
-                    </Box>
-                  )}
-                </Box>
+                  );
+                })()
               )}
 
               {/* ── Tab 1: Fields ────────────────────────────────────── */}

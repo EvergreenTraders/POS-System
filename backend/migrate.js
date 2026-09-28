@@ -39,6 +39,7 @@ const MIGRATION_FILES = [
   'trusted_pcs.sql',
   'customers.sql',
   'category_tree.sql',   // divisions, categories, field_definitions, category_field_rules
+  'category_details_v2.sql', // display_order, alternate_names, internal_notes on categories
   'category_descriptions.sql', // title template + description/search/web-filter flags
   'category_field_rules_v2.sql', // required_at, allow_free_type, wider data_type list
   'division_field_rules.sql', // division-level fields, inherited by every category in the division
