@@ -28,6 +28,9 @@ import Hardgoods from './pages/Hardgoods';
 import HardgoodsEdit from './pages/HardgoodsEdit';
 import HardgoodsEstimator from './pages/HardgoodsEstimator';
 import CategoryManager from './pages/CategoryManager';
+import CatalogItemEditor from './pages/CatalogItemEditor';
+import CatalogManager from './pages/CatalogManager';
+import NewCatalogItem from './pages/NewCatalogItem';
 import SystemConfig from './pages/SystemConfig';
 import Employees from './pages/Employees';
 import JewelEstimator from './pages/JewelEstimator';
@@ -625,6 +628,38 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <CategoryManager />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/catalog"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CatalogManager />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              {/* Catalog Manager → "New Catalog Item" (also the editor's Duplicate) */}
+              <Route
+                path="/catalog/items/new"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <NewCatalogItem />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              {/* :id is a catalog item id — Catalog Manager → "Open in Catalog Item Editor" */}
+              <Route
+                path="/catalog/items/:id"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CatalogItemEditor />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

@@ -47,6 +47,7 @@ import KeyboardBackspaceIcon from '@mui/icons-material/KeyboardBackspace';
 import CloudUpload from '@mui/icons-material/CloudUpload';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import CameraCaptureDialog, { ImageFileInput } from '../components/CameraCaptureDialog';
 import { useNavigate, useLocation } from 'react-router-dom';
 import config from '../config';
 
@@ -191,6 +192,7 @@ function CoinsBullions() {
   const [editingItemId, setEditingItemId] = useState(null);
   const [editPrice, setEditPrice] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     item: '',
@@ -349,9 +351,11 @@ function CoinsBullions() {
     setTabValue(newValue);
   };
 
-  const handleImageUpload = (e) => {
-    const files = Array.from(e.target.files);
-    
+  // Adds images to the active tab — from the shared ImageFileInput (Upload)
+  // or CameraCaptureDialog (Photo); both report [{ file }].
+  const handleImageUpload = (results) => {
+    const files = results.map(r => r.file);
+
     if (tabValue === 0) { // Scrap Metal tab
       const newImages = files.map((file, index) => ({
         file,
@@ -429,9 +433,11 @@ function CoinsBullions() {
     }
   };
 
-  const handleCameraOpen = () => {
-    // Handle camera access logic here
-    console.log('Camera access requested');
+  const handleCameraOpen = () => setCameraOpen(true);
+
+  const handleCameraCapture = (result) => {
+    handleImageUpload([result]);
+    setCameraOpen(false);
   };
 
   const handleEditItem = (item, type) => {
@@ -943,14 +949,7 @@ function CoinsBullions() {
                         >
                           Upload
                         </Button>
-                        <input
-                          type="file"
-                          ref={fileInputRef}
-                          accept="image/*"
-                          style={{ display: 'none' }}
-                          onChange={handleImageUpload}
-                          multiple
-                        />
+                        <ImageFileInput ref={fileInputRef} multiple readAsDataUrl={false} onSelect={handleImageUpload} />
                         <Button
                           size="small"
                           variant="outlined"
@@ -1272,14 +1271,7 @@ function CoinsBullions() {
                             >
                               Upload
                             </Button>
-                            <input
-                              type="file"
-                              ref={fileInputRef}
-                              accept="image/*"
-                              style={{ display: 'none' }}
-                              onChange={handleImageUpload}
-                              multiple
-                            />
+                            <ImageFileInput ref={fileInputRef} multiple readAsDataUrl={false} onSelect={handleImageUpload} />
                             <Button
                               size="small"
                               variant="outlined"
@@ -1663,14 +1655,7 @@ function CoinsBullions() {
                             >
                               Upload
                             </Button>
-                            <input
-                              type="file"
-                              ref={fileInputRef}
-                              accept="image/*"
-                              style={{ display: 'none' }}
-                              onChange={handleImageUpload}
-                              multiple
-                            />
+                            <ImageFileInput ref={fileInputRef} multiple readAsDataUrl={false} onSelect={handleImageUpload} />
                             <Button
                               size="small"
                               variant="outlined"
@@ -1933,6 +1918,13 @@ function CoinsBullions() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* "Photo" buttons on every tab — shared camera */}
+      <CameraCaptureDialog
+        open={cameraOpen}
+        onClose={() => setCameraOpen(false)}
+        onCapture={handleCameraCapture}
+      />
     </Container>
   );
 }

@@ -51,6 +51,7 @@ import HistoryIcon from '@mui/icons-material/History';
 import axios from 'axios';
 import config from '../config';
 import { injectPDFScript } from '../utils/printUtils';
+import { CameraView, ImageFileInput } from '../components/CameraCaptureDialog';
 import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
 import { useStoreStatus } from '../context/StoreStatusContext';
@@ -112,14 +113,16 @@ const Scrap = () => {
     loading: false
   });
 
+  // cameraMode shows the shared CameraView, which owns the camera stream.
   const [weightPhotoDialog, setWeightPhotoDialog] = useState({
     open: false,
     selectedFile: null,
     preview: null,
     uploading: false,
-    cameraMode: false,
-    stream: null
+    cameraMode: false
   });
+  const weightCameraRef = useRef(null);
+  const [weightCameraReady, setWeightCameraReady] = useState(false);
 
   const [photoTimestamp, setPhotoTimestamp] = useState(Date.now());
 
@@ -307,17 +310,6 @@ const Scrap = () => {
     initialize();
   }, []);
   
-  // Handle video stream for camera
-  useEffect(() => {
-    if (weightPhotoDialog.cameraMode && weightPhotoDialog.stream) {
-      const video = document.getElementById('camera-video');
-      if (video) {
-        video.srcObject = weightPhotoDialog.stream;
-        video.play();
-      }
-    }
-  }, [weightPhotoDialog.cameraMode, weightPhotoDialog.stream]);
-
 
   const handleNewScrap = () => {
     setOpenCreateDialog(true);
@@ -1033,72 +1025,40 @@ const Scrap = () => {
       selectedFile: null,
       preview: null,
       uploading: false,
-      cameraMode: false,
-      stream: null
+      cameraMode: false
     });
   };
 
-  // Handle closing weight photo dialog
+  // Handle closing weight photo dialog (the CameraView releases the camera
+  // itself when it unmounts)
   const handleCloseWeightPhotoDialog = () => {
-    // Stop camera stream if active
-    if (weightPhotoDialog.stream) {
-      weightPhotoDialog.stream.getTracks().forEach(track => track.stop());
-    }
     setWeightPhotoDialog({
       open: false,
       selectedFile: null,
       preview: null,
       uploading: false,
-      cameraMode: false,
-      stream: null
+      cameraMode: false
     });
   };
 
-  // Handle opening camera
-  const handleOpenCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
-      });
-      setWeightPhotoDialog(prev => ({
-        ...prev,
-        cameraMode: true,
-        stream: stream,
-        selectedFile: null,
-        preview: null
-      }));
-    } catch (err) {
-      console.error('Error accessing camera:', err);
-      setError('Unable to access camera. Please check permissions.');
-    }
+  // Handle opening camera — shows the shared CameraView
+  const handleOpenCamera = () => {
+    setWeightPhotoDialog(prev => ({
+      ...prev,
+      cameraMode: true,
+      selectedFile: null,
+      preview: null
+    }));
   };
 
-  // Handle capturing photo from camera
-  const handleCapturePhoto = () => {
-    const video = document.getElementById('camera-video');
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0);
-
-    canvas.toBlob((blob) => {
-      const file = new File([blob], `weight-photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      const previewUrl = URL.createObjectURL(blob);
-
-      // Stop camera stream
-      if (weightPhotoDialog.stream) {
-        weightPhotoDialog.stream.getTracks().forEach(track => track.stop());
-      }
-
-      setWeightPhotoDialog(prev => ({
-        ...prev,
-        selectedFile: file,
-        preview: previewUrl,
-        cameraMode: false,
-        stream: null
-      }));
-    }, 'image/jpeg', 0.95);
+  // Handle a captured photo from the camera
+  const handleCapturePhoto = ({ file }) => {
+    setWeightPhotoDialog(prev => ({
+      ...prev,
+      selectedFile: file,
+      preview: URL.createObjectURL(file),
+      cameraMode: false
+    }));
   };
 
   // Handle retaking photo
@@ -1111,18 +1071,13 @@ const Scrap = () => {
     }));
   };
 
-  // Handle file selection for weight photo
-  const handleWeightPhotoFileSelect = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      // Create preview URL
-      const previewUrl = URL.createObjectURL(file);
-      setWeightPhotoDialog(prev => ({
-        ...prev,
-        selectedFile: file,
-        preview: previewUrl
-      }));
-    }
+  // Handle file selection for weight photo (shared ImageFileInput)
+  const handleWeightPhotoFileSelect = ([picked]) => {
+    setWeightPhotoDialog(prev => ({
+      ...prev,
+      selectedFile: picked.file,
+      preview: URL.createObjectURL(picked.file)
+    }));
   };
 
   // Handle opening image preview dialog
@@ -2507,13 +2462,7 @@ const Scrap = () => {
               </Box>
 
               {/* File Upload */}
-              <input
-                accept="image/*"
-                style={{ display: 'none' }}
-                id="weight-photo-upload"
-                type="file"
-                onChange={handleWeightPhotoFileSelect}
-              />
+              <ImageFileInput id="weight-photo-upload" readAsDataUrl={false} onSelect={handleWeightPhotoFileSelect} />
               <Box sx={{ flex: 1 }}>
                 <label htmlFor="weight-photo-upload" style={{ width: '100%', display: 'block' }}>
                   <Button
@@ -2533,23 +2482,22 @@ const Scrap = () => {
           {/* Camera View */}
           {weightPhotoDialog.cameraMode && (
             <Box sx={{ textAlign: 'center' }}>
-              <video
-                id="camera-video"
-                autoPlay
-                playsInline
-                style={{
-                  width: '100%',
-                  maxHeight: '400px',
-                  borderRadius: '4px',
-                  backgroundColor: '#000'
-                }}
+              <CameraView
+                ref={weightCameraRef}
+                quality={0.95}
+                fileNamePrefix="weight-photo"
+                onCapture={handleCapturePhoto}
+                onReadyChange={setWeightCameraReady}
+                showCaptureButton={false}
+                videoStyle={{ maxHeight: '400px', borderRadius: '4px', backgroundColor: '#000' }}
               />
               <Box sx={{ mt: 2, display: 'flex', gap: 1, justifyContent: 'center' }}>
                 <Button
                   variant="contained"
                   color="primary"
                   startIcon={<PhotoCameraIcon />}
-                  onClick={handleCapturePhoto}
+                  disabled={!weightCameraReady}
+                  onClick={() => weightCameraRef.current?.capture()}
                 >
                   Capture
                 </Button>

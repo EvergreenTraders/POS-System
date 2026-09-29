@@ -102,6 +102,30 @@ if (!fs.existsSync(hardgoodsUploadDir)) {
   fs.mkdirSync(hardgoodsUploadDir, { recursive: true });
 }
 
+// Catalog reference images (Evergreen-controlled storage, doc §12).
+const catalogUploadDir = 'uploads/catalog/';
+if (!fs.existsSync(catalogUploadDir)) {
+  fs.mkdirSync(catalogUploadDir, { recursive: true });
+}
+const CATALOG_IMAGE_EXTENSIONS = {
+  'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
+};
+// One image per request, images only, 10 MB max. Multer errors (e.g. too
+// large) are returned as a 400 instead of falling through to Express.
+const catalogImageMulter = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, Object.prototype.hasOwnProperty.call(CATALOG_IMAGE_EXTENSIONS, file.mimetype)),
+}).single('image');
+const uploadCatalogImage = (req, res, next) => catalogImageMulter(req, res, (err) => {
+  if (err) {
+    return res.status(400).json({
+      error: err.code === 'LIMIT_FILE_SIZE' ? 'Image must be 10 MB or smaller' : `Image upload failed: ${err.message}`,
+    });
+  }
+  next();
+});
+
 const scrapUploadDir = 'uploads/scrap/';
 if (!fs.existsSync(scrapUploadDir)) {
   fs.mkdirSync(scrapUploadDir, { recursive: true });
@@ -15727,23 +15751,25 @@ app.get('/api/divisions', async (req, res) => {
 // CATEGORIES
 // ============================================================
 
-// GET /api/categories?division_id=1  — flat list, optionally filtered by division
+// GET /api/categories?division_id=1  — flat list, optionally filtered by division.
+// Inactive categories are still returned (soft-deactivated, not deleted, per
+// the Details tab's Status field) — the caller decides how to display them.
 app.get('/api/categories', async (req, res) => {
   try {
     const { division_id } = req.query;
     const params = [];
-    let where = 'WHERE c.is_active = true';
+    let where = 'WHERE 1=1';
     if (division_id) {
       params.push(division_id);
       where += ` AND c.division_id = $${params.length}`;
     }
     const result = await pool.query(
       `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
-              c.description, c.is_active, d.code AS division_code, d.name AS division_name
+              c.description, c.is_active, c.display_order, c.numeric_code, d.code AS division_code, d.name AS division_name
        FROM categories c
        JOIN divisions d ON d.id = c.division_id
        ${where}
-       ORDER BY c.division_id, c.parent_category_id NULLS FIRST, c.name`,
+       ORDER BY c.division_id, c.parent_category_id NULLS FIRST, c.display_order, c.name`,
       params
     );
     res.json(result.rows);
@@ -15753,23 +15779,25 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// GET /api/categories/tree?division_id=1  — nested tree, optionally filtered by division
+// GET /api/categories/tree?division_id=1  — nested tree, optionally filtered by
+// division. Inactive categories still appear (see note above) so admins can
+// find and reactivate them; the frontend is responsible for graying them out.
 app.get('/api/categories/tree', async (req, res) => {
   try {
     const { division_id } = req.query;
     const params = [];
-    let where = 'WHERE c.is_active = true';
+    let where = 'WHERE 1=1';
     if (division_id) {
       params.push(division_id);
       where += ` AND c.division_id = $${params.length}`;
     }
     const result = await pool.query(
       `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
-              c.description, d.code AS division_code, d.name AS division_name
+              c.description, c.is_active, c.display_order, c.numeric_code, d.code AS division_code, d.name AS division_name
        FROM categories c
        JOIN divisions d ON d.id = c.division_id
        ${where}
-       ORDER BY c.division_id, c.name`,
+       ORDER BY c.division_id, c.display_order, c.name`,
       params
     );
 
@@ -15801,9 +15829,12 @@ app.get('/api/categories/:id', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
-              c.description, c.is_active, d.code AS division_code, d.name AS division_name
+              c.description, c.is_active, c.display_order, c.alternate_names, c.internal_notes, c.numeric_code,
+              d.code AS division_code, d.name AS division_name,
+              p.name AS parent_category_name
        FROM categories c
        JOIN divisions d ON d.id = c.division_id
+       LEFT JOIN categories p ON p.id = c.parent_category_id
        WHERE c.id = $1`,
       [req.params.id]
     );
@@ -15815,22 +15846,45 @@ app.get('/api/categories/:id', async (req, res) => {
   }
 });
 
-// POST /api/categories  — create a new category
+// Friendly category code: 1–3 characters, A–Z / 0–9, stored uppercase.
+// (Uniqueness guarantees come from numeric_code, a random 5-digit code the
+// database assigns — see catalog_items.sql, section 8.)
+const CATEGORY_CODE_PATTERN = /^[A-Z0-9]{1,3}$/;
+const normalizeCategoryCode = (code) => String(code ?? '').trim().toUpperCase();
+const CATEGORY_CODE_ERROR = 'Category code must be 1–3 letters or numbers';
+
+// Friendly-code clash among siblings (incl. root level) vs. anything else.
+const isCategoryCodeConflict = (err) =>
+  err.code === '23505' && ['uq_category_code_per_parent', 'uq_category_code_root'].includes(err.constraint);
+
+// POST /api/categories  — create a new category. numeric_code is generated
+// by the column default; a concurrent collision on it is retried.
 app.post('/api/categories', async (req, res) => {
   try {
-    const { division_id, parent_category_id, code, name, description } = req.body;
+    const { division_id, parent_category_id, name, description } = req.body;
+    const code = normalizeCategoryCode(req.body.code);
     if (!division_id || !code || !name) {
       return res.status(400).json({ error: 'division_id, code, and name are required' });
     }
-    const result = await pool.query(
-      `INSERT INTO categories (division_id, parent_category_id, code, name, description)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [division_id, parent_category_id || null, code.toUpperCase(), name, description || null]
-    );
-    res.status(201).json(result.rows[0]);
+    if (!CATEGORY_CODE_PATTERN.test(code)) {
+      return res.status(400).json({ error: CATEGORY_CODE_ERROR });
+    }
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const result = await pool.query(
+          `INSERT INTO categories (division_id, parent_category_id, code, name, description)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING *`,
+          [division_id, parent_category_id || null, code, name, description || null]
+        );
+        return res.status(201).json(result.rows[0]);
+      } catch (err) {
+        if (err.code === '23505' && err.constraint === 'uq_categories_numeric_code' && attempt < 5) continue;
+        throw err;
+      }
+    }
   } catch (err) {
-    if (err.code === '23505') {
+    if (isCategoryCodeConflict(err)) {
       return res.status(409).json({ error: 'A category with this code already exists under the same parent' });
     }
     console.error('Error creating category:', err);
@@ -15838,25 +15892,80 @@ app.post('/api/categories', async (req, res) => {
   }
 });
 
-// PUT /api/categories/:id  — update a category
+// Returns the ids of every descendant of categoryId (not including itself) —
+// used to keep a category from being re-parented onto itself or its own subtree.
+async function getDescendantCategoryIds(categoryId) {
+  const result = await pool.query(
+    `WITH RECURSIVE descendants AS (
+       SELECT id FROM categories WHERE parent_category_id = $1
+       UNION ALL
+       SELECT c.id FROM categories c JOIN descendants d ON c.parent_category_id = d.id
+     )
+     SELECT id FROM descendants`,
+    [categoryId]
+  );
+  return result.rows.map(r => r.id);
+}
+
+// PUT /api/categories/:id  — update a category. Every field is a direct SET
+// (via undefined-check, not COALESCE) since the Details tab always submits
+// the complete draft, including intentional nulls/clears (e.g. removing the
+// parent to make a category root-level, or clearing internal notes).
 app.put('/api/categories/:id', async (req, res) => {
   try {
-    const { name, code, description, is_active } = req.body;
+    const categoryId = parseInt(req.params.id, 10);
+    const { name, description, is_active, division_id, parent_category_id, display_order, alternate_names, internal_notes } = req.body;
+    // numeric_code is system-assigned and never updated here.
+    const code = req.body.code !== undefined ? normalizeCategoryCode(req.body.code) : undefined;
+    if (code !== undefined && !CATEGORY_CODE_PATTERN.test(code)) {
+      return res.status(400).json({ error: CATEGORY_CODE_ERROR });
+    }
+
+    if (parent_category_id !== undefined && parent_category_id !== null) {
+      const newParentId = parseInt(parent_category_id, 10);
+      if (newParentId === categoryId) {
+        return res.status(400).json({ error: 'A category cannot be its own parent' });
+      }
+      const descendantIds = await getDescendantCategoryIds(categoryId);
+      if (descendantIds.includes(newParentId)) {
+        return res.status(400).json({ error: 'Cannot move a category under one of its own subcategories' });
+      }
+    }
+
+    const existing = await pool.query('SELECT * FROM categories WHERE id = $1', [categoryId]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'Category not found' });
+    const current = existing.rows[0];
+
     const result = await pool.query(
       `UPDATE categories
-       SET name        = COALESCE($1, name),
-           code        = COALESCE($2, code),
-           description = COALESCE($3, description),
-           is_active   = COALESCE($4, is_active),
-           updated_at  = CURRENT_TIMESTAMP
-       WHERE id = $5
+       SET name              = $1,
+           code              = $2,
+           description       = $3,
+           is_active         = $4,
+           division_id       = $5,
+           parent_category_id = $6,
+           display_order     = $7,
+           alternate_names   = $8,
+           internal_notes    = $9,
+           updated_at        = CURRENT_TIMESTAMP
+       WHERE id = $10
        RETURNING *`,
-      [name, code ? code.toUpperCase() : null, description, is_active, req.params.id]
+      [
+        name !== undefined ? name : current.name,
+        code !== undefined ? code : current.code,
+        description !== undefined ? description : current.description,
+        is_active !== undefined ? is_active : current.is_active,
+        division_id !== undefined ? division_id : current.division_id,
+        parent_category_id !== undefined ? parent_category_id : current.parent_category_id,
+        display_order !== undefined ? display_order : current.display_order,
+        alternate_names !== undefined ? alternate_names : current.alternate_names,
+        internal_notes !== undefined ? internal_notes : current.internal_notes,
+        categoryId,
+      ]
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Category not found' });
     res.json(result.rows[0]);
   } catch (err) {
-    if (err.code === '23505') {
+    if (isCategoryCodeConflict(err)) {
       return res.status(409).json({ error: 'A category with this code already exists under the same parent' });
     }
     console.error('Error updating category:', err);
@@ -15868,12 +15977,14 @@ app.put('/api/categories/:id', async (req, res) => {
 // FIELD DEFINITIONS
 // ============================================================
 
+const FIELD_DATA_TYPES = ['TEXT', 'NUMBER', 'CURRENCY', 'ENUM', 'MULTISELECT', 'BOOLEAN', 'DATE', 'MEASUREMENT'];
+
 // GET /api/field-definitions  — list all
 app.get('/api/field-definitions', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, field_key, label, data_type, allowed_values,
-              unit_of_measure, normalizer, validation_rule
+              unit_of_measure, normalizer, validation_rule, allow_free_type
        FROM category_field_definitions
        ORDER BY field_key ASC`
     );
@@ -15887,20 +15998,25 @@ app.get('/api/field-definitions', async (req, res) => {
 // POST /api/field-definitions  — create
 app.post('/api/field-definitions', async (req, res) => {
   try {
-    const { field_key, label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule } = req.body;
+    const { field_key, label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule, allow_free_type } = req.body;
     if (!field_key || !label || !data_type) {
       return res.status(400).json({ error: 'field_key, label, and data_type are required' });
     }
-    const validTypes = ['TEXT', 'NUMBER', 'ENUM', 'BOOLEAN', 'DATE'];
-    if (!validTypes.includes(data_type)) {
-      return res.status(400).json({ error: `data_type must be one of: ${validTypes.join(', ')}` });
+    if (!FIELD_DATA_TYPES.includes(data_type)) {
+      return res.status(400).json({ error: `data_type must be one of: ${FIELD_DATA_TYPES.join(', ')}` });
     }
+    // pg serializes a raw JS array as a Postgres array literal ({a,b}), not
+    // JSON — invalid for a jsonb column. Must JSON.stringify it ourselves.
     const result = await pool.query(
       `INSERT INTO category_field_definitions
-         (field_key, label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (field_key, label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule, allow_free_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [field_key, label, data_type, allowed_values || null, unit_of_measure || null, normalizer || null, validation_rule || null]
+      [
+        field_key, label, data_type,
+        Array.isArray(allowed_values) ? JSON.stringify(allowed_values) : (allowed_values || null),
+        unit_of_measure || null, normalizer || null, validation_rule || null, !!allow_free_type,
+      ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -15912,23 +16028,49 @@ app.post('/api/field-definitions', async (req, res) => {
   }
 });
 
-// PUT /api/field-definitions/:id  — update
+// PUT /api/field-definitions/:id  — update.
+// Every field here is a direct SET, not COALESCE: the only caller (Category
+// Manager's Fields tab) always submits the complete desired state, including
+// explicit nulls (e.g. clearing allowed_values when switching a field away
+// from Dropdown/Multi-select) — COALESCE would silently keep the old value
+// instead of clearing it, and previously dropped data_type entirely since it
+// wasn't in the SET list at all.
 app.put('/api/field-definitions/:id', async (req, res) => {
   try {
-    const { label, allowed_values, unit_of_measure, normalizer, validation_rule } = req.body;
+    const { label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule, allow_free_type } = req.body;
+    if (data_type && !FIELD_DATA_TYPES.includes(data_type)) {
+      return res.status(400).json({ error: `data_type must be one of: ${FIELD_DATA_TYPES.join(', ')}` });
+    }
+    const existing = await pool.query('SELECT * FROM category_field_definitions WHERE id = $1', [req.params.id]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'Field definition not found' });
+    const current = existing.rows[0];
+    // pg parses a jsonb column back into a real JS array/object, and re-sending
+    // that raw array as a parameter hits the same array-vs-jsonb serialization
+    // issue as POST — always stringify whichever value (new or existing) wins.
+    const resolvedAllowedValues = allowed_values !== undefined ? allowed_values : current.allowed_values;
     const result = await pool.query(
       `UPDATE category_field_definitions
-       SET label           = COALESCE($1, label),
-           allowed_values  = COALESCE($2, allowed_values),
-           unit_of_measure = COALESCE($3, unit_of_measure),
-           normalizer      = COALESCE($4, normalizer),
-           validation_rule = COALESCE($5, validation_rule),
+       SET label           = $1,
+           data_type       = $2,
+           allowed_values  = $3,
+           unit_of_measure = $4,
+           normalizer      = $5,
+           validation_rule = $6,
+           allow_free_type = $7,
            updated_at      = CURRENT_TIMESTAMP
-       WHERE id = $6
+       WHERE id = $8
        RETURNING *`,
-      [label, allowed_values, unit_of_measure, normalizer, validation_rule, req.params.id]
+      [
+        label !== undefined ? label : current.label,
+        data_type !== undefined ? data_type : current.data_type,
+        Array.isArray(resolvedAllowedValues) ? JSON.stringify(resolvedAllowedValues) : resolvedAllowedValues,
+        unit_of_measure !== undefined ? unit_of_measure : current.unit_of_measure,
+        normalizer !== undefined ? normalizer : current.normalizer,
+        validation_rule !== undefined ? validation_rule : current.validation_rule,
+        allow_free_type !== undefined ? allow_free_type : current.allow_free_type,
+        req.params.id,
+      ]
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Field definition not found' });
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error updating field definition:', err);
@@ -15966,7 +16108,7 @@ app.get('/api/category-field-rules/:cat_id', async (req, res) => {
        FROM category_field_rules r
        JOIN category_field_definitions f ON f.id = r.field_definition_id
        WHERE r.category_id = $1
-       ORDER BY r.display_order ASC, f.field_key ASC`,
+       ORDER BY r.display_order ASC, r.id ASC`,
       [req.params.cat_id]
     );
     res.json(result.rows);
@@ -16054,6 +16196,1593 @@ app.delete('/api/category-field-rules/:id', async (req, res) => {
   } catch (err) {
     console.error('Error deleting category field rule:', err);
     res.status(500).json({ error: 'Failed to delete category field rule' });
+  }
+});
+
+// ============================================================
+// EFFECTIVE CATEGORY FIELDS — resolves parent-category inheritance for
+// the Category Manager "Fields" tab. A field is "effective" for a category
+// if some ancestor (or the category itself) ADDs it and nothing between
+// that ancestor and this category SUPPRESSes it; the nearest OVERRIDE
+// (at or below the ADD) wins for its settings, while the ADD's category
+// stays the field's "origin" for display (Source column).
+// ============================================================
+
+async function getCategoryAncestorChain(categoryId) {
+  const result = await pool.query(
+    `WITH RECURSIVE ancestors AS (
+       SELECT id, parent_category_id, division_id, name, 0 AS depth FROM categories WHERE id = $1
+       UNION ALL
+       SELECT c.id, c.parent_category_id, c.division_id, c.name, a.depth + 1
+       FROM categories c
+       JOIN ancestors a ON c.id = a.parent_category_id
+     )
+     SELECT id, name, division_id, depth FROM ancestors ORDER BY depth DESC`,
+    [categoryId]
+  );
+  return result.rows; // root-first ... selected-last
+}
+
+// Shared by category and division field-definition joins — same output shape
+// either way, so the rest of the resolution/UI code doesn't need to care
+// which table a row came from.
+const FIELD_RULE_SELECT_COLUMNS = `
+  f.field_key, f.label AS field_label, f.data_type, f.allowed_values,
+  f.unit_of_measure, f.allow_free_type`;
+
+async function resolveEffectiveFields(categoryId) {
+  const chain = await getCategoryAncestorChain(categoryId);
+  if (!chain.length) return { fields: [], suppressed: [] };
+  const chainIds = chain.map(c => c.id);
+  const nameById = Object.fromEntries(chain.map(c => [c.id, c.name]));
+
+  // A division is the "super-root" above every category in it — its own
+  // fields (division_field_rules) seed the merge first, exactly like an
+  // ancestor category's ADD rules would, so "Inherited from Hardgoods" works
+  // the same way "Inherited from Video Game Consoles" does.
+  const divisionId = chain[0].division_id;
+  const divisionRes = await pool.query(
+    `SELECT r.*, ${FIELD_RULE_SELECT_COLUMNS}
+     FROM division_field_rules r
+     JOIN category_field_definitions f ON f.id = r.field_definition_id
+     WHERE r.division_id = $1`,
+    [divisionId]
+  );
+  const divisionRow = await pool.query('SELECT name FROM divisions WHERE id = $1', [divisionId]);
+  const divisionName = divisionRow.rows[0]?.name || null;
+
+  const rulesRes = await pool.query(
+    `SELECT r.*, ${FIELD_RULE_SELECT_COLUMNS}
+     FROM category_field_rules r
+     JOIN category_field_definitions f ON f.id = r.field_definition_id
+     WHERE r.category_id = ANY($1)`,
+    [chainIds]
+  );
+  const rulesByCategory = {};
+  rulesRes.rows.forEach(r => {
+    (rulesByCategory[r.category_id] = rulesByCategory[r.category_id] || []).push(r);
+  });
+
+  const effective = new Map(); // field_definition_id -> { rule, originCategoryId, originDivisionName }
+  for (const r of divisionRes.rows) {
+    effective.set(r.field_definition_id, { rule: { ...r, category_id: null }, originCategoryId: null, originDivisionName: divisionName });
+  }
+  for (const cat of chain) {
+    for (const r of (rulesByCategory[cat.id] || [])) {
+      if (r.action === 'SUPPRESS') {
+        effective.delete(r.field_definition_id);
+      } else if (r.action === 'ADD') {
+        effective.set(r.field_definition_id, { rule: r, originCategoryId: cat.id, originDivisionName: null });
+      } else if (r.action === 'OVERRIDE') {
+        const existing = effective.get(r.field_definition_id);
+        effective.set(r.field_definition_id, {
+          rule: r,
+          originCategoryId: existing ? existing.originCategoryId : cat.id,
+          originDivisionName: existing ? existing.originDivisionName : null,
+        });
+      }
+    }
+  }
+
+  const fields = [...effective.values()]
+    .map(({ rule, originCategoryId, originDivisionName }) => ({
+      ...rule,
+      is_own: rule.category_id === categoryId,
+      origin_category_id: originCategoryId,
+      origin_category_name: originCategoryId ? nameById[originCategoryId] : originDivisionName,
+    }))
+    .sort((a, b) => (a.display_order - b.display_order) || a.id - b.id);
+
+  // Own SUPPRESS rows don't appear above (they're what removed a field from
+  // `effective`) — surfaced separately so the UI can offer to un-hide them.
+  const suppressed = (rulesByCategory[categoryId] || [])
+    .filter(r => r.action === 'SUPPRESS')
+    .map(r => ({ id: r.id, field_definition_id: r.field_definition_id, field_key: r.field_key, label: r.field_label }));
+
+  return { fields, suppressed };
+}
+
+// A division has no parent — every one of its own field rules is simply
+// "on", shaped to match resolveEffectiveFields' output so the same grid/
+// details-panel UI can render either.
+async function resolveDivisionFields(divisionId) {
+  const rulesRes = await pool.query(
+    `SELECT r.*, ${FIELD_RULE_SELECT_COLUMNS}
+     FROM division_field_rules r
+     JOIN category_field_definitions f ON f.id = r.field_definition_id
+     WHERE r.division_id = $1
+     ORDER BY r.display_order ASC, r.id ASC`,
+    [divisionId]
+  );
+  const fields = rulesRes.rows.map(r => ({
+    ...r,
+    is_own: true,
+    origin_category_id: null,
+    origin_category_name: null,
+  }));
+  return { fields, suppressed: [] };
+}
+
+// GET /api/categories/:id/effective-fields
+app.get('/api/categories/:id/effective-fields', async (req, res) => {
+  try {
+    const catRes = await pool.query('SELECT id FROM categories WHERE id = $1', [req.params.id]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+    res.json(await resolveEffectiveFields(parseInt(req.params.id, 10)));
+  } catch (err) {
+    console.error('Error resolving effective category fields:', err);
+    res.status(500).json({ error: 'Failed to resolve effective category fields' });
+  }
+});
+
+// PUT /api/categories/:id/field-rules  — replaces this category's OWN rule
+// set (ADD/OVERRIDE/SUPPRESS rows whose category_id is this category) with
+// the submitted list: rows with an id are updated, rows without one are
+// inserted, and existing own rows missing from the list are deleted (this
+// is how "restore inheritance" / "remove field" / "un-hide" are expressed —
+// the client just omits that row next Save).
+app.put('/api/categories/:id/field-rules', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    const incoming = Array.isArray(req.body.rules) ? req.body.rules : [];
+
+    await client.query('BEGIN');
+
+    const currentRes = await client.query('SELECT id FROM category_field_rules WHERE category_id = $1', [categoryId]);
+    const currentIds = new Set(currentRes.rows.map(r => r.id));
+    const incomingIds = new Set(incoming.filter(r => r.id).map(r => r.id));
+
+    // Delete first — a row being replaced (e.g. an OVERRIDE swapped for a
+    // SUPPRESS on the same field+scope) must be gone before the new row for
+    // that same field+scope is inserted, or the unique constraint collides.
+    const toDelete = [...currentIds].filter(id => !incomingIds.has(id));
+    if (toDelete.length > 0) {
+      await client.query('DELETE FROM category_field_rules WHERE id = ANY($1) AND category_id = $2', [toDelete, categoryId]);
+    }
+
+    for (const r of incoming) {
+      if (!r.field_definition_id || !r.action) continue;
+      if (r.id && currentIds.has(r.id)) {
+        await client.query(
+          `UPDATE category_field_rules
+           SET action = $1, scope = $2, required_at = $3, default_value = $4,
+               label_override = $5, help_text = $6, short_description = $7,
+               long_description = $8, search = $9, web_filter = $10,
+               display_order = $11, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $12 AND category_id = $13`,
+          [
+            r.action, r.scope || 'INVENTORY', r.required_at || 'OPTIONAL', r.default_value || null,
+            r.label_override || null, r.help_text || null, !!r.short_description,
+            !!r.long_description, !!r.search || !!r.web_filter, !!r.web_filter,
+            r.display_order || 0, r.id, categoryId,
+          ]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO category_field_rules
+             (category_id, field_definition_id, action, scope, required_at, default_value,
+              label_override, help_text, short_description, long_description, search, web_filter, display_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [
+            categoryId, r.field_definition_id, r.action, r.scope || 'INVENTORY', r.required_at || 'OPTIONAL',
+            r.default_value || null, r.label_override || null, r.help_text || null,
+            !!r.short_description, !!r.long_description, !!r.search || !!r.web_filter, !!r.web_filter,
+            r.display_order || 0,
+          ]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json(await resolveEffectiveFields(categoryId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'A rule for this field and scope already exists on this category' });
+    }
+    console.error('Error saving category field rules:', err);
+    res.status(500).json({ error: 'Failed to save category field rules' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/divisions/:id/effective-fields — a division's own fields (it has
+// no parent to inherit from, so this is just its field list, same response
+// shape as a category's for UI reuse).
+app.get('/api/divisions/:id/effective-fields', async (req, res) => {
+  try {
+    const divRes = await pool.query('SELECT id FROM divisions WHERE id = $1', [req.params.id]);
+    if (!divRes.rows.length) return res.status(404).json({ error: 'Division not found' });
+    res.json(await resolveDivisionFields(parseInt(req.params.id, 10)));
+  } catch (err) {
+    console.error('Error resolving division fields:', err);
+    res.status(500).json({ error: 'Failed to resolve division fields' });
+  }
+});
+
+// PUT /api/divisions/:id/field-rules — replaces this division's field set,
+// same replace-the-whole-set reconciliation as the category version.
+app.put('/api/divisions/:id/field-rules', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const divisionId = parseInt(req.params.id, 10);
+    const incoming = Array.isArray(req.body.rules) ? req.body.rules : [];
+
+    await client.query('BEGIN');
+
+    const currentRes = await client.query('SELECT id FROM division_field_rules WHERE division_id = $1', [divisionId]);
+    const currentIds = new Set(currentRes.rows.map(r => r.id));
+    const incomingIds = new Set(incoming.filter(r => r.id).map(r => r.id));
+
+    const toDelete = [...currentIds].filter(id => !incomingIds.has(id));
+    if (toDelete.length > 0) {
+      await client.query('DELETE FROM division_field_rules WHERE id = ANY($1) AND division_id = $2', [toDelete, divisionId]);
+    }
+
+    for (const r of incoming) {
+      if (!r.field_definition_id) continue;
+      if (r.id && currentIds.has(r.id)) {
+        await client.query(
+          `UPDATE division_field_rules
+           SET scope = $1, required_at = $2, default_value = $3, label_override = $4, help_text = $5,
+               short_description = $6, long_description = $7, search = $8, web_filter = $9,
+               display_order = $10, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $11 AND division_id = $12`,
+          [
+            r.scope || 'INVENTORY', r.required_at || 'OPTIONAL', r.default_value || null,
+            r.label_override || null, r.help_text || null, !!r.short_description,
+            !!r.long_description, !!r.search || !!r.web_filter, !!r.web_filter,
+            r.display_order || 0, r.id, divisionId,
+          ]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO division_field_rules
+             (division_id, field_definition_id, action, scope, required_at, default_value,
+              label_override, help_text, short_description, long_description, search, web_filter, display_order)
+           VALUES ($1,$2,'ADD',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [
+            divisionId, r.field_definition_id, r.scope || 'INVENTORY', r.required_at || 'OPTIONAL',
+            r.default_value || null, r.label_override || null, r.help_text || null,
+            !!r.short_description, !!r.long_description, !!r.search || !!r.web_filter, !!r.web_filter,
+            r.display_order || 0,
+          ]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json(await resolveDivisionFields(divisionId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'A rule for this field and scope already exists on this division' });
+    }
+    console.error('Error saving division field rules:', err);
+    res.status(500).json({ error: 'Failed to save division field rules' });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// CATEGORY DESCRIPTIONS (Item Title template + description/search/
+// web-filter behaviour) — powers Category Manager's Descriptions tab.
+// Only resolves this category's own field rules today, not inherited
+// parent-category rules (category-field-rules has the same limitation).
+// ============================================================
+
+const DEFAULT_DESCRIPTION_SETTINGS = {
+  title_template: ['category'],
+  category_in_short_description: true,
+  category_in_long_description: true,
+  search_index_title: true,
+  search_index_short_description: true,
+  search_index_long_description: false,
+  boost_title_matches: true,
+  web_search_title: true,
+  web_search_short_description: true,
+  web_search_long_description: true,
+};
+
+async function fetchDescriptionConfig(categoryId) {
+  const [settingsRes, fieldsRes] = await Promise.all([
+    pool.query('SELECT * FROM category_description_settings WHERE category_id = $1', [categoryId]),
+    pool.query(
+      `SELECT r.id, r.field_definition_id, r.short_description, r.long_description, r.search, r.web_filter,
+              f.field_key, f.label, r.label_override
+       FROM category_field_rules r
+       JOIN category_field_definitions f ON f.id = r.field_definition_id
+       WHERE r.category_id = $1 AND r.action != 'SUPPRESS'
+       ORDER BY r.display_order ASC, r.id ASC`,
+      [categoryId]
+    ),
+  ]);
+  const { category_id, updated_at, ...settingsRow } = settingsRes.rows[0] || {};
+  const settings = { ...DEFAULT_DESCRIPTION_SETTINGS, ...settingsRow };
+  return { settings, fields: fieldsRes.rows };
+}
+
+// GET /api/categories/:id/description-config
+app.get('/api/categories/:id/description-config', async (req, res) => {
+  try {
+    const catRes = await pool.query('SELECT id FROM categories WHERE id = $1', [req.params.id]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+    res.json(await fetchDescriptionConfig(req.params.id));
+  } catch (err) {
+    console.error('Error fetching category description config:', err);
+    res.status(500).json({ error: 'Failed to fetch category description config' });
+  }
+});
+
+// PUT /api/categories/:id/description-config
+app.put('/api/categories/:id/description-config', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const categoryId = req.params.id;
+    const s = { ...DEFAULT_DESCRIPTION_SETTINGS, ...req.body.settings };
+    const fields = Array.isArray(req.body.fields) ? req.body.fields : [];
+
+    await client.query('BEGIN');
+
+    await client.query(
+      `INSERT INTO category_description_settings
+         (category_id, title_template, category_in_short_description, category_in_long_description,
+          search_index_title, search_index_short_description, search_index_long_description,
+          boost_title_matches, web_search_title, web_search_short_description, web_search_long_description,
+          updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, CURRENT_TIMESTAMP)
+       ON CONFLICT (category_id) DO UPDATE SET
+         title_template                 = EXCLUDED.title_template,
+         category_in_short_description  = EXCLUDED.category_in_short_description,
+         category_in_long_description   = EXCLUDED.category_in_long_description,
+         search_index_title             = EXCLUDED.search_index_title,
+         search_index_short_description = EXCLUDED.search_index_short_description,
+         search_index_long_description  = EXCLUDED.search_index_long_description,
+         boost_title_matches            = EXCLUDED.boost_title_matches,
+         web_search_title               = EXCLUDED.web_search_title,
+         web_search_short_description   = EXCLUDED.web_search_short_description,
+         web_search_long_description    = EXCLUDED.web_search_long_description,
+         updated_at                     = CURRENT_TIMESTAMP`,
+      [
+        categoryId, JSON.stringify(s.title_template),
+        s.category_in_short_description, s.category_in_long_description,
+        s.search_index_title, s.search_index_short_description, s.search_index_long_description,
+        s.boost_title_matches, s.web_search_title, s.web_search_short_description, s.web_search_long_description,
+      ]
+    );
+
+    for (const f of fields) {
+      if (!f || !f.id) continue;
+      // Web Filter implies Search — a field can be searchable without being a
+      // web filter, but not the other way around.
+      const search = !!f.search || !!f.web_filter;
+      await client.query(
+        `UPDATE category_field_rules
+         SET short_description = $1, long_description = $2, search = $3, web_filter = $4, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $5 AND category_id = $6`,
+        [!!f.short_description, !!f.long_description, search, !!f.web_filter, f.id, categoryId]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json(await fetchDescriptionConfig(categoryId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error saving category description config:', err);
+    res.status(500).json({ error: 'Failed to save category description config' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/categories/:id/description-config/reset  — revert to defaults
+app.post('/api/categories/:id/description-config/reset', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const categoryId = req.params.id;
+    await client.query('BEGIN');
+    await client.query('DELETE FROM category_description_settings WHERE category_id = $1', [categoryId]);
+    await client.query(
+      `UPDATE category_field_rules
+       SET short_description = false, long_description = false, search = false, web_filter = false, updated_at = CURRENT_TIMESTAMP
+       WHERE category_id = $1`,
+      [categoryId]
+    );
+    await client.query('COMMIT');
+    res.json(await fetchDescriptionConfig(categoryId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error resetting category description config:', err);
+    res.status(500).json({ error: 'Failed to reset category description config' });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// CATALOG ITEMS (Phase 1) — reusable, company-wide product definitions.
+// A Catalog Item is NOT inventory: hardgoods/jewelry rows link to it via
+// catalog_item_id but keep their own snapshotted values, so nothing here
+// rewrites existing inventory descriptions. The one exception is Category,
+// which is structural — moving a Catalog Item reclassifies linked inventory.
+// Search, Merge/Split, Intake and intelligence are deliberately out of scope.
+// ============================================================
+
+// MERGED is only ever set by the (future) Merge workflow.
+const CATALOG_SETTABLE_STATUSES = ['DRAFT', 'ACTIVE', 'INACTIVE'];
+const CATALOG_IDENTIFIER_TYPES = ['UPC', 'EAN', 'MANUFACTURER_MODEL', 'OTHER'];
+const CATALOG_IDENTIFIER_SOURCES = ['MANUAL', 'MANUFACTURER_API', 'EXTERNAL_PROVIDER'];
+// Barcode identifiers that must not map to two ACTIVE Catalog Items in the same company.
+const CATALOG_UNIQUE_IDENTIFIER_TYPES = ['UPC', 'EAN'];
+// Scalar columns tracked in catalog_item_audit.
+const CATALOG_AUDITED_COLUMNS = [
+  'category_id', 'status', 'make_brand', 'model_name', 'generated_title', 'title_override',
+  'default_inventory_mode', 'suggested_cost', 'suggested_retail', 'retails_new_for', 'internal_notes',
+];
+const CATALOG_MONEY_COLUMNS = ['suggested_cost', 'suggested_retail', 'retails_new_for'];
+
+class CatalogValidationError extends Error {
+  constructor(message, status = 400, details = undefined) {
+    super(message);
+    this.status = status;
+    this.details = details;
+  }
+}
+
+// Removes harmless formatting (case, spaces, dashes, dots, slashes, underscores)
+// so "CFI-1215A" and "cfi 1215a" share one search key. Letters/digits are kept.
+const normalizeCatalogIdentifier = (raw) =>
+  String(raw ?? '').trim().toUpperCase().replace(/[\s\-_./]/g, '');
+
+const normalizeCatalogAlias = (raw) =>
+  String(raw ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+const trimOrNull = (v) => {
+  if (v === undefined || v === null) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
+};
+
+// Catalog pricing is nullable by design: blank/null means "no Catalog
+// default — use history/market logic", never zero.
+const parseCatalogMoney = (value, label) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) throw new CatalogValidationError(`${label} must be a non-negative number or blank`);
+  return Math.round(n * 100) / 100;
+};
+
+const parseEmployeeId = (v) => {
+  const n = parseInt(v, 10);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
+
+async function getDefaultCompanyId(client) {
+  const result = await client.query('SELECT id FROM companies WHERE is_active = true ORDER BY id LIMIT 1');
+  if (!result.rows.length) throw new CatalogValidationError('No active company is configured', 500);
+  return result.rows[0].id;
+}
+
+// Fields effective for the category (division + ancestor inheritance, via
+// resolveEffectiveFields) whose scope is CATALOG — the only fields a Catalog
+// Item stores values for. Inventory-scope fields live on the inventory record.
+async function getCatalogScopeFields(categoryId) {
+  const { fields } = await resolveEffectiveFields(categoryId);
+  return fields.filter(f => f.scope === 'CATALOG' && f.required_at !== 'NOT_USED');
+}
+
+// Field values are stored as TEXT (same as hardgoods_attributes); multi-select
+// arrays are stored as a JSON array string.
+function serializeCatalogFieldValue(value) {
+  if (value === undefined || value === null) return null;
+  if (Array.isArray(value)) return value.length ? JSON.stringify(value) : null;
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  const s = String(value).trim();
+  return s === '' ? null : s;
+}
+
+function displayCatalogFieldValue(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string' && value.startsWith('[')) {
+    try {
+      const arr = JSON.parse(value);
+      if (Array.isArray(arr)) return arr.join(', ');
+    } catch (e) { /* plain text that happens to start with "[" */ }
+  }
+  return String(value).trim();
+}
+
+// Generated title = Make/Brand + Model Name, followed by any Catalog field
+// values referenced by the category's existing Item Title template
+// (category_description_settings.title_template, "field:A|field:B" = A, else B).
+// The template's "category" token is skipped — Category is shown alongside
+// the title rather than repeated inside it. Blank values are skipped.
+async function buildCatalogGeneratedTitle(categoryId, makeBrand, modelName, valueByFieldId) {
+  const settingsRes = await pool.query(
+    'SELECT title_template FROM category_description_settings WHERE category_id = $1',
+    [categoryId]
+  );
+  const template = settingsRes.rows[0]?.title_template || DEFAULT_DESCRIPTION_SETTINGS.title_template;
+
+  const make = trimOrNull(makeBrand);
+  const model = trimOrNull(modelName);
+  const parts = [];
+  // Avoid "Apple Apple iPhone 13" when the model name already leads with the make.
+  if (make && !(model && model.toLowerCase().startsWith(make.toLowerCase()))) parts.push(make);
+  if (model) parts.push(model);
+
+  for (const token of template) {
+    if (typeof token !== 'string' || !token.startsWith('field:')) continue;
+    const resolved = token.split('|')
+      .map(t => parseInt(t.replace('field:', ''), 10))
+      .map(id => displayCatalogFieldValue(valueByFieldId[id]))
+      .find(v => v !== '');
+    if (resolved) parts.push(resolved);
+  }
+
+  const title = parts.join(' ').replace(/\s+/g, ' ').trim();
+  return title ? title.slice(0, 300) : null;
+}
+
+async function loadCatalogFieldValueMap(client, catalogItemId) {
+  const result = await client.query(
+    'SELECT field_definition_id, value FROM catalog_item_field_values WHERE catalog_item_id = $1',
+    [catalogItemId]
+  );
+  return Object.fromEntries(result.rows.map(r => [r.field_definition_id, r.value]));
+}
+
+// Replace-set semantics for the item's identifier list: submitted rows are
+// upserted by (type, normalized value); previously-active identifiers that
+// were omitted are deactivated rather than deleted so lineage survives.
+async function saveCatalogIdentifiers(client, catalogItemId, companyId, identifiers) {
+  if (!Array.isArray(identifiers)) throw new CatalogValidationError('identifiers must be an array');
+  const seen = new Set();
+  const keepKeys = [];
+  for (const raw of identifiers) {
+    const type = String(raw?.identifier_type || '').toUpperCase();
+    if (!CATALOG_IDENTIFIER_TYPES.includes(type)) {
+      throw new CatalogValidationError(`identifier_type must be one of: ${CATALOG_IDENTIFIER_TYPES.join(', ')}`);
+    }
+    const rawValue = trimOrNull(raw?.raw_value);
+    const normalized = normalizeCatalogIdentifier(rawValue);
+    if (!rawValue || !normalized) throw new CatalogValidationError('Identifier value is required');
+    if (rawValue.length > 100) throw new CatalogValidationError(`Identifier "${rawValue}" is too long`);
+    if (CATALOG_UNIQUE_IDENTIFIER_TYPES.includes(type) && !/^\d+$/.test(normalized)) {
+      throw new CatalogValidationError(`${type} "${rawValue}" must contain digits only`);
+    }
+    const source = raw?.source ? String(raw.source).toUpperCase() : 'MANUAL';
+    if (!CATALOG_IDENTIFIER_SOURCES.includes(source)) {
+      throw new CatalogValidationError(`source must be one of: ${CATALOG_IDENTIFIER_SOURCES.join(', ')}`);
+    }
+    const key = `${type}:${normalized}`;
+    if (seen.has(key)) throw new CatalogValidationError(`Duplicate identifier ${type} "${rawValue}"`);
+    seen.add(key);
+    const isActive = raw?.is_active === undefined ? true : !!raw.is_active;
+    if (isActive) keepKeys.push(key);
+
+    await client.query(
+      `INSERT INTO catalog_item_identifiers
+         (catalog_item_id, company_id, identifier_type, raw_value, normalized_value, is_active, source, provider)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (catalog_item_id, identifier_type, normalized_value) DO UPDATE SET
+         raw_value  = EXCLUDED.raw_value,
+         is_active  = EXCLUDED.is_active,
+         source     = EXCLUDED.source,
+         provider   = EXCLUDED.provider,
+         updated_at = CURRENT_TIMESTAMP`,
+      [catalogItemId, companyId, type, rawValue, normalized, isActive, source, trimOrNull(raw?.provider)]
+    );
+  }
+  await client.query(
+    `UPDATE catalog_item_identifiers
+     SET is_active = false, updated_at = CURRENT_TIMESTAMP
+     WHERE catalog_item_id = $1 AND is_active = true
+       AND NOT ((identifier_type || ':' || normalized_value) = ANY($2::text[]))`,
+    [catalogItemId, keepKeys]
+  );
+}
+
+// aliases: array of strings (or { alias }) = the complete set of staff-entered
+// SEARCH_TERM aliases. PREVIOUS_TITLE / MERGED_TITLE aliases are system-managed
+// and never removed here.
+async function saveCatalogAliases(client, catalogItemId, aliases) {
+  if (!Array.isArray(aliases)) throw new CatalogValidationError('aliases must be an array');
+  const keep = [];
+  for (const raw of aliases) {
+    const alias = trimOrNull(typeof raw === 'string' ? raw : raw?.alias);
+    if (!alias) continue;
+    if (alias.length > 300) throw new CatalogValidationError(`Alias "${alias.slice(0, 40)}…" is too long`);
+    const normalized = normalizeCatalogAlias(alias);
+    if (keep.includes(normalized)) continue;
+    keep.push(normalized);
+    await client.query(
+      `INSERT INTO catalog_item_aliases (catalog_item_id, alias, normalized_alias, alias_type)
+       VALUES ($1, $2, $3, 'SEARCH_TERM')
+       ON CONFLICT (catalog_item_id, normalized_alias) DO UPDATE SET is_active = true`,
+      [catalogItemId, alias, normalized]
+    );
+  }
+  await client.query(
+    `DELETE FROM catalog_item_aliases
+     WHERE catalog_item_id = $1 AND alias_type = 'SEARCH_TERM' AND NOT (normalized_alias = ANY($2::text[]))`,
+    [catalogItemId, keep]
+  );
+}
+
+// field_values: [{ field_definition_id, value }] — upserts each submitted value
+// (blank = remove). Only Catalog-scope fields effective for the category are
+// accepted. Values for fields not submitted are left untouched, and values for
+// fields that stop applying after a Category move are retained (not deleted).
+async function saveCatalogFieldValues(client, catalogItemId, categoryId, fieldValues) {
+  if (!Array.isArray(fieldValues)) throw new CatalogValidationError('field_values must be an array');
+  if (!fieldValues.length) return;
+  const catalogFields = await getCatalogScopeFields(categoryId);
+  const fieldById = Object.fromEntries(catalogFields.map(f => [f.field_definition_id, f]));
+
+  for (const fv of fieldValues) {
+    const fieldId = parseInt(fv?.field_definition_id, 10);
+    const field = fieldById[fieldId];
+    if (!field) {
+      throw new CatalogValidationError(`Field ${fv?.field_definition_id} is not a Catalog field for this category`);
+    }
+    const value = serializeCatalogFieldValue(fv.value);
+    const label = field.label_override || field.field_label;
+    if (value !== null && ['NUMBER', 'CURRENCY'].includes(field.data_type) && !Number.isFinite(Number(value))) {
+      throw new CatalogValidationError(`${label} must be a number`);
+    }
+    if (value !== null && field.data_type === 'ENUM' && !field.allow_free_type
+        && Array.isArray(field.allowed_values) && field.allowed_values.length
+        && !field.allowed_values.includes(value)) {
+      throw new CatalogValidationError(`${label} must be one of: ${field.allowed_values.join(', ')}`);
+    }
+
+    if (value === null) {
+      await client.query(
+        'DELETE FROM catalog_item_field_values WHERE catalog_item_id = $1 AND field_definition_id = $2',
+        [catalogItemId, fieldId]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO catalog_item_field_values (catalog_item_id, field_definition_id, value)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (catalog_item_id, field_definition_id) DO UPDATE SET
+           value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
+        [catalogItemId, fieldId, value]
+      );
+    }
+  }
+}
+
+// A UPC/EAN must not map to two ACTIVE Catalog Items in the same company —
+// that's a catalog-quality exception, so it's rejected when the item is (or
+// becomes) Active. Draft/Inactive items may overlap until resolved.
+async function assertNoActiveIdentifierConflicts(client, catalogItemId) {
+  const result = await client.query(
+    `SELECT i.identifier_type, i.raw_value, o.id AS conflicting_catalog_item_id, o.catalog_code AS conflicting_catalog_code
+     FROM catalog_item_identifiers i
+     JOIN catalog_item_identifiers x
+       ON x.company_id = i.company_id
+      AND x.identifier_type = i.identifier_type
+      AND x.normalized_value = i.normalized_value
+      AND x.catalog_item_id <> i.catalog_item_id
+      AND x.is_active = true
+     JOIN catalog_items o ON o.id = x.catalog_item_id AND o.status = 'ACTIVE'
+     WHERE i.catalog_item_id = $1 AND i.is_active = true AND i.identifier_type = ANY($2::text[])`,
+    [catalogItemId, CATALOG_UNIQUE_IDENTIFIER_TYPES]
+  );
+  if (result.rows.length) {
+    const first = result.rows[0];
+    throw new CatalogValidationError(
+      `${first.identifier_type} ${first.raw_value} is already used by active Catalog Item ${first.conflicting_catalog_code}`,
+      409,
+      result.rows
+    );
+  }
+}
+
+async function assertCategoryExists(client, categoryId) {
+  const result = await client.query('SELECT id, code, is_active FROM categories WHERE id = $1', [categoryId]);
+  if (!result.rows.length) throw new CatalogValidationError('Category not found');
+  return result.rows[0];
+}
+
+async function assertInventoryModeExists(client, mode) {
+  if (mode === null) return;
+  const result = await client.query('SELECT 1 FROM inventory_modes WHERE code = $1', [mode]);
+  if (!result.rows.length) throw new CatalogValidationError(`Unknown inventory mode "${mode}"`);
+}
+
+// Comparable snapshot of everything a PUT can change, for audit diffs.
+async function snapshotCatalogItem(client, catalogItemId) {
+  const [itemRes, identRes, aliasRes, valueRes] = await Promise.all([
+    client.query('SELECT * FROM catalog_items WHERE id = $1', [catalogItemId]),
+    client.query(
+      `SELECT identifier_type, raw_value, source, provider FROM catalog_item_identifiers
+       WHERE catalog_item_id = $1 AND is_active = true ORDER BY identifier_type, normalized_value`,
+      [catalogItemId]
+    ),
+    client.query(
+      `SELECT alias FROM catalog_item_aliases
+       WHERE catalog_item_id = $1 AND alias_type = 'SEARCH_TERM' ORDER BY normalized_alias`,
+      [catalogItemId]
+    ),
+    client.query(
+      `SELECT f.label, v.value
+       FROM catalog_item_field_values v
+       JOIN category_field_definitions f ON f.id = v.field_definition_id
+       WHERE v.catalog_item_id = $1
+       ORDER BY f.label`,
+      [catalogItemId]
+    ),
+  ]);
+  const item = itemRes.rows[0];
+  const snap = {};
+  for (const col of CATALOG_AUDITED_COLUMNS) {
+    const v = item[col];
+    snap[col] = CATALOG_MONEY_COLUMNS.includes(col) && v !== null ? Number(v) : v;
+  }
+  // Readable forms for the History dialog: "UPC 711719541028", with a
+  // non-manual source/provider appended so a source-only change still shows.
+  snap.identifiers = identRes.rows.map(r => {
+    const origin = r.source && r.source !== 'MANUAL' ? ` [${[r.source, r.provider].filter(Boolean).join(': ')}]` : '';
+    return `${r.identifier_type} ${r.raw_value}${origin}`;
+  });
+  snap.aliases = aliasRes.rows.map(r => r.alias);
+  // Keyed by field label (not id) so history reads "Storage Capacity: 1 TB → 2 TB".
+  snap.field_values = Object.fromEntries(valueRes.rows.map(r => [r.label, r.value]));
+  return snap;
+}
+
+function diffCatalogSnapshots(before, after) {
+  const changes = {};
+  for (const key of Object.keys(after)) {
+    if (JSON.stringify(before?.[key] ?? null) !== JSON.stringify(after[key] ?? null)) {
+      changes[key] = { from: before?.[key] ?? null, to: after[key] ?? null };
+    }
+  }
+  return changes;
+}
+
+async function writeCatalogAudit(client, catalogItemId, action, changedFields, employeeId) {
+  await client.query(
+    `INSERT INTO catalog_item_audit (catalog_item_id, action, changed_fields, performed_by)
+     VALUES ($1, $2, $3, $4)`,
+    [catalogItemId, action, JSON.stringify(changedFields), employeeId]
+  );
+}
+
+// Full Catalog Item for the editor: item + category + identifiers + aliases +
+// Catalog-scope field definitions with their current values + pricing.
+// Historical intelligence (On Hand, averages, last sold…) is NOT included —
+// it's a separate, later concern and must never be mixed into catalog data.
+async function loadCatalogItem(catalogItemId) {
+  const itemRes = await pool.query(
+    `SELECT ci.*,
+            c.name AS category_name, c.code AS category_code, c.division_id,
+            d.name AS division_name, co.name AS company_name,
+            im.label AS default_inventory_mode_label,
+            NULLIF(TRIM(CONCAT(ce.first_name, ' ', ce.last_name)), '') AS created_by_name,
+            NULLIF(TRIM(CONCAT(ue.first_name, ' ', ue.last_name)), '') AS updated_by_name
+     FROM catalog_items ci
+     JOIN categories c  ON c.id = ci.category_id
+     JOIN divisions d   ON d.id = c.division_id
+     JOIN companies co  ON co.id = ci.company_id
+     LEFT JOIN inventory_modes im ON im.code = ci.default_inventory_mode
+     LEFT JOIN employees ce ON ce.employee_id = ci.created_by
+     LEFT JOIN employees ue ON ue.employee_id = ci.updated_by
+     WHERE ci.id = $1`,
+    [catalogItemId]
+  );
+  if (!itemRes.rows.length) return null;
+  const item = itemRes.rows[0];
+
+  const [identRes, aliasRes, valueMap, catalogFields, linkedRes, imageRes] = await Promise.all([
+    pool.query(
+      `SELECT id, identifier_type, raw_value, normalized_value, is_active, source, provider, created_at, updated_at
+       FROM catalog_item_identifiers WHERE catalog_item_id = $1
+       ORDER BY is_active DESC, identifier_type, id`,
+      [catalogItemId]
+    ),
+    pool.query(
+      `SELECT id, alias, normalized_alias, alias_type, is_active, created_at
+       FROM catalog_item_aliases WHERE catalog_item_id = $1 ORDER BY id`,
+      [catalogItemId]
+    ),
+    loadCatalogFieldValueMap(pool, catalogItemId),
+    getCatalogScopeFields(item.category_id),
+    pool.query(
+      `SELECT (SELECT COUNT(*) FROM hardgoods WHERE catalog_item_id = $1)
+            + (SELECT COUNT(*) FROM jewelry   WHERE catalog_item_id = $1) AS n`,
+      [catalogItemId]
+    ),
+    pool.query(
+      `SELECT i.id, i.image_url, i.is_primary, i.source, i.source_url, i.provider, i.created_at,
+              NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS uploaded_by_name
+       FROM catalog_item_images i
+       LEFT JOIN employees e ON e.employee_id = i.uploaded_by
+       WHERE i.catalog_item_id = $1
+       ORDER BY i.is_primary DESC, i.created_at DESC, i.id DESC`,
+      [catalogItemId]
+    ),
+  ]);
+
+  const fieldValues = catalogFields.map(f => ({
+    field_definition_id: f.field_definition_id,
+    field_key: f.field_key,
+    label: f.label_override || f.field_label,
+    data_type: f.data_type,
+    allowed_values: f.allowed_values,
+    allow_free_type: f.allow_free_type,
+    unit_of_measure: f.unit_of_measure,
+    required_at: f.required_at,
+    default_value: f.default_value,
+    help_text: f.help_text,
+    display_order: f.display_order,
+    origin_category_name: f.origin_category_name,
+    value: valueMap[f.field_definition_id] ?? null,
+  }));
+
+  const { suggested_cost, suggested_retail, retails_new_for, ...rest } = item;
+  const toMoney = (v) => (v === null ? null : Number(v));
+  return {
+    ...rest,
+    title: item.title_override || item.generated_title,
+    pricing: {
+      suggested_cost: toMoney(suggested_cost),
+      suggested_retail: toMoney(suggested_retail),
+      retails_new_for: toMoney(retails_new_for),
+    },
+    identifiers: identRes.rows,
+    aliases: aliasRes.rows,
+    field_values: fieldValues,
+    images: imageRes.rows,
+    primary_image: imageRes.rows.find(r => r.is_primary) || null,
+    summary: {
+      identifiers: identRes.rows.filter(r => r.is_active).length,
+      aliases: aliasRes.rows.filter(r => r.is_active).length,
+      fields_available: fieldValues.length,
+      fields_defined: fieldValues.filter(f => f.value !== null && f.value !== '').length,
+      linked_inventory: parseInt(linkedRes.rows[0].n, 10),
+    },
+  };
+}
+
+const sendCatalogError = (res, err, fallbackMessage) => {
+  if (err instanceof CatalogValidationError) {
+    return res.status(err.status).json({ error: err.message, ...(err.details ? { details: err.details } : {}) });
+  }
+  if (err.code === '23503') return res.status(400).json({ error: 'A referenced record (category, inventory mode or employee) does not exist' });
+  console.error(fallbackMessage, err);
+  return res.status(500).json({ error: fallbackMessage });
+};
+
+const parseCatalogItemId = (raw) => {
+  const id = parseInt(raw, 10);
+  if (!Number.isInteger(id) || id <= 0 || String(id) !== String(raw)) {
+    throw new CatalogValidationError('Invalid catalog item id');
+  }
+  return id;
+};
+
+// POST /api/catalog-items/generate-title — previews the generated title for
+// the editor's "Regenerate" button without saving. Body: { category_id,
+// make_brand, model_name, field_values?: [{ field_definition_id, value }] }
+app.post('/api/catalog-items/generate-title', async (req, res) => {
+  try {
+    const { category_id, make_brand, model_name, field_values } = req.body;
+    if (!category_id) return res.status(400).json({ error: 'category_id is required' });
+    await assertCategoryExists(pool, category_id);
+    const valueByFieldId = Object.fromEntries(
+      (Array.isArray(field_values) ? field_values : [])
+        .map(fv => [parseInt(fv.field_definition_id, 10), serializeCatalogFieldValue(fv.value)])
+    );
+    res.json({ generated_title: await buildCatalogGeneratedTitle(category_id, make_brand, model_name, valueByFieldId) });
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to generate catalog item title');
+  }
+});
+
+// POST /api/catalog-items — create. Body: { category_id, make_brand, model_name,
+// title_override?, status? (DRAFT default), default_inventory_mode?, pricing?:
+// { suggested_cost, suggested_retail, retails_new_for }, internal_notes?,
+// identifiers?, aliases?, field_values?, employee_id }
+app.post('/api/catalog-items', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const b = req.body;
+    const employeeId = parseEmployeeId(b.employee_id);
+    const categoryId = parseInt(b.category_id, 10);
+    const makeBrand = trimOrNull(b.make_brand);
+    const modelName = trimOrNull(b.model_name);
+    const status = b.status ? String(b.status).toUpperCase() : 'DRAFT';
+    const mode = trimOrNull(b.default_inventory_mode);
+    const pricing = b.pricing || {};
+
+    if (!categoryId) throw new CatalogValidationError('Category is required');
+    if (!makeBrand) throw new CatalogValidationError('Make / Brand is required');
+    if (!modelName) throw new CatalogValidationError('Model Name is required');
+    if (!CATALOG_SETTABLE_STATUSES.includes(status)) {
+      throw new CatalogValidationError(`status must be one of: ${CATALOG_SETTABLE_STATUSES.join(', ')}`);
+    }
+
+    await client.query('BEGIN');
+    const category = await assertCategoryExists(client, categoryId);
+    if (!category.is_active) throw new CatalogValidationError('Cannot create a Catalog Item in an inactive category');
+    await assertInventoryModeExists(client, mode);
+    const companyId = await getDefaultCompanyId(client);
+
+    // catalog_code (CAT-XXXXX) and friendly_code (CAT-{div}-{BRANDMODEL}) are
+    // assigned once by the trg_catalog_items_assign_codes trigger
+    // (catalog_items.sql, section 9). A concurrent insert could pick the same code
+    // between the trigger's check and commit, so a collision on either unique
+    // constraint is retried from a savepoint.
+    const insertParams = [
+      companyId, categoryId, status, makeBrand, modelName,
+      trimOrNull(b.title_override), mode,
+      parseCatalogMoney(pricing.suggested_cost, 'Suggested Cost') ?? null,
+      parseCatalogMoney(pricing.suggested_retail, 'Suggested Retail') ?? null,
+      parseCatalogMoney(pricing.retails_new_for, 'Retails New For') ?? null,
+      trimOrNull(b.internal_notes), employeeId,
+    ];
+    let catalogItemId;
+    for (let attempt = 1; ; attempt++) {
+      await client.query('SAVEPOINT catalog_insert');
+      try {
+        const inserted = await client.query(
+          `INSERT INTO catalog_items
+             (company_id, category_id, status, make_brand, model_name, title_override,
+              default_inventory_mode, suggested_cost, suggested_retail, retails_new_for, internal_notes,
+              created_by, updated_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
+           RETURNING id`,
+          insertParams
+        );
+        catalogItemId = inserted.rows[0].id;
+        await client.query('RELEASE SAVEPOINT catalog_insert');
+        break;
+      } catch (err) {
+        const codeCollision = err.code === '23505'
+          && ['catalog_items_catalog_code_key', 'uq_catalog_items_friendly_code'].includes(err.constraint);
+        if (!codeCollision || attempt >= 5) throw err;
+        await client.query('ROLLBACK TO SAVEPOINT catalog_insert');
+      }
+    }
+
+    if (b.field_values !== undefined) await saveCatalogFieldValues(client, catalogItemId, categoryId, b.field_values);
+    if (b.identifiers !== undefined) await saveCatalogIdentifiers(client, catalogItemId, companyId, b.identifiers);
+    if (b.aliases !== undefined) await saveCatalogAliases(client, catalogItemId, b.aliases);
+
+    const generatedTitle = await buildCatalogGeneratedTitle(
+      categoryId, makeBrand, modelName, await loadCatalogFieldValueMap(client, catalogItemId)
+    );
+    await client.query('UPDATE catalog_items SET generated_title = $1 WHERE id = $2', [generatedTitle, catalogItemId]);
+
+    if (status === 'ACTIVE') await assertNoActiveIdentifierConflicts(client, catalogItemId);
+
+    await writeCatalogAudit(client, catalogItemId, 'CREATE',
+      diffCatalogSnapshots({}, await snapshotCatalogItem(client, catalogItemId)), employeeId);
+
+    await client.query('COMMIT');
+    res.status(201).json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to create catalog item');
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// CATALOG SEARCH (doc §9/§10/§13) — server-side, indexed, search-first.
+// Used by Intake (Find Matching Item) and the Catalog Manager.
+// mode=auto (default, Intake): 0) exact staff/catalog code (CAT-…)
+//   1) exact identifier (UPC/EAN/model/other, normalized)
+//   2) manufacturer-model prefix  3) ranked keyword (title + aliases)
+// mode=identifier | model | keyword: Catalog Manager's explicit "Search by".
+// No search text + a category / make filter = Category browse; the Catalog
+// Manager may also browse everything (browse_all=true), always paginated.
+// Returns a lightweight page (no intelligence); the client loads the full
+// item via GET /api/catalog-items/:id after selection.
+// Status: Active only by default (Intake). The Catalog Manager passes
+// status=ACTIVE|INACTIVE|DRAFT|MERGED|ALL; include_inactive=true is kept.
+// ============================================================
+
+const CATALOG_SEARCH_DEFAULT_PAGE_SIZE = 25;
+const CATALOG_SEARCH_MAX_PAGE_SIZE = 100;
+const CATALOG_SEARCH_MODES = ['auto', 'identifier', 'model', 'keyword'];
+const CATALOG_STATUS_FILTERS = {
+  ACTIVE: ['ACTIVE'],
+  INACTIVE: ['INACTIVE'],
+  DRAFT: ['DRAFT'],
+  MERGED: ['MERGED'],
+  ALL: ['DRAFT', 'ACTIVE', 'INACTIVE', 'MERGED'],
+};
+const CATALOG_TITLE_SORT = 'lower(COALESCE(ci.title_override, ci.generated_title, ci.model_name)), ci.id';
+const CATALOG_SORTS = {
+  best_match: `m.score DESC, ${CATALOG_TITLE_SORT}`,
+  title: CATALOG_TITLE_SORT,
+  updated: 'ci.updated_at DESC, ci.id',
+};
+
+// Must match the idx_catalog_items_title_fts expression exactly.
+const CATALOG_TITLE_TSVECTOR = `to_tsvector('simple',
+  coalesce(ci.title_override, '') || ' ' || coalesce(ci.generated_title, '') || ' ' ||
+  coalesce(ci.make_brand, '') || ' ' || coalesce(ci.model_name, ''))`;
+
+// Every typed word becomes a prefix term, all required ("ps5 disc" → ps5:* & disc:*).
+function buildCatalogTsQuery(q) {
+  const tokens = String(q).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).slice(0, 8);
+  return tokens.length ? tokens.map(t => `${t}:*`).join(' & ') : null;
+}
+
+async function catalogSearchScope(query) {
+  const categoryId = query.category_id ? parseInt(query.category_id, 10) : null;
+  const divisionId = query.division_id ? parseInt(query.division_id, 10) : null;
+  let categoryIds = null;
+  if (categoryId) {
+    // Browsing a category includes everything beneath it.
+    categoryIds = [categoryId, ...(await getDescendantCategoryIds(categoryId))];
+  } else if (divisionId) {
+    // e.g. Hardgoods intake only searches Hardgoods catalog items.
+    const divRes = await pool.query('SELECT id FROM categories WHERE division_id = $1', [divisionId]);
+    categoryIds = divRes.rows.map(r => r.id);
+  }
+
+  let statuses = query.include_inactive === 'true' ? ['ACTIVE', 'INACTIVE'] : ['ACTIVE'];
+  if (query.status) {
+    statuses = CATALOG_STATUS_FILTERS[String(query.status).toUpperCase()];
+    if (!statuses) {
+      throw new CatalogValidationError(`status must be one of: ${Object.keys(CATALOG_STATUS_FILTERS).join(', ')}`);
+    }
+  }
+
+  return {
+    companyId: await getDefaultCompanyId(pool),
+    statuses,
+    categoryIds,
+    makeBrand: trimOrNull(query.make_brand),
+  };
+}
+
+// WHERE fragment for the shared company/status/category/make filters on alias `ci`.
+function catalogScopeWhere(scope, params) {
+  params.push(scope.companyId);
+  let sql = `ci.company_id = $${params.length}`;
+  params.push(scope.statuses);
+  sql += ` AND ci.status = ANY($${params.length}::text[])`;
+  if (scope.categoryIds) {
+    params.push(scope.categoryIds);
+    sql += ` AND ci.category_id = ANY($${params.length}::int[])`;
+  }
+  if (scope.makeBrand) {
+    params.push(scope.makeBrand);
+    sql += ` AND lower(ci.make_brand) = lower($${params.length})`;
+  }
+  return sql;
+}
+
+// Runs one search step. `matchesSql` must return (id, score) rows — one per
+// item — using `params`. Returns the requested page plus the total match
+// count and the best score (window functions, computed before LIMIT).
+// Plain LIMIT/OFFSET pages: fine for the page sizes used here; very deep
+// admin paging would want keyset pagination (doc §10).
+async function runCatalogSearchPage(matchesSql, params, { sort, pageSize, offset }) {
+  params.push(pageSize, offset);
+  const result = await pool.query(
+    `WITH matches AS (${matchesSql})
+     SELECT m.id, m.score, MAX(m.score) OVER () AS max_score, COUNT(*) OVER () AS total
+     FROM matches m
+     JOIN catalog_items ci ON ci.id = m.id
+     ORDER BY ${CATALOG_SORTS[sort]}
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
+  );
+  return {
+    rows: result.rows,
+    total: result.rows.length ? parseInt(result.rows[0].total, 10) : 0,
+    maxScore: result.rows.length ? Number(result.rows[0].max_score) : 0,
+  };
+}
+
+// Code / identifier match → EXACT, model prefix → HIGH, keyword → relative to
+// the best keyword score in the whole result set. Browse has no strength.
+function catalogMatchStrength(matchType, score, maxScore) {
+  if (matchType === 'CODE' || matchType === 'IDENTIFIER') return 'EXACT';
+  if (matchType === 'MODEL_PREFIX') return 'HIGH';
+  if (matchType !== 'KEYWORD' || !maxScore) return null;
+  const ratio = Number(score) / maxScore;
+  return ratio >= 0.75 ? 'HIGH' : ratio >= 0.4 ? 'MEDIUM' : 'LOW';
+}
+
+async function hydrateCatalogSearchResults(ids) {
+  if (!ids.length) return [];
+  const result = await pool.query(
+    `SELECT ci.id, ci.catalog_code, ci.friendly_code, ci.status, ci.make_brand, ci.model_name,
+            COALESCE(ci.title_override, ci.generated_title, ci.model_name) AS title,
+            ci.category_id, c.name AS category_name, ci.default_inventory_mode,
+            ci.suggested_cost, ci.suggested_retail, ci.updated_at,
+            (SELECT image_url FROM catalog_item_images
+             WHERE catalog_item_id = ci.id AND is_primary LIMIT 1) AS primary_image_url,
+            COALESCE((
+              SELECT json_agg(json_build_object('identifier_type', x.identifier_type, 'raw_value', x.raw_value))
+              FROM (
+                SELECT identifier_type, raw_value FROM catalog_item_identifiers
+                WHERE catalog_item_id = ci.id AND is_active = true
+                ORDER BY (identifier_type IN ('UPC', 'EAN')) DESC, id
+                LIMIT 3
+              ) x
+            ), '[]') AS identifiers,
+            (SELECT COUNT(*) FROM catalog_item_identifiers
+             WHERE catalog_item_id = ci.id AND is_active = true AND identifier_type = 'MANUFACTURER_MODEL')::int AS model_count,
+            (SELECT COUNT(*) FROM catalog_item_identifiers
+             WHERE catalog_item_id = ci.id AND is_active = true AND identifier_type IN ('UPC', 'EAN'))::int AS upc_count
+     FROM catalog_items ci
+     JOIN categories c ON c.id = ci.category_id
+     WHERE ci.id = ANY($1::int[])`,
+    [ids]
+  );
+  const toMoney = (v) => (v === null ? null : Number(v));
+  const byId = Object.fromEntries(result.rows.map(r => [r.id, {
+    ...r, suggested_cost: toMoney(r.suggested_cost), suggested_retail: toMoney(r.suggested_retail),
+  }]));
+  return ids.map(id => byId[id]).filter(Boolean);
+}
+
+// GET /api/catalog-items/search?q=&mode=&division_id=&category_id=&make_brand=
+//     &status=&include_inactive=&browse_all=&sort=&page=&page_size=   (limit = page_size alias)
+app.get('/api/catalog-items/search', async (req, res) => {
+  try {
+    const startedAt = Date.now();
+    const q = String(req.query.q || '').trim();
+    const mode = CATALOG_SEARCH_MODES.includes(req.query.mode) ? req.query.mode : 'auto';
+    const sort = CATALOG_SORTS[req.query.sort] ? req.query.sort : 'best_match';
+    const pageSize = Math.min(
+      Math.max(parseInt(req.query.page_size || req.query.limit, 10) || CATALOG_SEARCH_DEFAULT_PAGE_SIZE, 1),
+      CATALOG_SEARCH_MAX_PAGE_SIZE
+    );
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const paging = { sort, pageSize, offset: (page - 1) * pageSize };
+    const scope = await catalogSearchScope(req.query);
+
+    const respond = async (matchType, found = { rows: [], total: 0, maxScore: 0 }) => {
+      const results = await hydrateCatalogSearchResults(found.rows.map(r => r.id));
+      const scoreById = Object.fromEntries(found.rows.map(r => [r.id, r.score]));
+      res.json({
+        match_type: matchType,
+        total: found.total,
+        page,
+        page_size: pageSize,
+        elapsed_ms: Date.now() - startedAt,
+        results: results.map(r => ({
+          ...r,
+          match_strength: catalogMatchStrength(matchType, scoreById[r.id], found.maxScore),
+        })),
+      });
+    };
+
+    // Browse needs an explicit category or make (a bare division would list the
+    // whole catalog, which Intake must never do) — or the Catalog Manager's
+    // explicit, paginated browse_all.
+    if (!q && !req.query.category_id && !scope.makeBrand && req.query.browse_all !== 'true') {
+      return respond(null);
+    }
+
+    if (q) {
+      const normalized = normalizeCatalogIdentifier(q);
+
+      // 0) Exact staff/catalog code (CAT-43867 / CAT-HG-FENDERSTRAT).
+      if (['auto', 'keyword'].includes(mode) && /^CAT-/i.test(q)) {
+        const params = [q.toUpperCase()];
+        const where = catalogScopeWhere(scope, params);
+        const found = await runCatalogSearchPage(
+          `SELECT ci.id, 1.0::float AS score FROM catalog_items ci
+           WHERE (ci.catalog_code = $1 OR ci.friendly_code = $1) AND ${where}`,
+          params, paging
+        );
+        if (found.total) return respond('CODE', found);
+      }
+
+      // 1) Exact identifier — UPC/EAN scans resolve here immediately.
+      //    auto: any type; identifier: UPC/EAN only; model: model numbers only.
+      if (normalized && mode !== 'keyword') {
+        const exactTypes = { identifier: ['UPC', 'EAN'], model: ['MANUFACTURER_MODEL'] }[mode] || null;
+        const params = [normalized];
+        let typeFilter = '';
+        if (exactTypes) {
+          params.push(exactTypes);
+          typeFilter = ` AND i.identifier_type = ANY($${params.length}::text[])`;
+        }
+        const where = catalogScopeWhere(scope, params);
+        const found = await runCatalogSearchPage(
+          `SELECT i.catalog_item_id AS id,
+                  MAX(CASE WHEN i.identifier_type IN ('UPC', 'EAN') THEN 1.0 ELSE 0.95 END)::float AS score
+           FROM catalog_item_identifiers i
+           JOIN catalog_items ci ON ci.id = i.catalog_item_id
+           WHERE i.normalized_value = $1 AND i.is_active = true AND i.company_id = ci.company_id${typeFilter}
+             AND ${where}
+           GROUP BY i.catalog_item_id`,
+          params, paging
+        );
+        if (found.total) return respond('IDENTIFIER', found);
+      }
+
+      // 2) Controlled model-number prefix: only for model-number-looking input
+      //    (3+ chars containing a digit), via the text_pattern_ops index.
+      if (['auto', 'model'].includes(mode) && normalized.length >= 3 && /\d/.test(normalized)) {
+        const params = [`${normalized.replace(/[\\%_]/g, '\\$&')}%`];
+        const where = catalogScopeWhere(scope, params);
+        const found = await runCatalogSearchPage(
+          `SELECT DISTINCT i.catalog_item_id AS id, 0.8::float AS score
+           FROM catalog_item_identifiers i
+           JOIN catalog_items ci ON ci.id = i.catalog_item_id
+           WHERE i.identifier_type = 'MANUFACTURER_MODEL' AND i.is_active = true
+             AND i.normalized_value LIKE $1 AND ${where}`,
+          params, paging
+        );
+        if (found.total) return respond('MODEL_PREFIX', found);
+      }
+
+      // 3) Ranked keyword search over title/make/model and aliases (full-text,
+      //    GIN-indexed). Title hits outrank alias hits.
+      const tsQuery = ['auto', 'keyword'].includes(mode) ? buildCatalogTsQuery(q) : null;
+      if (tsQuery) {
+        const params = [tsQuery];
+        const where = catalogScopeWhere(scope, params);
+        const found = await runCatalogSearchPage(
+          `SELECT id, MAX(rank)::float AS score FROM (
+             SELECT ci.id, ts_rank(${CATALOG_TITLE_TSVECTOR}, to_tsquery('simple', $1)) * 2 AS rank
+             FROM catalog_items ci
+             WHERE ${CATALOG_TITLE_TSVECTOR} @@ to_tsquery('simple', $1) AND ${where}
+             UNION ALL
+             SELECT ci.id, ts_rank(to_tsvector('simple', a.alias), to_tsquery('simple', $1)) AS rank
+             FROM catalog_item_aliases a
+             JOIN catalog_items ci ON ci.id = a.catalog_item_id
+             WHERE a.is_active = true AND to_tsvector('simple', a.alias) @@ to_tsquery('simple', $1) AND ${where}
+           ) hits
+           GROUP BY id`,
+          params, paging
+        );
+        if (found.total) return respond('KEYWORD', found);
+      }
+
+      return respond(null);
+    }
+
+    // Category → Make/Brand browse (or Catalog Manager browse_all): only the
+    // filtered subset, one page at a time.
+    const params = [];
+    const where = catalogScopeWhere(scope, params);
+    const found = await runCatalogSearchPage(
+      `SELECT ci.id, 0::float AS score FROM catalog_items ci WHERE ${where}`,
+      params, paging
+    );
+    return respond('BROWSE', found);
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to search catalog items');
+  }
+});
+
+// GET /api/catalog-items/makes?category_id= — distinct Make/Brand values among
+// searchable items in the category subtree, for the browse Make filter.
+app.get('/api/catalog-items/makes', async (req, res) => {
+  try {
+    const scope = await catalogSearchScope({ ...req.query, make_brand: undefined });
+    const params = [];
+    const where = catalogScopeWhere(scope, params);
+    const result = await pool.query(
+      `SELECT MIN(ci.make_brand) AS make_brand
+       FROM catalog_items ci
+       WHERE ${where} AND ci.make_brand IS NOT NULL
+       GROUP BY lower(ci.make_brand)
+       ORDER BY lower(MIN(ci.make_brand))
+       LIMIT 200`,
+      params
+    );
+    res.json(result.rows.map(r => r.make_brand));
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to load catalog makes');
+  }
+});
+
+// GET /api/catalog-items/:id — item + identifiers, aliases, Catalog field values, pricing, status
+app.get('/api/catalog-items/:id', async (req, res) => {
+  try {
+    const item = await loadCatalogItem(parseCatalogItemId(req.params.id));
+    if (!item) return res.status(404).json({ error: 'Catalog item not found' });
+    res.json(item);
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to fetch catalog item');
+  }
+});
+
+// GET /api/catalog-items/:id/history — audit trail, newest first
+app.get('/api/catalog-items/:id/history', async (req, res) => {
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const result = await pool.query(
+      `SELECT a.id, a.action, a.changed_fields, a.performed_by, a.performed_at,
+              NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS performed_by_name
+       FROM catalog_item_audit a
+       LEFT JOIN employees e ON e.employee_id = a.performed_by
+       WHERE a.catalog_item_id = $1
+       ORDER BY a.performed_at DESC, a.id DESC
+       LIMIT 200`,
+      [catalogItemId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to fetch catalog item history');
+  }
+});
+
+// PUT /api/catalog-items/:id — update. Like the Category Details PUT, every
+// provided key is a direct SET (undefined = keep current) so intentional
+// clears (e.g. blank pricing → NULL) work. identifiers / aliases are
+// replace-sets when provided; field_values upserts the submitted fields.
+// generated_title is server-owned and recomputed on every save from Make,
+// Model, the Category title template and Catalog field values (any
+// regenerate_title flag is ignored). Editing never touches linked inventory's
+// descriptive values; only a Category move reclassifies linked inventory.
+app.put('/api/catalog-items/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const b = req.body;
+    const employeeId = parseEmployeeId(b.employee_id);
+
+    await client.query('BEGIN');
+    const currentRes = await client.query('SELECT * FROM catalog_items WHERE id = $1 FOR UPDATE', [catalogItemId]);
+    if (!currentRes.rows.length) throw new CatalogValidationError('Catalog item not found', 404);
+    const current = currentRes.rows[0];
+    if (current.status === 'MERGED') throw new CatalogValidationError('Merged catalog items are read-only', 409);
+
+    const before = await snapshotCatalogItem(client, catalogItemId);
+    const pick = (key, value) => (value !== undefined ? value : current[key]);
+
+    const categoryId = b.category_id !== undefined ? parseInt(b.category_id, 10) : current.category_id;
+    if (!categoryId) throw new CatalogValidationError('Category is required');
+    const categoryChanged = categoryId !== current.category_id;
+    if (categoryChanged) {
+      const category = await assertCategoryExists(client, categoryId);
+      if (!category.is_active) throw new CatalogValidationError('Cannot move a Catalog Item into an inactive category');
+    }
+
+    const status = b.status !== undefined ? String(b.status).toUpperCase() : current.status;
+    if (status !== current.status && !CATALOG_SETTABLE_STATUSES.includes(status)) {
+      throw new CatalogValidationError(`status must be one of: ${CATALOG_SETTABLE_STATUSES.join(', ')}`);
+    }
+
+    const makeBrand = pick('make_brand', b.make_brand !== undefined ? trimOrNull(b.make_brand) : undefined);
+    const modelName = pick('model_name', b.model_name !== undefined ? trimOrNull(b.model_name) : undefined);
+    if (!makeBrand) throw new CatalogValidationError('Make / Brand is required');
+    if (!modelName) throw new CatalogValidationError('Model Name is required');
+
+    const mode = b.default_inventory_mode !== undefined ? trimOrNull(b.default_inventory_mode) : current.default_inventory_mode;
+    if (mode !== current.default_inventory_mode) await assertInventoryModeExists(client, mode);
+
+    const pricing = b.pricing || {};
+    const money = (key, label) => {
+      const parsed = parseCatalogMoney(pricing[key], label);
+      return parsed !== undefined ? parsed : current[key];
+    };
+
+    await client.query(
+      `UPDATE catalog_items
+       SET category_id            = $1,
+           status                 = $2,
+           make_brand             = $3,
+           model_name             = $4,
+           title_override         = $5,
+           default_inventory_mode = $6,
+           suggested_cost         = $7,
+           suggested_retail       = $8,
+           retails_new_for        = $9,
+           internal_notes         = $10
+       WHERE id = $11`,
+      [
+        categoryId, status, makeBrand, modelName,
+        b.title_override !== undefined ? trimOrNull(b.title_override) : current.title_override,
+        mode,
+        money('suggested_cost', 'Suggested Cost'),
+        money('suggested_retail', 'Suggested Retail'),
+        money('retails_new_for', 'Retails New For'),
+        b.internal_notes !== undefined ? trimOrNull(b.internal_notes) : current.internal_notes,
+        catalogItemId,
+      ]
+    );
+
+    if (b.field_values !== undefined) await saveCatalogFieldValues(client, catalogItemId, categoryId, b.field_values);
+    if (b.identifiers !== undefined) await saveCatalogIdentifiers(client, catalogItemId, current.company_id, b.identifiers);
+    if (b.aliases !== undefined) await saveCatalogAliases(client, catalogItemId, b.aliases);
+
+    // Generated title always follows its inputs (Make, Model, Category title
+    // template, Catalog field values) — recomputed on every save.
+    const generatedTitle = await buildCatalogGeneratedTitle(
+      categoryId, makeBrand, modelName, await loadCatalogFieldValueMap(client, catalogItemId)
+    );
+    await client.query('UPDATE catalog_items SET generated_title = $1 WHERE id = $2', [generatedTitle, catalogItemId]);
+
+    if (status === 'ACTIVE') await assertNoActiveIdentifierConflicts(client, catalogItemId);
+
+    const after = await snapshotCatalogItem(client, catalogItemId);
+    const changes = diffCatalogSnapshots(before, after);
+
+    if (Object.keys(changes).length) {
+      // The old display title stays findable: keep it as a PREVIOUS_TITLE alias.
+      const oldTitle = current.title_override || current.generated_title;
+      const newTitle = after.title_override || after.generated_title;
+      if (oldTitle && newTitle && normalizeCatalogAlias(oldTitle) !== normalizeCatalogAlias(newTitle)) {
+        await client.query(
+          `INSERT INTO catalog_item_aliases (catalog_item_id, alias, normalized_alias, alias_type)
+           VALUES ($1, $2, $3, 'PREVIOUS_TITLE')
+           ON CONFLICT (catalog_item_id, normalized_alias) DO NOTHING`,
+          [catalogItemId, oldTitle, normalizeCatalogAlias(oldTitle)]
+        );
+      }
+
+      // Category is structural: linked inventory follows the new classification.
+      // Descriptive/snapshotted inventory values are intentionally NOT touched.
+      if (categoryChanged) {
+        const hg = await client.query(
+          'UPDATE hardgoods SET category_id = $1, updated_at = CURRENT_TIMESTAMP WHERE catalog_item_id = $2',
+          [categoryId, catalogItemId]
+        );
+        const jw = await client.query(
+          'UPDATE jewelry SET category_id = $1 WHERE catalog_item_id = $2',
+          [categoryId, catalogItemId]
+        );
+        changes.reclassified_inventory = { from: null, to: hg.rowCount + jw.rowCount };
+      }
+
+      await client.query(
+        'UPDATE catalog_items SET updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+        [employeeId, catalogItemId]
+      );
+      const action = categoryChanged ? 'CATEGORY_CHANGE'
+        : (Object.keys(changes).length === 1 && changes.status) ? 'STATUS_CHANGE'
+        : 'UPDATE';
+      await writeCatalogAudit(client, catalogItemId, action, changes, employeeId);
+    }
+
+    await client.query('COMMIT');
+    res.json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to update catalog item');
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/catalog-items/:id/status — Body: { status: DRAFT|ACTIVE|INACTIVE, employee_id }.
+// Inactive keeps the item and all history (excluded from normal Intake search
+// later). MERGED can't be set or left here — that belongs to the Merge workflow.
+app.patch('/api/catalog-items/:id/status', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const status = String(req.body.status || '').toUpperCase();
+    const employeeId = parseEmployeeId(req.body.employee_id);
+    if (!CATALOG_SETTABLE_STATUSES.includes(status)) {
+      throw new CatalogValidationError(`status must be one of: ${CATALOG_SETTABLE_STATUSES.join(', ')}`);
+    }
+
+    await client.query('BEGIN');
+    const currentRes = await client.query('SELECT status FROM catalog_items WHERE id = $1 FOR UPDATE', [catalogItemId]);
+    if (!currentRes.rows.length) throw new CatalogValidationError('Catalog item not found', 404);
+    const currentStatus = currentRes.rows[0].status;
+    if (currentStatus === 'MERGED') throw new CatalogValidationError('Merged catalog items are read-only', 409);
+
+    if (currentStatus !== status) {
+      if (status === 'ACTIVE') await assertNoActiveIdentifierConflicts(client, catalogItemId);
+      await client.query(
+        'UPDATE catalog_items SET status = $1, updated_by = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+        [status, employeeId, catalogItemId]
+      );
+      await writeCatalogAudit(client, catalogItemId, 'STATUS_CHANGE',
+        { status: { from: currentStatus, to: status } }, employeeId);
+    }
+
+    await client.query('COMMIT');
+    res.json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to update catalog item status');
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/catalog-items/:id/images — add a reference image (multipart:
+// image=<file>, source=UPLOAD|CAMERA, make_primary=true|false, employee_id).
+// make_primary (default true): the new image becomes primary; the previous
+// primary is kept (non-primary) so nothing is lost. make_primary=false adds an
+// additional image — unless the item has no primary yet, in which case it
+// becomes the primary anyway. Recorded in the Catalog Item's History.
+app.post('/api/catalog-items/:id/images', uploadCatalogImage, async (req, res) => {
+  const client = await pool.connect();
+  let writtenPath = null;
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    if (!req.file) throw new CatalogValidationError('Choose a JPG, PNG, WebP or GIF image');
+    const source = ['UPLOAD', 'CAMERA'].includes(String(req.body.source || '').toUpperCase())
+      ? String(req.body.source).toUpperCase()
+      : 'UPLOAD';
+    const employeeId = parseEmployeeId(req.body.employee_id);
+    const requestedPrimary = String(req.body.make_primary ?? 'true').toLowerCase() !== 'false';
+
+    await client.query('BEGIN');
+    const itemRes = await client.query('SELECT status FROM catalog_items WHERE id = $1 FOR UPDATE', [catalogItemId]);
+    if (!itemRes.rows.length) throw new CatalogValidationError('Catalog item not found', 404);
+    if (itemRes.rows[0].status === 'MERGED') throw new CatalogValidationError('Merged catalog items are read-only', 409);
+
+    const previousRes = await client.query(
+      'SELECT image_url FROM catalog_item_images WHERE catalog_item_id = $1 AND is_primary',
+      [catalogItemId]
+    );
+
+    const filename = `catalog-${catalogItemId}-${Date.now()}${CATALOG_IMAGE_EXTENSIONS[req.file.mimetype]}`;
+    writtenPath = path.join(catalogUploadDir, filename);
+    await fs.promises.writeFile(writtenPath, req.file.buffer);
+    const imageUrl = `/uploads/catalog/${filename}`;
+    const previousPrimaryUrl = previousRes.rows[0]?.image_url || null;
+    const makePrimary = requestedPrimary || !previousPrimaryUrl;
+
+    if (makePrimary) {
+      await client.query(
+        'UPDATE catalog_item_images SET is_primary = false WHERE catalog_item_id = $1 AND is_primary',
+        [catalogItemId]
+      );
+    }
+    await client.query(
+      `INSERT INTO catalog_item_images (catalog_item_id, image_url, is_primary, source, uploaded_by)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [catalogItemId, imageUrl, makePrimary, source, employeeId]
+    );
+    await client.query(
+      'UPDATE catalog_items SET updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [employeeId, catalogItemId]
+    );
+    await writeCatalogAudit(client, catalogItemId, 'UPDATE', makePrimary
+      ? { reference_image: { from: previousPrimaryUrl, to: imageUrl, source } }
+      : { additional_image: { from: null, to: imageUrl, source } },
+    employeeId);
+
+    await client.query('COMMIT');
+    writtenPath = null;
+    res.status(201).json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    // Don't leave an orphaned file behind when the database write failed.
+    if (writtenPath) fs.promises.unlink(writtenPath).catch(() => {});
+    sendCatalogError(res, err, 'Failed to save reference image');
+  } finally {
+    client.release();
   }
 });
 
@@ -16168,6 +17897,27 @@ app.post('/api/hardgoods', async (req, res) => {
 
     if (!item_id) return res.status(400).json({ error: 'item_id is required' });
 
+    // Inventory created from a Catalog Item keeps the catalog_item_id link and
+    // takes its Category from the Catalog Item (Category is structural, doc §4).
+    // Descriptive values arrive already snapshotted in `attributes` (catalog
+    // prefill + employee overrides) and are never read live from the catalog.
+    let resolvedCategoryId = category_id || null;
+    if (catalog_item_id) {
+      const catalogRes = await client.query(
+        'SELECT category_id, status FROM catalog_items WHERE id = $1',
+        [catalog_item_id]
+      );
+      if (!catalogRes.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Catalog item not found' });
+      }
+      if (catalogRes.rows[0].status === 'MERGED') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Catalog item has been merged; select the surviving catalog item' });
+      }
+      resolvedCategoryId = catalogRes.rows[0].category_id;
+    }
+
     const itemResult = await client.query(
       `INSERT INTO hardgoods (
          item_id, mode, category_id, catalog_item_id, stock_sku_id, vendor_id,
@@ -16185,7 +17935,7 @@ app.post('/api/hardgoods', async (req, res) => {
          $22,$23,$24,$25,$26,$27
        ) RETURNING *`,
       [
-        item_id, mode || 'PIECE', category_id || null, catalog_item_id || null,
+        item_id, mode || 'PIECE', resolvedCategoryId, catalog_item_id || null,
         stock_sku_id || null, vendor_id || null,
         long_desc || null, short_desc || null,
         condition || null, location || null, status || 'HOLD',
@@ -16240,6 +17990,45 @@ app.put('/api/hardgoods/:id', async (req, res) => {
       attributes
     } = req.body;
 
+    const currentRes = await client.query(
+      'SELECT category_id, catalog_item_id FROM hardgoods WHERE item_id = $1 FOR UPDATE',
+      [req.params.id]
+    );
+    if (!currentRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found' });
+    }
+    const current = currentRes.rows[0];
+
+    // Category/Catalog integrity: an item linked to a Catalog Item always takes
+    // its Category from that Catalog Item (Category is structural, doc §4). The
+    // COALESCE below means a null catalog_item_id keeps the current link.
+    let resolvedCategoryId = category_id ?? null;
+    const effectiveCatalogItemId = catalog_item_id ?? current.catalog_item_id;
+    if (effectiveCatalogItemId) {
+      const catalogRes = await client.query(
+        'SELECT category_id, status FROM catalog_items WHERE id = $1',
+        [effectiveCatalogItemId]
+      );
+      if (!catalogRes.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Catalog item not found' });
+      }
+      const catalog = catalogRes.rows[0];
+      const relinking = catalog_item_id != null && Number(catalog_item_id) !== current.catalog_item_id;
+      if (relinking && catalog.status === 'MERGED') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Catalog item has been merged; select the surviving catalog item' });
+      }
+      if (category_id != null && Number(category_id) !== catalog.category_id) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'Category must match the linked catalog item. Move the catalog item to another category instead.',
+        });
+      }
+      resolvedCategoryId = catalog.category_id;
+    }
+
     const result = await client.query(
       `UPDATE hardgoods SET
          mode                = COALESCE($1,  mode),
@@ -16273,7 +18062,7 @@ app.put('/api/hardgoods/:id', async (req, res) => {
        WHERE item_id = $28
        RETURNING *`,
       [
-        mode, category_id, catalog_item_id, stock_sku_id, vendor_id,
+        mode, resolvedCategoryId, catalog_item_id, stock_sku_id, vendor_id,
         long_desc, short_desc, condition, location, status,
         cost_price, retail_price, serial_number, quantity, bucket_value,
         processing_status, processing_queue, current_location_id,

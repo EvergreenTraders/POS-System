@@ -37,6 +37,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import { useSnackbar } from 'notistack';
 import config from '../config';
+import { ImageFileInput } from '../components/CameraCaptureDialog';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -533,22 +534,16 @@ function HardgoodsEstimator() {
 
             <Button variant="outlined" component="label" startIcon={<AddIcon />} fullWidth sx={{ mb: 2 }}>
               Add Photos
-              <input
-                type="file"
-                hidden
+              <ImageFileInput
                 multiple
-                accept="image/*"
-                onChange={e => {
-                  const files = Array.from(e.target.files);
-                  if (files.length) {
-                    const newImgs = files.map((file, i) => ({
-                      url: URL.createObjectURL(file),
-                      file,
-                      isPrimary: form.images.length === 0 && i === 0,
-                    }));
-                    setField('images', [...form.images, ...newImgs]);
-                  }
-                  e.target.value = '';
+                readAsDataUrl={false}
+                onSelect={results => {
+                  const newImgs = results.map(({ file }, i) => ({
+                    url: URL.createObjectURL(file),
+                    file,
+                    isPrimary: form.images.length === 0 && i === 0,
+                  }));
+                  setField('images', [...form.images, ...newImgs]);
                 }}
               />
             </Button>

@@ -43,6 +43,7 @@ import { styled } from '@mui/material/styles';
 import axios from 'axios';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
+import { ImageFileInput } from '../components/CameraCaptureDialog';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -1218,8 +1219,8 @@ const handleTabChange = (event, newValue) => {
     }));
   };
 
-  const handleLogoUpload = (event) => {
-    const file = event.target.files[0];
+  // From the shared ImageFileInput: { file, dataUrl }.
+  const handleLogoUpload = ({ file, dataUrl }) => {
     if (file) {
       // Validate file type
       if (!file.type.startsWith('image/')) {
@@ -1242,13 +1243,7 @@ const handleTabChange = (event, newValue) => {
       }
 
       setLogoFile(file);
-
-      // Create preview
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLogoPreview(reader.result);
-      };
-      reader.readAsDataURL(file);
+      setLogoPreview(dataUrl);
 
       // Auto-save when logo is uploaded
       setTimeout(() => {
@@ -2948,12 +2943,7 @@ const handleTabChange = (event, newValue) => {
                       startIcon={<UploadIcon />}
                     >
                       Upload Logo
-                      <input
-                        type="file"
-                        hidden
-                        accept="image/*"
-                        onChange={handleLogoUpload}
-                      />
+                      <ImageFileInput onSelect={([picked]) => handleLogoUpload(picked)} />
                     </Button>
                     {logoPreview && (
                       <Button

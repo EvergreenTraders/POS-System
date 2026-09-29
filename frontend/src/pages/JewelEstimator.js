@@ -35,6 +35,7 @@ import config from '../config';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 import MetalEstimator from './MetalEstimator';
+import { CameraView, ImageFileInput } from '../components/CameraCaptureDialog';
 import GemEstimator from './GemEstimator';
 import EditIcon from '@mui/icons-material/Edit';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
@@ -1278,9 +1279,6 @@ function JewelEstimator({
   };
 
   const [showCamera, setShowCamera] = useState(false);
-  const videoRef = React.useRef(null);
-  const [stream, setStream] = useState(null);
-  const [isVideoReady, setIsVideoReady] = useState(false);
   const [currentShapeIndex, setCurrentShapeIndex] = useState(0);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
@@ -1410,8 +1408,9 @@ function JewelEstimator({
     }
   };
 
-  const handleFileUpload = (event) => {
-    const files = Array.from(event.target.files);
+  // Picked via the shared ImageFileInput (results: [{ file }]).
+  const handleFileUpload = (results) => {
+    const files = results.map(r => r.file);
     const newImages = files.map((file, index) => ({
       file,
       url: URL.createObjectURL(file),
@@ -1428,95 +1427,21 @@ function JewelEstimator({
     });
   };
 
-  const startCamera = async () => {
-    setIsVideoReady(false); // Reset video ready state
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        } 
-      });
-      setStream(mediaStream);
-      setShowCamera(true);
-    } catch (err) {
-      console.error("Error accessing camera:", err);
-      alert("Could not access camera. Please make sure you have given permission.");
-    }
-  };
+  // Inline camera = shared CameraView (it starts/stops the stream itself).
+  const startCamera = () => setShowCamera(true);
+  const stopCamera = () => setShowCamera(false);
 
-  const stopCamera = () => {
-    setIsVideoReady(false);
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setStream(null);
-    setShowCamera(false);
-  };
-
-  // Effect to assign stream to video element when stream changes
-  useEffect(() => {
-    if (stream && videoRef.current) {
-      videoRef.current.srcObject = stream;
-
-      // Set video ready when video can play
-      const handleCanPlay = () => {
-        setIsVideoReady(true);
-        console.log('Camera video is ready');
+  const captureImage = ({ file }) => {
+    setImages(prev => {
+      const newImage = {
+        file,
+        url: URL.createObjectURL(file),
+        type: 'capture',
+        isPrimary: prev.length === 0 // Set as primary if it's the first image
       };
-
-      videoRef.current.addEventListener('canplay', handleCanPlay);
-
-      // Cleanup
-      return () => {
-        if (videoRef.current) {
-          videoRef.current.removeEventListener('canplay', handleCanPlay);
-        }
-      };
-    }
-  }, [stream]);
-
-  const captureImage = () => {
-    if (!videoRef.current || !isVideoReady) {
-      console.log("Video ref:", videoRef.current, "Ready:", isVideoReady);
-      alert("Camera is not ready yet. Please wait a moment.");
-      return;
-    }
-
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth || 1280;
-      canvas.height = videoRef.current.videoHeight || 720;
-      
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      
-      canvas.toBlob(blob => {
-        if (!blob) {
-          alert("Failed to capture image. Please try again.");
-          return;
-        }
-        const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-
-        setImages(prev => {
-          const newImage = {
-            file,
-            url: URL.createObjectURL(file),
-            type: 'capture',
-            isPrimary: prev.length === 0 // Set as primary if it's the first image
-          };
-          return [...prev, newImage];
-        });
-        stopCamera();
-      }, 'image/jpeg', 0.8);
-    } catch (err) {
-      console.error("Error capturing image:", err);
-      alert("Failed to capture image. Please try again.");
-    }
+      return [...prev, newImage];
+    });
+    stopCamera();
   };
 
   const handleExactColorChange = (event, newValue) => {
@@ -2043,13 +1968,7 @@ function JewelEstimator({
                 sx={{ flex: 1 }}
               >
                 Upload
-                <input
-                  type="file"
-                  hidden
-                  accept="image/*"
-                  multiple
-                  onChange={handleFileUpload}
-                />
+                <ImageFileInput multiple readAsDataUrl={false} onSelect={handleFileUpload} />
               </Button>
               <Button
                 variant="outlined"
@@ -2063,24 +1982,14 @@ function JewelEstimator({
 
             {/* Camera Preview */}
             {showCamera && (
-              <Box sx={{ position: 'relative', mb: 2 }}>
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  style={{ width: '100%', borderRadius: '8px' }}
-                />
-                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
-                  <Button
-                    variant="contained"
-                    onClick={captureImage}
-                    startIcon={<PhotoCamera />}
-                    size="small"
-                  >
-                    Capture
-                  </Button>
-                </Box>
-              </Box>
+              <CameraView
+                resolution={{ width: 1280, height: 720 }}
+                quality={0.8}
+                fileNamePrefix="capture"
+                onCapture={captureImage}
+                videoStyle={{ borderRadius: 8 }}
+                sx={{ position: 'relative', mb: 2 }}
+              />
             )}
 
             {/* Image Gallery */}

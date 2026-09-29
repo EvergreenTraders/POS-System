@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Container, Typography, Box, Button, TextField, Dialog, DialogTitle,
   DialogContent, DialogActions, Table, TableBody, TableCell,
@@ -12,6 +12,7 @@ import { Add as AddIcon, Edit as EditIcon, FilterList as FilterListIcon,
   History as HistoryIcon, Link as LinkIcon } from '@mui/icons-material';
 import CustomerReporting from './CustomerReporting';
 import LinkedAccountsManager from '../components/LinkedAccountsManager';
+import CameraCaptureDialog from '../components/CameraCaptureDialog';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -33,8 +34,6 @@ function bufferToDataUrl(bufferObj) {
 const CustomerManager = () => {
   // Define all state variables first
   const [showCamera, setShowCamera] = useState(false);
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
   const navigate = useNavigate();
   const location = useLocation();
   const { setCustomer, addToCart, cartItems } = useCart();
@@ -110,19 +109,6 @@ const CustomerManager = () => {
   // State for column preferences
   const [columnPreferences, setColumnPreferences] = useState({});
 
-  // Camera effect
-  useEffect(() => {
-    if (showCamera) {
-      startCamera();
-    } else {
-      stopCamera();
-    }
-    // Cleanup on unmount
-    return () => {
-      stopCamera();
-    };
-    // eslint-disable-next-line
-  }, [showCamera]);
 
   // Fetch customers on component mount or when page/filters change
   useEffect(() => {
@@ -214,44 +200,10 @@ const CustomerManager = () => {
     }
   };
 
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-    } catch (err) {
-      alert('Unable to access camera.');
-      setShowCamera(false);
-    }
-  };
-
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  };
-
-  const captureImage = () => {
-    if (!videoRef.current) return;
-    const video = videoRef.current;
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 320;
-    canvas.height = video.videoHeight || 240;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob(blob => {
-      if (blob) {
-        const file = new File([blob], `customer-photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
-        setFormData(prev => ({ ...prev, image: file }));
-        setShowCamera(false);
-      }
-    }, 'image/jpeg', 0.9);
+  // Camera (start/stop/capture) is the shared CameraCaptureDialog.
+  const captureImage = ({ file }) => {
+    setFormData(prev => ({ ...prev, image: file }));
+    setShowCamera(false);
   };
 
   // State declarations have been moved to the beginning of the component
@@ -1233,30 +1185,15 @@ const CustomerManager = () => {
 )}
 
 {/* Camera Dialog */}
-<Dialog open={showCamera} onClose={() => { stopCamera(); setShowCamera(false); }} maxWidth="xs" fullWidth>
-  <DialogTitle>Capture Photo</DialogTitle>
-  <DialogContent>
-    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        style={{ width: '100%', maxHeight: 240, background: '#222', borderRadius: 8 }}
-      />
-      <Button
-        variant="contained"
-        color="primary"
-        sx={{ mt: 2 }}
-        onClick={captureImage}
-      >
-        Capture
-      </Button>
-    </Box>
-  </DialogContent>
-  <DialogActions>
-    <Button onClick={() => { stopCamera(); setShowCamera(false); }}>Cancel</Button>
-  </DialogActions>
-</Dialog>
+<CameraCaptureDialog
+  open={showCamera}
+  title="Capture Photo"
+  facingMode="user"
+  maxWidth="xs"
+  fileNamePrefix="customer-photo"
+  onClose={() => setShowCamera(false)}
+  onCapture={captureImage}
+/>
                 </Grid>
                 {/* Main Fields on the right */}
                 <Grid item xs={12} sm={9} md={9}>

@@ -1186,13 +1186,22 @@ function Checkout() {
                   short_desc: item.short_desc || item.description || null,
                   long_desc: item.long_desc || null,
                   category_id: item.category_id || null,
+                  // Inventory snapshot from intake: the link back to the Catalog
+                  // Item plus the resolved field values (catalog prefill +
+                  // employee overrides + inventory fields) as this record's own
+                  // attributes, so later catalog edits never rewrite it.
+                  catalog_item_id: item.catalog_item_id || null,
+                  attributes: Array.isArray(item.attributes)
+                    ? item.attributes.filter(a => a && a.field_key).map(a => ({ field_key: a.field_key, field_value: a.field_value }))
+                    : [],
+                  serial_number: item.serial_number || item.serial || null,
                   condition: item.condition || null,
                   source: item.source || 'CUSTOMER_PURCHASE',
                   part_number: item.part_number || null,
                   cost_price: item.buy_price || item.price || null,
                   retail_price: item.retail_price || null,
                   notes: item.notes || null,
-                  mode: 'PIECE',
+                  mode: ['PIECE', 'UNIT'].includes(item.mode) ? item.mode : 'PIECE',
                   status: 'HOLD',
                   processing_status: 'INTAKE_PENDING',
                   sellable_status: 'NOT_SELLABLE',
