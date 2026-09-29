@@ -56,6 +56,7 @@ import CheckIcon from '@mui/icons-material/Check';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { useSnackbar } from 'notistack';
 import config from '../config';
+import CategoryPricingTab from './CategoryPricingTab';
 
 const API = config.apiUrl;
 
@@ -1135,15 +1136,22 @@ function CategoryManager() {
           ) : (
             <>
               {/* Category header */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <Chip label={selected.division_code} size="small" color="primary" />
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>{selected.name}</Typography>
-                <Chip label={selected.code} size="small" variant="outlined" sx={{ fontFamily: 'monospace' }} />
-                {selected.numeric_code && (
-                  <Tooltip title="Unique numeric category code">
-                    <Chip label={`#${selected.numeric_code}`} size="small" variant="outlined" sx={{ fontFamily: 'monospace' }} />
-                  </Tooltip>
-                )}
+              <Box sx={{ mb: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <Typography variant="h5" sx={{ fontWeight: 600 }}>{selected.name}</Typography>
+                  <Chip size="small" label={selected.is_active === false ? 'Inactive' : 'Active'}
+                    color={selected.is_active === false ? 'default' : 'success'} variant="outlined" />
+                </Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Category Code: <Box component="span" sx={{ color: 'text.primary', fontFamily: 'monospace' }}>{selected.numeric_code || '—'}</Box>
+                  {' '}(<Box component="span" sx={{ fontFamily: 'monospace' }}>{selected.code}</Box>)
+                  <Box component="span" sx={{ mx: 1.5, color: 'divider' }}>|</Box>
+                  Parent: <Box component="span" sx={{ color: 'text.primary' }}>
+                    {flattenCategoryTree(tree).find(c => c.id === selected.parent_category_id)?.name || 'None (root)'}
+                  </Box>
+                  <Box component="span" sx={{ mx: 1.5, color: 'divider' }}>|</Box>
+                  Division: <Box component="span" sx={{ color: 'text.primary' }}>{selected.division_name}</Box>
+                </Typography>
               </Box>
 
               <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
@@ -1586,12 +1594,8 @@ function CategoryManager() {
                 </Box>
               )}
 
-              {/* ── Tab 4: Pricing (placeholder) ─────────────────────── */}
-              {tab === 4 && (
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', py: 6 }}>
-                  <Typography color="text.secondary">Pricing configuration is coming soon.</Typography>
-                </Box>
-              )}
+              {/* ── Tab 4: Pricing ──────────────────────────────────── */}
+              {tab === 4 && <CategoryPricingTab key={selected.id} category={selected} />}
             </>
           )}
         </Box>

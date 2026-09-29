@@ -16623,6 +16623,144 @@ app.post('/api/categories/:id/description-config/reset', async (req, res) => {
 });
 
 // ============================================================
+// CATEGORY PRICING — Category Manager "Pricing" tab. Category Buy / Pawn /
+// Trade % (applied to a Catalog Item's Suggested Cost, doc §7), intelligence
+// source priority, valuation and retail-suggestion logic. NULL = inherit from
+// the nearest ancestor category that sets it.
+// ============================================================
+
+const CATEGORY_PRICING_PCT_FIELDS = ['suggested_buy_pct', 'suggested_pawn_pct', 'suggested_trade_pct'];
+const CATEGORY_PRICING_FIELDS = [...CATEGORY_PRICING_PCT_FIELDS, 'source_priority', 'valuation_method', 'retail_logic'];
+const PRICING_SOURCES = ['STORE', 'COMPANY', 'NETWORK'];
+const PRICING_VALUATION_METHODS = ['AUTOMATIC'];
+const PRICING_RETAIL_LOGIC = ['CATALOG_THEN_INTELLIGENCE'];
+// Used when neither the category nor any ancestor sets a value. Percentages
+// have no default — a category must configure them before Buy/Pawn can be
+// calculated from Suggested Cost.
+const CATEGORY_PRICING_DEFAULTS = {
+  suggested_buy_pct: null,
+  suggested_pawn_pct: null,
+  suggested_trade_pct: null,
+  source_priority: PRICING_SOURCES,
+  valuation_method: 'AUTOMATIC',
+  retail_logic: 'CATALOG_THEN_INTELLIGENCE',
+};
+
+function toPricingSetting(row, field) {
+  const v = row?.[field];
+  if (v === null || v === undefined) return null;
+  return CATEGORY_PRICING_PCT_FIELDS.includes(field) ? Number(v) : v;
+}
+
+// { own, effective: { field: { value, source_category_id, source_category_name } } }
+async function resolveCategoryPricing(categoryId) {
+  const chain = await getCategoryAncestorChain(categoryId); // root-first … self-last
+  const rowsRes = await pool.query(
+    'SELECT * FROM category_pricing_settings WHERE category_id = ANY($1)',
+    [chain.map(c => c.id)]
+  );
+  const rowByCategory = Object.fromEntries(rowsRes.rows.map(r => [r.category_id, r]));
+  const ownRow = rowByCategory[categoryId] || null;
+
+  const effective = {};
+  for (const field of CATEGORY_PRICING_FIELDS) {
+    effective[field] = { value: CATEGORY_PRICING_DEFAULTS[field], source_category_id: null, source_category_name: null };
+    for (let i = chain.length - 1; i >= 0; i -= 1) { // nearest first
+      const value = toPricingSetting(rowByCategory[chain[i].id], field);
+      if (value !== null) {
+        effective[field] = { value, source_category_id: chain[i].id, source_category_name: chain[i].name };
+        break;
+      }
+    }
+  }
+
+  return {
+    own: Object.fromEntries(CATEGORY_PRICING_FIELDS.map(f => [f, toPricingSetting(ownRow, f)])),
+    effective,
+    updated_at: ownRow?.updated_at || null,
+  };
+}
+
+// GET /api/categories/:id/pricing
+app.get('/api/categories/:id/pricing', async (req, res) => {
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    const catRes = await pool.query('SELECT id FROM categories WHERE id = $1', [categoryId]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+    res.json(await resolveCategoryPricing(categoryId));
+  } catch (err) {
+    console.error('Error fetching category pricing:', err);
+    res.status(500).json({ error: 'Failed to fetch category pricing' });
+  }
+});
+
+// PUT /api/categories/:id/pricing — body: this category's own settings
+// (null / omitted = inherit), employee_id. A category with nothing of its own
+// left has its row removed so it inherits everything.
+app.put('/api/categories/:id/pricing', async (req, res) => {
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    const catRes = await pool.query('SELECT id FROM categories WHERE id = $1', [categoryId]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+
+    const b = req.body || {};
+    const values = {};
+    for (const field of CATEGORY_PRICING_PCT_FIELDS) {
+      const raw = b[field];
+      if (raw === null || raw === undefined || raw === '') { values[field] = null; continue; }
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || n > 200) {
+        return res.status(400).json({ error: `${field.replace(/_/g, ' ')} must be between 0 and 200` });
+      }
+      values[field] = Math.round(n * 100) / 100;
+    }
+    if (b.source_priority === null || b.source_priority === undefined) {
+      values.source_priority = null;
+    } else if (!Array.isArray(b.source_priority)
+      || b.source_priority.length !== PRICING_SOURCES.length
+      || !PRICING_SOURCES.every(s => b.source_priority.includes(s))) {
+      return res.status(400).json({ error: `source_priority must list each of ${PRICING_SOURCES.join(', ')} once` });
+    } else {
+      values.source_priority = b.source_priority;
+    }
+    for (const [field, allowed] of [['valuation_method', PRICING_VALUATION_METHODS], ['retail_logic', PRICING_RETAIL_LOGIC]]) {
+      const raw = b[field];
+      if (raw === null || raw === undefined || raw === '') { values[field] = null; continue; }
+      if (!allowed.includes(raw)) return res.status(400).json({ error: `${field} must be one of: ${allowed.join(', ')}` });
+      values[field] = raw;
+    }
+
+    if (CATEGORY_PRICING_FIELDS.every(f => values[f] === null)) {
+      await pool.query('DELETE FROM category_pricing_settings WHERE category_id = $1', [categoryId]);
+    } else {
+      await pool.query(
+        `INSERT INTO category_pricing_settings
+           (category_id, suggested_buy_pct, suggested_pawn_pct, suggested_trade_pct,
+            source_priority, valuation_method, retail_logic, updated_by, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+         ON CONFLICT (category_id) DO UPDATE SET
+           suggested_buy_pct   = EXCLUDED.suggested_buy_pct,
+           suggested_pawn_pct  = EXCLUDED.suggested_pawn_pct,
+           suggested_trade_pct = EXCLUDED.suggested_trade_pct,
+           source_priority     = EXCLUDED.source_priority,
+           valuation_method    = EXCLUDED.valuation_method,
+           retail_logic        = EXCLUDED.retail_logic,
+           updated_by          = EXCLUDED.updated_by,
+           updated_at          = CURRENT_TIMESTAMP`,
+        [
+          categoryId, values.suggested_buy_pct, values.suggested_pawn_pct, values.suggested_trade_pct,
+          values.source_priority, values.valuation_method, values.retail_logic, parseEmployeeId(b.employee_id),
+        ]
+      );
+    }
+    res.json(await resolveCategoryPricing(categoryId));
+  } catch (err) {
+    console.error('Error saving category pricing:', err);
+    res.status(500).json({ error: 'Failed to save category pricing' });
+  }
+});
+
+// ============================================================
 // CATALOG ITEMS (Phase 1) — reusable, company-wide product definitions.
 // A Catalog Item is NOT inventory: hardgoods/jewelry rows link to it via
 // catalog_item_id but keep their own snapshotted values, so nothing here
