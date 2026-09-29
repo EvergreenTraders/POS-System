@@ -89,6 +89,7 @@ const HISTORY_FIELD_LABELS = {
   field_values: 'Catalog Field Values',
   reclassified_inventory: 'Inventory Reclassified',
   reference_image: 'Reference Image',
+  additional_image: 'Additional Image',
 };
 const HISTORY_ACTION_LABELS = {
   CREATE: 'Created',
@@ -281,7 +282,7 @@ function historyValue(key, v, categoryNameById) {
 // each changed field, everything else "old → new". A CREATE shows the values set.
 function describeHistoryChange(action, key, change, categoryNameById) {
   const { from, to } = change;
-  if (key === 'reference_image') {
+  if (key === 'reference_image' || key === 'additional_image') {
     return `${from ? 'replaced' : 'added'} (${(IMAGE_SOURCE_LABELS[change.source] || 'image').toLowerCase()})`;
   }
   if (action === 'CREATE' || key === 'reclassified_inventory') return historyValue(key, to, categoryNameById);

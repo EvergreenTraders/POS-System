@@ -17718,10 +17718,12 @@ app.patch('/api/catalog-items/:id/status', async (req, res) => {
   }
 });
 
-// POST /api/catalog-items/:id/images — set the reference image (multipart:
-// image=<file>, source=UPLOAD|CAMERA, employee_id). The new image becomes
-// primary; the previous primary is kept (non-primary) so nothing is lost.
-// Recorded in the Catalog Item's History.
+// POST /api/catalog-items/:id/images — add a reference image (multipart:
+// image=<file>, source=UPLOAD|CAMERA, make_primary=true|false, employee_id).
+// make_primary (default true): the new image becomes primary; the previous
+// primary is kept (non-primary) so nothing is lost. make_primary=false adds an
+// additional image — unless the item has no primary yet, in which case it
+// becomes the primary anyway. Recorded in the Catalog Item's History.
 app.post('/api/catalog-items/:id/images', uploadCatalogImage, async (req, res) => {
   const client = await pool.connect();
   let writtenPath = null;
@@ -17732,6 +17734,7 @@ app.post('/api/catalog-items/:id/images', uploadCatalogImage, async (req, res) =
       ? String(req.body.source).toUpperCase()
       : 'UPLOAD';
     const employeeId = parseEmployeeId(req.body.employee_id);
+    const requestedPrimary = String(req.body.make_primary ?? 'true').toLowerCase() !== 'false';
 
     await client.query('BEGIN');
     const itemRes = await client.query('SELECT status FROM catalog_items WHERE id = $1 FOR UPDATE', [catalogItemId]);
@@ -17747,23 +17750,28 @@ app.post('/api/catalog-items/:id/images', uploadCatalogImage, async (req, res) =
     writtenPath = path.join(catalogUploadDir, filename);
     await fs.promises.writeFile(writtenPath, req.file.buffer);
     const imageUrl = `/uploads/catalog/${filename}`;
+    const previousPrimaryUrl = previousRes.rows[0]?.image_url || null;
+    const makePrimary = requestedPrimary || !previousPrimaryUrl;
 
-    await client.query(
-      'UPDATE catalog_item_images SET is_primary = false WHERE catalog_item_id = $1 AND is_primary',
-      [catalogItemId]
-    );
+    if (makePrimary) {
+      await client.query(
+        'UPDATE catalog_item_images SET is_primary = false WHERE catalog_item_id = $1 AND is_primary',
+        [catalogItemId]
+      );
+    }
     await client.query(
       `INSERT INTO catalog_item_images (catalog_item_id, image_url, is_primary, source, uploaded_by)
-       VALUES ($1, $2, true, $3, $4)`,
-      [catalogItemId, imageUrl, source, employeeId]
+       VALUES ($1, $2, $3, $4, $5)`,
+      [catalogItemId, imageUrl, makePrimary, source, employeeId]
     );
     await client.query(
       'UPDATE catalog_items SET updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
       [employeeId, catalogItemId]
     );
-    await writeCatalogAudit(client, catalogItemId, 'UPDATE', {
-      reference_image: { from: previousRes.rows[0]?.image_url || null, to: imageUrl, source },
-    }, employeeId);
+    await writeCatalogAudit(client, catalogItemId, 'UPDATE', makePrimary
+      ? { reference_image: { from: previousPrimaryUrl, to: imageUrl, source } }
+      : { additional_image: { from: null, to: imageUrl, source } },
+    employeeId);
 
     await client.query('COMMIT');
     writtenPath = null;
