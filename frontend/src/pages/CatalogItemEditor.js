@@ -5,6 +5,7 @@ import {
   Alert,
   Box,
   Breadcrumbs,
+  Link,
   Button,
   ButtonGroup,
   Chip,
@@ -38,6 +39,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ImageNotSupportedOutlinedIcon from '@mui/icons-material/ImageNotSupportedOutlined';
 import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined';
 import MergeTypeIcon from '@mui/icons-material/MergeType';
@@ -47,6 +49,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { useSnackbar } from 'notistack';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
+import { flattenCategoryTree } from '../utils/categoryTree';
 
 const API = config.apiUrl;
 
@@ -93,6 +96,9 @@ const HISTORY_ACTION_LABELS = {
 
 const NOTES_MAX = 1000;
 
+// Where "back" goes from both the New Catalog Item page and an existing item.
+const CATALOG_MANAGER_PATH = '/catalog';
+
 const EMPTY_DRAFT = {
   category_id: '',
   make_brand: '',
@@ -137,23 +143,6 @@ function draftFromItem(item) {
   };
 }
 
-// Division → categories (depth-first, with depth for indentation and a
-// readable path for the selected value).
-function flattenCategoryTree(tree) {
-  const out = [];
-  tree.forEach(div => {
-    const walk = (nodes, depth, path) => {
-      nodes.forEach(n => {
-        const nodePath = [...path, n.name];
-        out.push({ id: n.id, name: n.name, is_active: n.is_active, depth, path: nodePath.join(' › '), division_id: div.id, division_name: div.name });
-        if (n.children?.length) walk(n.children, depth + 1, nodePath);
-      });
-    };
-    walk(div.categories || [], 0, []);
-  });
-  return out;
-}
-
 function SectionTitle({ children, sx }) {
   return <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1.5, ...sx }}>{children}</Typography>;
 }
@@ -193,8 +182,11 @@ function historyValue(key, v, categoryNameById) {
 
 // ─────────────────────────────────────────────────────────────────────────
 // Catalog Item Editor (Phase 1: General tab). Routes:
-//   /catalog/items/new   — create (optionally pre-filled by Duplicate)
-//   /catalog/items/:id   — edit
+//   /catalog/items/new   — New Catalog Item (Catalog Manager's "New Catalog
+//                          Item" button; optionally pre-filled by Duplicate)
+//   /catalog/items/:id   — existing item (Catalog Manager's "Open in Catalog
+//                          Item Editor")
+// Both lead back to the Catalog Manager (/catalog).
 // ─────────────────────────────────────────────────────────────────────────
 function CatalogItemEditorInner({ itemId, duplicate }) {
   const navigate = useNavigate();
@@ -503,9 +495,12 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
     <Box sx={{ p: 3, bgcolor: 'grey.50', minHeight: '100%' }}>
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} sx={{ mb: 1 }}>
-        {/* Catalog Manager / Catalog Items list screens are a later phase — shown as plain text. */}
-        <Typography variant="body2" color="text.secondary">Catalog Manager</Typography>
-        <Typography variant="body2" color="text.secondary">Catalog Items</Typography>
+        <Link component="button" variant="body2" underline="hover" onClick={() => navigate(CATALOG_MANAGER_PATH)}>
+          Catalog Manager
+        </Link>
+        <Link component="button" variant="body2" underline="hover" color="text.secondary" onClick={() => navigate(CATALOG_MANAGER_PATH)}>
+          Catalog Items
+        </Link>
         <Typography variant="body2" color="text.primary">{heading}</Typography>
       </Breadcrumbs>
 
@@ -522,6 +517,9 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
 
         <Box sx={{ flex: 1 }} />
 
+        <Button variant="text" startIcon={<ArrowBackIcon />} onClick={() => navigate(CATALOG_MANAGER_PATH)}>
+          Back to Catalog Manager
+        </Button>
         {!isNew && (
           <>
             <Button variant="outlined" startIcon={<HistoryIcon />} onClick={openHistory}>History</Button>

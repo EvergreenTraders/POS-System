@@ -17154,15 +17154,35 @@ app.post('/api/catalog-items', async (req, res) => {
 
 // ============================================================
 // CATALOG SEARCH (doc §9/§10/§13) — server-side, indexed, search-first.
-// Priority: 1) exact identifier (UPC/EAN/model/other, normalized)
-//           2) manufacturer-model prefix  3) ranked keyword (title + aliases)
-// No search text + a category / make filter = Category browse.
-// Returns a small, lightweight result set (no pricing/intelligence); the
-// client loads the full item via GET /api/catalog-items/:id after selection.
-// Active items only unless include_inactive=true (Draft/Merged never).
+// Used by Intake (Find Matching Item) and the Catalog Manager.
+// mode=auto (default, Intake): 0) exact staff/catalog code (CAT-…)
+//   1) exact identifier (UPC/EAN/model/other, normalized)
+//   2) manufacturer-model prefix  3) ranked keyword (title + aliases)
+// mode=identifier | model | keyword: Catalog Manager's explicit "Search by".
+// No search text + a category / make filter = Category browse; the Catalog
+// Manager may also browse everything (browse_all=true), always paginated.
+// Returns a lightweight page (no intelligence); the client loads the full
+// item via GET /api/catalog-items/:id after selection.
+// Status: Active only by default (Intake). The Catalog Manager passes
+// status=ACTIVE|INACTIVE|DRAFT|MERGED|ALL; include_inactive=true is kept.
 // ============================================================
 
-const CATALOG_SEARCH_MAX_LIMIT = 25;
+const CATALOG_SEARCH_DEFAULT_PAGE_SIZE = 25;
+const CATALOG_SEARCH_MAX_PAGE_SIZE = 100;
+const CATALOG_SEARCH_MODES = ['auto', 'identifier', 'model', 'keyword'];
+const CATALOG_STATUS_FILTERS = {
+  ACTIVE: ['ACTIVE'],
+  INACTIVE: ['INACTIVE'],
+  DRAFT: ['DRAFT'],
+  MERGED: ['MERGED'],
+  ALL: ['DRAFT', 'ACTIVE', 'INACTIVE', 'MERGED'],
+};
+const CATALOG_TITLE_SORT = 'lower(COALESCE(ci.title_override, ci.generated_title, ci.model_name)), ci.id';
+const CATALOG_SORTS = {
+  best_match: `m.score DESC, ${CATALOG_TITLE_SORT}`,
+  title: CATALOG_TITLE_SORT,
+  updated: 'ci.updated_at DESC, ci.id',
+};
 
 // Must match the idx_catalog_items_title_fts expression exactly.
 const CATALOG_TITLE_TSVECTOR = `to_tsvector('simple',
@@ -17187,9 +17207,18 @@ async function catalogSearchScope(query) {
     const divRes = await pool.query('SELECT id FROM categories WHERE division_id = $1', [divisionId]);
     categoryIds = divRes.rows.map(r => r.id);
   }
+
+  let statuses = query.include_inactive === 'true' ? ['ACTIVE', 'INACTIVE'] : ['ACTIVE'];
+  if (query.status) {
+    statuses = CATALOG_STATUS_FILTERS[String(query.status).toUpperCase()];
+    if (!statuses) {
+      throw new CatalogValidationError(`status must be one of: ${Object.keys(CATALOG_STATUS_FILTERS).join(', ')}`);
+    }
+  }
+
   return {
     companyId: await getDefaultCompanyId(pool),
-    statuses: query.include_inactive === 'true' ? ['ACTIVE', 'INACTIVE'] : ['ACTIVE'],
+    statuses,
     categoryIds,
     makeBrand: trimOrNull(query.make_brand),
   };
@@ -17212,12 +17241,46 @@ function catalogScopeWhere(scope, params) {
   return sql;
 }
 
+// Runs one search step. `matchesSql` must return (id, score) rows — one per
+// item — using `params`. Returns the requested page plus the total match
+// count and the best score (window functions, computed before LIMIT).
+// Plain LIMIT/OFFSET pages: fine for the page sizes used here; very deep
+// admin paging would want keyset pagination (doc §10).
+async function runCatalogSearchPage(matchesSql, params, { sort, pageSize, offset }) {
+  params.push(pageSize, offset);
+  const result = await pool.query(
+    `WITH matches AS (${matchesSql})
+     SELECT m.id, m.score, MAX(m.score) OVER () AS max_score, COUNT(*) OVER () AS total
+     FROM matches m
+     JOIN catalog_items ci ON ci.id = m.id
+     ORDER BY ${CATALOG_SORTS[sort]}
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
+  );
+  return {
+    rows: result.rows,
+    total: result.rows.length ? parseInt(result.rows[0].total, 10) : 0,
+    maxScore: result.rows.length ? Number(result.rows[0].max_score) : 0,
+  };
+}
+
+// Code / identifier match → EXACT, model prefix → HIGH, keyword → relative to
+// the best keyword score in the whole result set. Browse has no strength.
+function catalogMatchStrength(matchType, score, maxScore) {
+  if (matchType === 'CODE' || matchType === 'IDENTIFIER') return 'EXACT';
+  if (matchType === 'MODEL_PREFIX') return 'HIGH';
+  if (matchType !== 'KEYWORD' || !maxScore) return null;
+  const ratio = Number(score) / maxScore;
+  return ratio >= 0.75 ? 'HIGH' : ratio >= 0.4 ? 'MEDIUM' : 'LOW';
+}
+
 async function hydrateCatalogSearchResults(ids) {
   if (!ids.length) return [];
   const result = await pool.query(
     `SELECT ci.id, ci.catalog_code, ci.friendly_code, ci.status, ci.make_brand, ci.model_name,
             COALESCE(ci.title_override, ci.generated_title, ci.model_name) AS title,
             ci.category_id, c.name AS category_name, ci.default_inventory_mode,
+            ci.suggested_cost, ci.suggested_retail, ci.updated_at,
             COALESCE((
               SELECT json_agg(json_build_object('identifier_type', x.identifier_type, 'raw_value', x.raw_value))
               FROM (
@@ -17226,85 +17289,125 @@ async function hydrateCatalogSearchResults(ids) {
                 ORDER BY (identifier_type IN ('UPC', 'EAN')) DESC, id
                 LIMIT 3
               ) x
-            ), '[]') AS identifiers
+            ), '[]') AS identifiers,
+            (SELECT COUNT(*) FROM catalog_item_identifiers
+             WHERE catalog_item_id = ci.id AND is_active = true AND identifier_type = 'MANUFACTURER_MODEL')::int AS model_count,
+            (SELECT COUNT(*) FROM catalog_item_identifiers
+             WHERE catalog_item_id = ci.id AND is_active = true AND identifier_type IN ('UPC', 'EAN'))::int AS upc_count
      FROM catalog_items ci
      JOIN categories c ON c.id = ci.category_id
      WHERE ci.id = ANY($1::int[])`,
     [ids]
   );
-  const byId = Object.fromEntries(result.rows.map(r => [r.id, r]));
+  const toMoney = (v) => (v === null ? null : Number(v));
+  const byId = Object.fromEntries(result.rows.map(r => [r.id, {
+    ...r, suggested_cost: toMoney(r.suggested_cost), suggested_retail: toMoney(r.suggested_retail),
+  }]));
   return ids.map(id => byId[id]).filter(Boolean);
 }
 
-// GET /api/catalog-items/search?q=&division_id=&category_id=&make_brand=&include_inactive=&limit=
+// GET /api/catalog-items/search?q=&mode=&division_id=&category_id=&make_brand=
+//     &status=&include_inactive=&browse_all=&sort=&page=&page_size=   (limit = page_size alias)
 app.get('/api/catalog-items/search', async (req, res) => {
   try {
+    const startedAt = Date.now();
     const q = String(req.query.q || '').trim();
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || CATALOG_SEARCH_MAX_LIMIT, 1), CATALOG_SEARCH_MAX_LIMIT);
+    const mode = CATALOG_SEARCH_MODES.includes(req.query.mode) ? req.query.mode : 'auto';
+    const sort = CATALOG_SORTS[req.query.sort] ? req.query.sort : 'best_match';
+    const pageSize = Math.min(
+      Math.max(parseInt(req.query.page_size || req.query.limit, 10) || CATALOG_SEARCH_DEFAULT_PAGE_SIZE, 1),
+      CATALOG_SEARCH_MAX_PAGE_SIZE
+    );
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const paging = { sort, pageSize, offset: (page - 1) * pageSize };
     const scope = await catalogSearchScope(req.query);
 
-    // Browse needs an explicit category or make — a bare division alone would
-    // just list the whole catalog, which Intake must never do.
-    if (!q && !req.query.category_id && !scope.makeBrand) return res.json({ match_type: null, results: [] });
+    const respond = async (matchType, found = { rows: [], total: 0, maxScore: 0 }) => {
+      const results = await hydrateCatalogSearchResults(found.rows.map(r => r.id));
+      const scoreById = Object.fromEntries(found.rows.map(r => [r.id, r.score]));
+      res.json({
+        match_type: matchType,
+        total: found.total,
+        page,
+        page_size: pageSize,
+        elapsed_ms: Date.now() - startedAt,
+        results: results.map(r => ({
+          ...r,
+          match_strength: catalogMatchStrength(matchType, scoreById[r.id], found.maxScore),
+        })),
+      });
+    };
 
-    let matchType = null;
-    let ids = [];
+    // Browse needs an explicit category or make (a bare division would list the
+    // whole catalog, which Intake must never do) — or the Catalog Manager's
+    // explicit, paginated browse_all.
+    if (!q && !req.query.category_id && !scope.makeBrand && req.query.browse_all !== 'true') {
+      return respond(null);
+    }
 
     if (q) {
       const normalized = normalizeCatalogIdentifier(q);
 
-      // 1) Exact identifier — UPC/EAN scans resolve here immediately.
-      if (normalized) {
-        const params = [normalized];
+      // 0) Exact staff/catalog code (CAT-43867 / CAT-HG-FENDERSTRAT).
+      if (['auto', 'keyword'].includes(mode) && /^CAT-/i.test(q)) {
+        const params = [q.toUpperCase()];
         const where = catalogScopeWhere(scope, params);
-        params.push(limit);
-        const exact = await pool.query(
-          `SELECT i.catalog_item_id AS id, bool_or(i.identifier_type IN ('UPC', 'EAN')) AS is_barcode
+        const found = await runCatalogSearchPage(
+          `SELECT ci.id, 1.0::float AS score FROM catalog_items ci
+           WHERE (ci.catalog_code = $1 OR ci.friendly_code = $1) AND ${where}`,
+          params, paging
+        );
+        if (found.total) return respond('CODE', found);
+      }
+
+      // 1) Exact identifier — UPC/EAN scans resolve here immediately.
+      //    auto: any type; identifier: UPC/EAN only; model: model numbers only.
+      if (normalized && mode !== 'keyword') {
+        const exactTypes = { identifier: ['UPC', 'EAN'], model: ['MANUFACTURER_MODEL'] }[mode] || null;
+        const params = [normalized];
+        let typeFilter = '';
+        if (exactTypes) {
+          params.push(exactTypes);
+          typeFilter = ` AND i.identifier_type = ANY($${params.length}::text[])`;
+        }
+        const where = catalogScopeWhere(scope, params);
+        const found = await runCatalogSearchPage(
+          `SELECT i.catalog_item_id AS id,
+                  MAX(CASE WHEN i.identifier_type IN ('UPC', 'EAN') THEN 1.0 ELSE 0.95 END)::float AS score
            FROM catalog_item_identifiers i
            JOIN catalog_items ci ON ci.id = i.catalog_item_id
-           WHERE i.normalized_value = $1 AND i.is_active = true AND i.company_id = ci.company_id AND ${where}
-           GROUP BY i.catalog_item_id
-           ORDER BY is_barcode DESC, i.catalog_item_id
-           LIMIT $${params.length}`,
-          params
+           WHERE i.normalized_value = $1 AND i.is_active = true AND i.company_id = ci.company_id${typeFilter}
+             AND ${where}
+           GROUP BY i.catalog_item_id`,
+          params, paging
         );
-        if (exact.rows.length) {
-          matchType = 'IDENTIFIER';
-          ids = exact.rows.map(r => r.id);
-        }
+        if (found.total) return respond('IDENTIFIER', found);
       }
 
       // 2) Controlled model-number prefix: only for model-number-looking input
       //    (3+ chars containing a digit), via the text_pattern_ops index.
-      if (!ids.length && normalized.length >= 3 && /\d/.test(normalized)) {
+      if (['auto', 'model'].includes(mode) && normalized.length >= 3 && /\d/.test(normalized)) {
         const params = [`${normalized.replace(/[\\%_]/g, '\\$&')}%`];
         const where = catalogScopeWhere(scope, params);
-        params.push(limit);
-        const prefix = await pool.query(
-          `SELECT DISTINCT i.catalog_item_id AS id
+        const found = await runCatalogSearchPage(
+          `SELECT DISTINCT i.catalog_item_id AS id, 0.8::float AS score
            FROM catalog_item_identifiers i
            JOIN catalog_items ci ON ci.id = i.catalog_item_id
            WHERE i.identifier_type = 'MANUFACTURER_MODEL' AND i.is_active = true
-             AND i.normalized_value LIKE $1 AND ${where}
-           ORDER BY i.catalog_item_id
-           LIMIT $${params.length}`,
-          params
+             AND i.normalized_value LIKE $1 AND ${where}`,
+          params, paging
         );
-        if (prefix.rows.length) {
-          matchType = 'MODEL_PREFIX';
-          ids = prefix.rows.map(r => r.id);
-        }
+        if (found.total) return respond('MODEL_PREFIX', found);
       }
 
       // 3) Ranked keyword search over title/make/model and aliases (full-text,
       //    GIN-indexed). Title hits outrank alias hits.
-      const tsQuery = !ids.length ? buildCatalogTsQuery(q) : null;
+      const tsQuery = ['auto', 'keyword'].includes(mode) ? buildCatalogTsQuery(q) : null;
       if (tsQuery) {
         const params = [tsQuery];
         const where = catalogScopeWhere(scope, params);
-        params.push(limit);
-        const keyword = await pool.query(
-          `WITH hits AS (
+        const found = await runCatalogSearchPage(
+          `SELECT id, MAX(rank)::float AS score FROM (
              SELECT ci.id, ts_rank(${CATALOG_TITLE_TSVECTOR}, to_tsquery('simple', $1)) * 2 AS rank
              FROM catalog_items ci
              WHERE ${CATALOG_TITLE_TSVECTOR} @@ to_tsquery('simple', $1) AND ${where}
@@ -17313,34 +17416,25 @@ app.get('/api/catalog-items/search', async (req, res) => {
              FROM catalog_item_aliases a
              JOIN catalog_items ci ON ci.id = a.catalog_item_id
              WHERE a.is_active = true AND to_tsvector('simple', a.alias) @@ to_tsquery('simple', $1) AND ${where}
-           )
-           SELECT id, MAX(rank) AS rank FROM hits GROUP BY id
-           ORDER BY rank DESC, id
-           LIMIT $${params.length}`,
-          params
+           ) hits
+           GROUP BY id`,
+          params, paging
         );
-        if (keyword.rows.length) {
-          matchType = 'KEYWORD';
-          ids = keyword.rows.map(r => r.id);
-        }
+        if (found.total) return respond('KEYWORD', found);
       }
-    } else {
-      // Category → Make/Brand browse: only the filtered subset, limited.
-      const params = [];
-      const where = catalogScopeWhere(scope, params);
-      params.push(limit);
-      const browse = await pool.query(
-        `SELECT ci.id FROM catalog_items ci
-         WHERE ${where}
-         ORDER BY lower(COALESCE(ci.title_override, ci.generated_title, ci.model_name)), ci.id
-         LIMIT $${params.length}`,
-        params
-      );
-      matchType = 'BROWSE';
-      ids = browse.rows.map(r => r.id);
+
+      return respond(null);
     }
 
-    res.json({ match_type: matchType, results: await hydrateCatalogSearchResults(ids) });
+    // Category → Make/Brand browse (or Catalog Manager browse_all): only the
+    // filtered subset, one page at a time.
+    const params = [];
+    const where = catalogScopeWhere(scope, params);
+    const found = await runCatalogSearchPage(
+      `SELECT ci.id, 0::float AS score FROM catalog_items ci WHERE ${where}`,
+      params, paging
+    );
+    return respond('BROWSE', found);
   } catch (err) {
     sendCatalogError(res, err, 'Failed to search catalog items');
   }

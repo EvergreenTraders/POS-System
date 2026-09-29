@@ -273,9 +273,11 @@ function Sidebar() {
                 {isOpen && <ListItemText primary="Category Manager" />}
               </StyledListItem>
             </StyledLink>
-            <StyledLink to="/catalog/items/new">
-              <StyledListItem active={isActive('/catalog/items/new')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="New Catalog Item" />}
+            {/* Catalog Manager is the entry point; New Catalog Item and the item
+                editor are reached from it, so they stay highlighted under it. */}
+            <StyledLink to="/catalog">
+              <StyledListItem active={location.pathname === '/catalog' || location.pathname.startsWith('/catalog/')} sx={{ pl: 4 }}>
+                {isOpen && <ListItemText primary="Catalog Manager" />}
               </StyledListItem>
             </StyledLink>
           </List>
