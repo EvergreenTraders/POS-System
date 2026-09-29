@@ -61,10 +61,10 @@ export default function HardgoodsIntakeScreen({
   const catalogSource = editItem ? null : matchPrefill;
   const [linkedCatalog, setLinkedCatalog] = useState(() => {
     if (editItem?.catalog_item_id) {
-      return { id: editItem.catalog_item_id, catalog_code: editItem.catalog_code, title: editItem.catalog_title, pricing: editItem.catalog_pricing || null };
+      return { id: editItem.catalog_item_id, catalog_code: editItem.catalog_code, friendly_code: editItem.catalog_friendly_code, title: editItem.catalog_title, pricing: editItem.catalog_pricing || null };
     }
     if (catalogSource) {
-      return { id: catalogSource.id, catalog_code: catalogSource.catalog_code, title: catalogSource.title, pricing: catalogSource.pricing };
+      return { id: catalogSource.id, catalog_code: catalogSource.catalog_code, friendly_code: catalogSource.friendly_code, title: catalogSource.title, pricing: catalogSource.pricing };
     }
     return null;
   });
@@ -421,6 +421,7 @@ export default function HardgoodsIntakeScreen({
       // grouping/history; later catalog edits never rewrite this item.
       catalog_item_id: linkedCatalog?.id || null,
       catalog_code:    linkedCatalog?.catalog_code || null,
+      catalog_friendly_code: linkedCatalog?.friendly_code || null,
       catalog_title:   linkedCatalog?.title || null,
       catalog_pricing: linkedCatalog?.pricing || null,
       catalog_prefill: linkedCatalog ? catalogPrefill : {},
@@ -478,7 +479,8 @@ export default function HardgoodsIntakeScreen({
             <Typography variant="body2" color="text.secondary">Catalog Item:</Typography>
             {linkedCatalog ? (
               <>
-                <Chip size="small" label={linkedCatalog.catalog_code || `#${linkedCatalog.id}`}
+                <Chip size="small" title={linkedCatalog.catalog_code || ''}
+                  label={linkedCatalog.friendly_code || linkedCatalog.catalog_code || `#${linkedCatalog.id}`}
                   sx={{ height: 20, fontSize: 11, fontFamily: 'monospace', bgcolor: '#e3f2fd', color: '#1565c0', fontWeight: 700 }} />
                 <Typography variant="body2" fontWeight={700}>{linkedCatalog.title || '—'}</Typography>
               </>

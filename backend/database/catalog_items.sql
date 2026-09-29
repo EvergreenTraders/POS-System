@@ -5,8 +5,11 @@
 -- definition — NOT physical inventory. Inventory rows (hardgoods, jewelry)
 -- link back via their existing catalog_item_id column and keep their own
 -- snapshotted values, so editing a Catalog Item never rewrites them.
+-- Also owns code generation for categories (3-char code + 5-digit
+-- numeric_code, section 8) and Catalog Items (CAT-XXXXX + CAT-HG-BRANDMODEL,
+-- section 9).
 -- Depends on: category_tree.sql, inventory_modes.sql, hardgoods.sql,
--- inventory.sql (jewelry), employees.sql.
+-- inventory.sql (jewelry), employees.sql. Safe to re-run.
 -- ============================================================
 
 
@@ -31,8 +34,9 @@ WHERE NOT EXISTS (SELECT 1 FROM companies LIMIT 1);
 -- ============================================================
 -- 2. CATALOG ITEMS (doc §3 Identity + Pricing + Status)
 -- id is the immutable internal catalog_item_id used by every foreign key.
--- catalog_code is the human-readable display code (e.g. VGCON-000125),
--- stamped once at creation and never changed.
+-- catalog_code (CAT-XXXXX) and friendly_code (CAT-HG-FENDERSTRAT) are the
+-- human-readable codes; both are assigned at creation by the trigger in
+-- section 9 (friendly_code is added there) and are never used as keys.
 -- Pricing is nullable on purpose: NULL means "use history/market logic",
 -- never zero.
 -- ============================================================
@@ -245,3 +249,239 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_hardgoods_catalog_item ON hardgoods(catalog_item_id);
 CREATE INDEX IF NOT EXISTS idx_jewelry_catalog_item   ON jewelry(catalog_item_id);
+
+
+-- ============================================================
+-- 8. CATEGORY CODES
+-- Two codes per category:
+--   * code         — short, user-friendly code (max 3 chars, A–Z/0–9),
+--                    unique among siblings (same division + parent).
+--   * numeric_code — random 5-digit number (10000–99999), assigned
+--                    automatically and unique across ALL categories. This
+--                    is the code that guarantees no duplicates.
+-- ============================================================
+
+-- ── 8a. numeric_code ────────────────────────────────────────
+-- Picks a random unused 5-digit code. Used as the column default so every
+-- insert path gets one; the unique constraint below is the real guarantee
+-- (the API retries on the rare concurrent collision).
+CREATE OR REPLACE FUNCTION generate_category_numeric_code() RETURNS CHAR(5) AS $$
+DECLARE
+  candidate CHAR(5);
+BEGIN
+  LOOP
+    candidate := (10000 + floor(random() * 90000))::INT::TEXT;
+    EXIT WHEN NOT EXISTS (SELECT 1 FROM categories WHERE numeric_code = candidate);
+  END LOOP;
+  RETURN candidate;
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
+ALTER TABLE categories ADD COLUMN IF NOT EXISTS numeric_code CHAR(5);
+
+-- Backfill existing categories one row at a time, so each generated code
+-- sees the ones assigned before it.
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN SELECT id FROM categories WHERE numeric_code IS NULL ORDER BY id LOOP
+    UPDATE categories SET numeric_code = generate_category_numeric_code() WHERE id = r.id;
+  END LOOP;
+END $$;
+
+ALTER TABLE categories ALTER COLUMN numeric_code SET DEFAULT generate_category_numeric_code();
+ALTER TABLE categories ALTER COLUMN numeric_code SET NOT NULL;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_categories_numeric_code') THEN
+    ALTER TABLE categories ADD CONSTRAINT uq_categories_numeric_code UNIQUE (numeric_code);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_categories_numeric_code') THEN
+    ALTER TABLE categories ADD CONSTRAINT chk_categories_numeric_code CHECK (numeric_code ~ '^[1-9][0-9]{4}$');
+  END IF;
+END $$;
+
+
+-- ── 8b. Shorten friendly codes to 3 characters ──────────────
+-- Existing 4–5 char codes are truncated (ELEC → ELE, CONSO → CON, …).
+-- A code whose truncated form would clash with a sibling is left alone and
+-- reported, rather than failing the whole migration; rename it in Category
+-- Manager and re-run.
+DO $$
+DECLARE
+  r RECORD;
+  skipped INT := 0;
+BEGIN
+  FOR r IN SELECT id, division_id, parent_category_id, code FROM categories
+           WHERE char_length(code) > 3 ORDER BY id LOOP
+    IF EXISTS (
+      SELECT 1 FROM categories o
+      WHERE o.id <> r.id
+        AND o.division_id = r.division_id
+        AND o.parent_category_id IS NOT DISTINCT FROM r.parent_category_id
+        AND upper(o.code) = upper(LEFT(r.code, 3))
+    ) THEN
+      skipped := skipped + 1;
+      RAISE WARNING 'Category % code "%" not shortened: "%" is already used by a sibling', r.id, r.code, LEFT(r.code, 3);
+    ELSE
+      UPDATE categories SET code = LEFT(code, 3), updated_at = CURRENT_TIMESTAMP WHERE id = r.id;
+    END IF;
+  END LOOP;
+
+  -- Enforce max 3 chars for all new/edited rows; validate once every existing
+  -- row complies (always true unless a clash was skipped above).
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_categories_code_format') THEN
+    ALTER TABLE categories ADD CONSTRAINT chk_categories_code_format
+      CHECK (code ~ '^[A-Z0-9]{1,3}$') NOT VALID;
+  END IF;
+  IF skipped = 0 AND NOT EXISTS (SELECT 1 FROM categories WHERE code !~ '^[A-Z0-9]{1,3}$') THEN
+    ALTER TABLE categories VALIDATE CONSTRAINT chk_categories_code_format;
+  END IF;
+END $$;
+
+
+-- ── 8c. Root-level uniqueness ───────────────────────────────
+-- uq_category_code_per_parent (division, parent, code) doesn't cover root
+-- categories: parent_category_id is NULL there and NULLs never compare equal,
+-- so two roots in one division could share a code. Close that gap.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'uq_category_code_root') THEN
+    IF EXISTS (
+      SELECT 1 FROM categories WHERE parent_category_id IS NULL
+      GROUP BY division_id, code HAVING COUNT(*) > 1
+    ) THEN
+      RAISE WARNING 'uq_category_code_root not created: duplicate root category codes exist within a division';
+    ELSE
+      CREATE UNIQUE INDEX uq_category_code_root ON categories (division_id, code) WHERE parent_category_id IS NULL;
+    END IF;
+  END IF;
+END $$;
+
+
+-- ============================================================
+-- 9. CATALOG ITEM CODES
+-- Neither code is the internal key: foreign keys always use catalog_items.id.
+-- ============================================================
+-- catalog_code  : CAT-XXXXX  (random 5-digit, unique) — the Catalog ID.
+-- friendly_code : CAT-{division code}-{BRAND}{MODEL}, e.g. CAT-HG-FENDERSTRAT.
+--   * letters/digits only, uppercase; brand isn't repeated when the model
+--     already starts with it (Sony + "Sony PS5" → SONYPS5, not SONYSONYPS5)
+--   * brand+model part capped at 24 chars to stay easy to type
+--   * a clash gets a numeric suffix: CAT-HG-FENDERSTRAT-2, -3, …
+-- Both are assigned once, at creation, by a BEFORE INSERT trigger, so every
+-- insert path gets them; later Make/Model/Category edits don't re-code the
+-- item (staff-facing codes stay stable). The unique constraints are the
+-- real guarantee; the API retries on a rare concurrent collision.
+-- NOTE: CAT-XXXXX allows at most 90,000 catalog items (10000–99999).
+
+-- Uppercase letters/digits only: "PlayStation 5 (Disc)" → "PLAYSTATION5DISC".
+CREATE OR REPLACE FUNCTION catalog_code_token(txt TEXT) RETURNS TEXT AS $$
+  SELECT upper(regexp_replace(coalesce(txt, ''), '[^A-Za-z0-9]+', '', 'g'));
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION generate_catalog_numeric_code() RETURNS VARCHAR(20) AS $$
+DECLARE
+  candidate VARCHAR(20);
+  attempts  INT := 0;
+BEGIN
+  LOOP
+    attempts := attempts + 1;
+    IF attempts > 1000 THEN
+      RAISE EXCEPTION 'Unable to allocate a unique CAT-XXXXX catalog code; the 5-digit range is nearly exhausted';
+    END IF;
+    candidate := 'CAT-' || (10000 + floor(random() * 90000))::INT::TEXT;
+    EXIT WHEN NOT EXISTS (SELECT 1 FROM catalog_items WHERE catalog_code = candidate);
+  END LOOP;
+  RETURN candidate;
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
+CREATE OR REPLACE FUNCTION generate_catalog_friendly_code(
+  p_category_id INT, p_make TEXT, p_model TEXT, p_exclude_id INT DEFAULT NULL
+) RETURNS VARCHAR(40) AS $$
+DECLARE
+  division_code TEXT;
+  brand_token   TEXT := catalog_code_token(p_make);
+  model_token   TEXT := catalog_code_token(p_model);
+  body          TEXT;
+  base          TEXT;
+  candidate     TEXT;
+  n             INT := 1;
+BEGIN
+  SELECT d.code INTO division_code
+  FROM categories c JOIN divisions d ON d.id = c.division_id
+  WHERE c.id = p_category_id;
+
+  IF brand_token <> '' AND left(model_token, length(brand_token)) = brand_token THEN
+    body := model_token;
+  ELSE
+    body := brand_token || model_token;
+  END IF;
+  body := left(body, 24);
+  IF body = '' THEN body := 'ITEM'; END IF;
+
+  base := 'CAT-' || coalesce(division_code, 'XX') || '-' || body;
+  candidate := base;
+  WHILE EXISTS (
+    SELECT 1 FROM catalog_items
+    WHERE friendly_code = candidate AND id IS DISTINCT FROM p_exclude_id
+  ) LOOP
+    n := n + 1;
+    candidate := base || '-' || n;
+  END LOOP;
+  RETURN candidate;
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
+ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS friendly_code VARCHAR(40);
+
+-- Re-code existing items once: anything not already CAT-XXXXX (e.g. the
+-- earlier {category code}-000001 format) gets new codes. Row by row so each
+-- generated code sees the ones assigned before it.
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN SELECT id FROM catalog_items WHERE catalog_code !~ '^CAT-[1-9][0-9]{4}$' ORDER BY id LOOP
+    UPDATE catalog_items SET catalog_code = generate_catalog_numeric_code() WHERE id = r.id;
+  END LOOP;
+  FOR r IN SELECT id, category_id, make_brand, model_name FROM catalog_items WHERE friendly_code IS NULL ORDER BY id LOOP
+    UPDATE catalog_items
+    SET friendly_code = generate_catalog_friendly_code(r.category_id, r.make_brand, r.model_name, r.id)
+    WHERE id = r.id;
+  END LOOP;
+END $$;
+
+ALTER TABLE catalog_items ALTER COLUMN friendly_code SET NOT NULL;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_catalog_items_friendly_code') THEN
+    ALTER TABLE catalog_items ADD CONSTRAINT uq_catalog_items_friendly_code UNIQUE (friendly_code);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_catalog_items_catalog_code') THEN
+    ALTER TABLE catalog_items ADD CONSTRAINT chk_catalog_items_catalog_code
+      CHECK (catalog_code ~ '^CAT-[1-9][0-9]{4}$');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_catalog_items_friendly_code') THEN
+    ALTER TABLE catalog_items ADD CONSTRAINT chk_catalog_items_friendly_code
+      CHECK (friendly_code ~ '^CAT-[A-Z0-9]+-[A-Z0-9]+(-[0-9]+)?$');
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION catalog_items_assign_codes() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.catalog_code IS NULL THEN
+    NEW.catalog_code := generate_catalog_numeric_code();
+  END IF;
+  IF NEW.friendly_code IS NULL THEN
+    NEW.friendly_code := generate_catalog_friendly_code(NEW.category_id, NEW.make_brand, NEW.model_name, NEW.id);
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_catalog_items_assign_codes ON catalog_items;
+CREATE TRIGGER trg_catalog_items_assign_codes
+  BEFORE INSERT ON catalog_items
+  FOR EACH ROW EXECUTE PROCEDURE catalog_items_assign_codes();

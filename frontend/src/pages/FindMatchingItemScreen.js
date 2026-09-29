@@ -266,7 +266,9 @@ export default function FindMatchingItemScreen({
                   <Typography variant="body2" fontWeight={700} noWrap>{r.title || 'Untitled catalog item'}</Typography>
                   <Chip size="small" label="Catalog Item" sx={{ height: 20, fontSize: 11, fontWeight: 700, bgcolor: '#e3f2fd', color: '#1565c0' }} />
                 </Box>
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ fontFamily: 'monospace' }}>{r.catalog_code}</Typography>
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ fontFamily: 'monospace' }}>
+                  {r.friendly_code} · {r.catalog_code}
+                </Typography>
                 <Typography variant="caption" color="text.secondary" noWrap display="block">{categoryPath(r.category_id) || r.category_name}</Typography>
               </Box>
               <Box sx={{ width: 260, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>

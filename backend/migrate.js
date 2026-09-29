@@ -46,7 +46,7 @@ const MIGRATION_FILES = [
   'inventory_modes.sql', // inventory_modes, processing_statuses
   'hardgoods.sql',       // hardgoods, hardgoods_attributes
   'inventory.sql',
-  'catalog_items.sql',   // companies, catalog_items + identifiers/aliases/field values/audit; FKs from hardgoods/jewelry
+  'catalog_items.sql',   // companies, catalog_items + identifiers/aliases/field values/audit; FKs from hardgoods/jewelry; category + catalog code generation
   'metal_estimator.sql',  // Creates metal_style_category, metal_style_subcategory
   'gem_estimator.sql',
   'system_config.sql',

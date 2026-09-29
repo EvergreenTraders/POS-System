@@ -349,7 +349,7 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
           ...buildPayload(),
           ...(duplicate?.fieldValues?.length ? { field_values: duplicate.fieldValues } : {}),
         });
-        enqueueSnackbar(`Catalog item ${res.data.catalog_code} created`, { variant: 'success' });
+        enqueueSnackbar(`Catalog item ${res.data.friendly_code} (${res.data.catalog_code}) created`, { variant: 'success' });
         navigate(`/catalog/items/${res.data.id}`, { replace: true });
         return;
       }
@@ -515,6 +515,7 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
         {!isNew && (
           <Typography variant="body2" color="text.secondary">
             Catalog ID: <Box component="span" sx={{ fontFamily: 'monospace' }}>{item.catalog_code}</Box>
+            &nbsp;·&nbsp;Code: <Box component="span" sx={{ fontFamily: 'monospace' }}>{item.friendly_code}</Box>
           </Typography>
         )}
         {dirty && !isNew && <Chip label="Unsaved changes" size="small" color="warning" />}
@@ -657,6 +658,15 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
                   fullWidth size="small" label="Catalog ID" sx={{ mb: 2, '& .MuiInputBase-root': { bgcolor: 'grey.100' } }}
                   value={isNew ? '' : item.catalog_code}
                   placeholder={isNew ? 'Assigned on create' : ''}
+                  InputProps={{ readOnly: true, sx: { fontFamily: 'monospace' } }}
+                  InputLabelProps={{ shrink: true }}
+                />
+
+                <TextField
+                  fullWidth size="small" label="Staff Code" sx={{ mb: 2, '& .MuiInputBase-root': { bgcolor: 'grey.100' } }}
+                  value={isNew ? '' : item.friendly_code}
+                  placeholder={isNew ? 'Assigned on create (CAT-HG-BRANDMODEL)' : ''}
+                  helperText={isNew ? '' : 'Easy-to-type code. Set once at creation; editing Make/Model does not change it.'}
                   InputProps={{ readOnly: true, sx: { fontFamily: 'monospace' } }}
                   InputLabelProps={{ shrink: true }}
                 />
@@ -885,7 +895,7 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
 
       {/* ── History ────────────────────────────────────────────────────── */}
       <Dialog open={historyOpen} onClose={() => setHistoryOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>History — {item?.catalog_code}</DialogTitle>
+        <DialogTitle>History — {item?.friendly_code} ({item?.catalog_code})</DialogTitle>
         <DialogContent dividers>
           {historyLoading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={24} /></Box>

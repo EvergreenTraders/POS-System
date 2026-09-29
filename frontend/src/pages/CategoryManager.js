@@ -72,6 +72,9 @@ const FIELD_DATA_TYPES = [
 ];
 const HAS_ALLOWED_VALUES = ['ENUM', 'MULTISELECT'];
 
+// Friendly category code: 1–3 letters/numbers (same rule as the API).
+const CATEGORY_CODE_PATTERN = /^[A-Z0-9]{1,3}$/;
+
 // category_field_rules.scope — Transaction is a legacy third option not
 // surfaced in this tab's UI (the doc only calls for Catalog Item / Inventory
 // Record) but existing data using it is left alone.
@@ -710,13 +713,17 @@ function CategoryManager() {
       setCatDialogError('Name and code are required');
       return;
     }
+    if (!CATEGORY_CODE_PATTERN.test(catForm.code.trim().toUpperCase())) {
+      setCatDialogError('Code must be 1–3 letters or numbers');
+      return;
+    }
     try {
       setCatSaving(true);
       setCatDialogError('');
       await axios.post(`${API}/categories`, {
         division_id:        catDialogParent.division_id,
         parent_category_id: catDialogParent.parent_id || null,
-        code:               catForm.code.toUpperCase(),
+        code:               catForm.code.trim().toUpperCase(),
         name:               catForm.name,
         description:        catForm.description || null,
       });
@@ -1132,6 +1139,11 @@ function CategoryManager() {
                 <Chip label={selected.division_code} size="small" color="primary" />
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>{selected.name}</Typography>
                 <Chip label={selected.code} size="small" variant="outlined" sx={{ fontFamily: 'monospace' }} />
+                {selected.numeric_code && (
+                  <Tooltip title="Unique numeric category code">
+                    <Chip label={`#${selected.numeric_code}`} size="small" variant="outlined" sx={{ fontFamily: 'monospace' }} />
+                  </Tooltip>
+                )}
               </Box>
 
               <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
@@ -1190,6 +1202,14 @@ function CategoryManager() {
                               label="Category Code" fullWidth size="small" disabled
                               value={detailsDraft.code}
                               helperText="Category codes cannot be changed."
+                              inputProps={{ style: { fontFamily: 'monospace' } }}
+                            />
+                          </Grid>
+                          <Grid item xs={12} sm={6} md={2.5}>
+                            <TextField
+                              label="Numeric Code" fullWidth size="small" disabled
+                              value={selected.numeric_code || ''}
+                              helperText="Assigned automatically; unique across all categories."
                               inputProps={{ style: { fontFamily: 'monospace' } }}
                             />
                           </Grid>
@@ -1596,13 +1616,13 @@ function CategoryManager() {
             </Grid>
             <Grid item xs={12}>
               <TextField
-                label="Code (e.g. ELEC, PHONE)"
+                label="Code (e.g. ELE, PHN)"
                 required
                 value={catForm.code}
-                onChange={e => setCatForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
+                onChange={e => setCatForm(f => ({ ...f, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') }))}
                 fullWidth size="small"
-                inputProps={{ style: { fontFamily: 'monospace', textTransform: 'uppercase' } }}
-                helperText="Short uppercase code — must be unique within the same parent"
+                inputProps={{ maxLength: 3, style: { fontFamily: 'monospace', textTransform: 'uppercase' } }}
+                helperText="Up to 3 letters/numbers, unique within the same parent. A unique 5-digit numeric code is assigned automatically."
               />
             </Grid>
             <Grid item xs={12}>

@@ -15741,7 +15741,7 @@ app.get('/api/categories', async (req, res) => {
     }
     const result = await pool.query(
       `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
-              c.description, c.is_active, c.display_order, d.code AS division_code, d.name AS division_name
+              c.description, c.is_active, c.display_order, c.numeric_code, d.code AS division_code, d.name AS division_name
        FROM categories c
        JOIN divisions d ON d.id = c.division_id
        ${where}
@@ -15769,7 +15769,7 @@ app.get('/api/categories/tree', async (req, res) => {
     }
     const result = await pool.query(
       `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
-              c.description, c.is_active, c.display_order, d.code AS division_code, d.name AS division_name
+              c.description, c.is_active, c.display_order, c.numeric_code, d.code AS division_code, d.name AS division_name
        FROM categories c
        JOIN divisions d ON d.id = c.division_id
        ${where}
@@ -15805,7 +15805,7 @@ app.get('/api/categories/:id', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
-              c.description, c.is_active, c.display_order, c.alternate_names, c.internal_notes,
+              c.description, c.is_active, c.display_order, c.alternate_names, c.internal_notes, c.numeric_code,
               d.code AS division_code, d.name AS division_name,
               p.name AS parent_category_name
        FROM categories c
@@ -15822,22 +15822,45 @@ app.get('/api/categories/:id', async (req, res) => {
   }
 });
 
-// POST /api/categories  — create a new category
+// Friendly category code: 1–3 characters, A–Z / 0–9, stored uppercase.
+// (Uniqueness guarantees come from numeric_code, a random 5-digit code the
+// database assigns — see catalog_items.sql, section 8.)
+const CATEGORY_CODE_PATTERN = /^[A-Z0-9]{1,3}$/;
+const normalizeCategoryCode = (code) => String(code ?? '').trim().toUpperCase();
+const CATEGORY_CODE_ERROR = 'Category code must be 1–3 letters or numbers';
+
+// Friendly-code clash among siblings (incl. root level) vs. anything else.
+const isCategoryCodeConflict = (err) =>
+  err.code === '23505' && ['uq_category_code_per_parent', 'uq_category_code_root'].includes(err.constraint);
+
+// POST /api/categories  — create a new category. numeric_code is generated
+// by the column default; a concurrent collision on it is retried.
 app.post('/api/categories', async (req, res) => {
   try {
-    const { division_id, parent_category_id, code, name, description } = req.body;
+    const { division_id, parent_category_id, name, description } = req.body;
+    const code = normalizeCategoryCode(req.body.code);
     if (!division_id || !code || !name) {
       return res.status(400).json({ error: 'division_id, code, and name are required' });
     }
-    const result = await pool.query(
-      `INSERT INTO categories (division_id, parent_category_id, code, name, description)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [division_id, parent_category_id || null, code.toUpperCase(), name, description || null]
-    );
-    res.status(201).json(result.rows[0]);
+    if (!CATEGORY_CODE_PATTERN.test(code)) {
+      return res.status(400).json({ error: CATEGORY_CODE_ERROR });
+    }
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const result = await pool.query(
+          `INSERT INTO categories (division_id, parent_category_id, code, name, description)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING *`,
+          [division_id, parent_category_id || null, code, name, description || null]
+        );
+        return res.status(201).json(result.rows[0]);
+      } catch (err) {
+        if (err.code === '23505' && err.constraint === 'uq_categories_numeric_code' && attempt < 5) continue;
+        throw err;
+      }
+    }
   } catch (err) {
-    if (err.code === '23505') {
+    if (isCategoryCodeConflict(err)) {
       return res.status(409).json({ error: 'A category with this code already exists under the same parent' });
     }
     console.error('Error creating category:', err);
@@ -15867,7 +15890,12 @@ async function getDescendantCategoryIds(categoryId) {
 app.put('/api/categories/:id', async (req, res) => {
   try {
     const categoryId = parseInt(req.params.id, 10);
-    const { name, code, description, is_active, division_id, parent_category_id, display_order, alternate_names, internal_notes } = req.body;
+    const { name, description, is_active, division_id, parent_category_id, display_order, alternate_names, internal_notes } = req.body;
+    // numeric_code is system-assigned and never updated here.
+    const code = req.body.code !== undefined ? normalizeCategoryCode(req.body.code) : undefined;
+    if (code !== undefined && !CATEGORY_CODE_PATTERN.test(code)) {
+      return res.status(400).json({ error: CATEGORY_CODE_ERROR });
+    }
 
     if (parent_category_id !== undefined && parent_category_id !== null) {
       const newParentId = parseInt(parent_category_id, 10);
@@ -15900,7 +15928,7 @@ app.put('/api/categories/:id', async (req, res) => {
        RETURNING *`,
       [
         name !== undefined ? name : current.name,
-        code !== undefined ? code.toUpperCase() : current.code,
+        code !== undefined ? code : current.code,
         description !== undefined ? description : current.description,
         is_active !== undefined ? is_active : current.is_active,
         division_id !== undefined ? division_id : current.division_id,
@@ -15913,7 +15941,7 @@ app.put('/api/categories/:id', async (req, res) => {
     );
     res.json(result.rows[0]);
   } catch (err) {
-    if (err.code === '23505') {
+    if (isCategoryCodeConflict(err)) {
       return res.status(409).json({ error: 'A category with this code already exists under the same parent' });
     }
     console.error('Error updating category:', err);
@@ -17063,27 +17091,42 @@ app.post('/api/catalog-items', async (req, res) => {
     await assertInventoryModeExists(client, mode);
     const companyId = await getDefaultCompanyId(client);
 
-    // Reserve the id first so the display code can be stamped once, at
-    // creation, and never recomputed (moving category must not change it).
-    const idRes = await client.query(`SELECT nextval(pg_get_serial_sequence('catalog_items', 'id')) AS id`);
-    const catalogItemId = parseInt(idRes.rows[0].id, 10);
-    const catalogCode = `${category.code}-${String(catalogItemId).padStart(6, '0')}`;
-
-    await client.query(
-      `INSERT INTO catalog_items
-         (id, catalog_code, company_id, category_id, status, make_brand, model_name, title_override,
-          default_inventory_mode, suggested_cost, suggested_retail, retails_new_for, internal_notes,
-          created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)`,
-      [
-        catalogItemId, catalogCode, companyId, categoryId, status, makeBrand, modelName,
-        trimOrNull(b.title_override), mode,
-        parseCatalogMoney(pricing.suggested_cost, 'Suggested Cost') ?? null,
-        parseCatalogMoney(pricing.suggested_retail, 'Suggested Retail') ?? null,
-        parseCatalogMoney(pricing.retails_new_for, 'Retails New For') ?? null,
-        trimOrNull(b.internal_notes), employeeId,
-      ]
-    );
+    // catalog_code (CAT-XXXXX) and friendly_code (CAT-{div}-{BRANDMODEL}) are
+    // assigned once by the trg_catalog_items_assign_codes trigger
+    // (catalog_items.sql, section 9). A concurrent insert could pick the same code
+    // between the trigger's check and commit, so a collision on either unique
+    // constraint is retried from a savepoint.
+    const insertParams = [
+      companyId, categoryId, status, makeBrand, modelName,
+      trimOrNull(b.title_override), mode,
+      parseCatalogMoney(pricing.suggested_cost, 'Suggested Cost') ?? null,
+      parseCatalogMoney(pricing.suggested_retail, 'Suggested Retail') ?? null,
+      parseCatalogMoney(pricing.retails_new_for, 'Retails New For') ?? null,
+      trimOrNull(b.internal_notes), employeeId,
+    ];
+    let catalogItemId;
+    for (let attempt = 1; ; attempt++) {
+      await client.query('SAVEPOINT catalog_insert');
+      try {
+        const inserted = await client.query(
+          `INSERT INTO catalog_items
+             (company_id, category_id, status, make_brand, model_name, title_override,
+              default_inventory_mode, suggested_cost, suggested_retail, retails_new_for, internal_notes,
+              created_by, updated_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
+           RETURNING id`,
+          insertParams
+        );
+        catalogItemId = inserted.rows[0].id;
+        await client.query('RELEASE SAVEPOINT catalog_insert');
+        break;
+      } catch (err) {
+        const codeCollision = err.code === '23505'
+          && ['catalog_items_catalog_code_key', 'uq_catalog_items_friendly_code'].includes(err.constraint);
+        if (!codeCollision || attempt >= 5) throw err;
+        await client.query('ROLLBACK TO SAVEPOINT catalog_insert');
+      }
+    }
 
     if (b.field_values !== undefined) await saveCatalogFieldValues(client, catalogItemId, categoryId, b.field_values);
     if (b.identifiers !== undefined) await saveCatalogIdentifiers(client, catalogItemId, companyId, b.identifiers);
@@ -17172,7 +17215,7 @@ function catalogScopeWhere(scope, params) {
 async function hydrateCatalogSearchResults(ids) {
   if (!ids.length) return [];
   const result = await pool.query(
-    `SELECT ci.id, ci.catalog_code, ci.status, ci.make_brand, ci.model_name,
+    `SELECT ci.id, ci.catalog_code, ci.friendly_code, ci.status, ci.make_brand, ci.model_name,
             COALESCE(ci.title_override, ci.generated_title, ci.model_name) AS title,
             ci.category_id, c.name AS category_name, ci.default_inventory_mode,
             COALESCE((
