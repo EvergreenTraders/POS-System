@@ -17737,6 +17737,45 @@ app.put('/api/hardgoods/:id', async (req, res) => {
       attributes
     } = req.body;
 
+    const currentRes = await client.query(
+      'SELECT category_id, catalog_item_id FROM hardgoods WHERE item_id = $1 FOR UPDATE',
+      [req.params.id]
+    );
+    if (!currentRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found' });
+    }
+    const current = currentRes.rows[0];
+
+    // Category/Catalog integrity: an item linked to a Catalog Item always takes
+    // its Category from that Catalog Item (Category is structural, doc §4). The
+    // COALESCE below means a null catalog_item_id keeps the current link.
+    let resolvedCategoryId = category_id ?? null;
+    const effectiveCatalogItemId = catalog_item_id ?? current.catalog_item_id;
+    if (effectiveCatalogItemId) {
+      const catalogRes = await client.query(
+        'SELECT category_id, status FROM catalog_items WHERE id = $1',
+        [effectiveCatalogItemId]
+      );
+      if (!catalogRes.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Catalog item not found' });
+      }
+      const catalog = catalogRes.rows[0];
+      const relinking = catalog_item_id != null && Number(catalog_item_id) !== current.catalog_item_id;
+      if (relinking && catalog.status === 'MERGED') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Catalog item has been merged; select the surviving catalog item' });
+      }
+      if (category_id != null && Number(category_id) !== catalog.category_id) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'Category must match the linked catalog item. Move the catalog item to another category instead.',
+        });
+      }
+      resolvedCategoryId = catalog.category_id;
+    }
+
     const result = await client.query(
       `UPDATE hardgoods SET
          mode                = COALESCE($1,  mode),
@@ -17770,7 +17809,7 @@ app.put('/api/hardgoods/:id', async (req, res) => {
        WHERE item_id = $28
        RETURNING *`,
       [
-        mode, category_id, catalog_item_id, stock_sku_id, vendor_id,
+        mode, resolvedCategoryId, catalog_item_id, stock_sku_id, vendor_id,
         long_desc, short_desc, condition, location, status,
         cost_price, retail_price, serial_number, quantity, bucket_value,
         processing_status, processing_queue, current_location_id,

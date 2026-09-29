@@ -72,6 +72,9 @@ function HardgoodsEdit() {
   const [shortDesc, setShortDesc] = useState('');
   const [longDesc, setLongDesc] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  // A catalog-linked item's Category comes from its Catalog Item (the API
+  // rejects a conflicting category), so the picker is locked while linked.
+  const [catalogItemId, setCatalogItemId] = useState(null);
   const [condition, setCondition] = useState('');
   const [itemLocation, setItemLocation] = useState('');
   const [notes, setNotes] = useState('');
@@ -202,6 +205,7 @@ function HardgoodsEdit() {
     setShortDesc(item.short_desc || '');
     setLongDesc(item.long_desc || '');
     setCategoryId(item.category_id || '');
+    setCatalogItemId(item.catalog_item_id || null);
     setCondition(item.condition || '');
     setItemLocation(item.location || '');
     setNotes(item.notes || '');
@@ -543,12 +547,13 @@ function HardgoodsEdit() {
             <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
               <Box sx={{ display: 'flex', gap: 1.5 }}>
                 <TextField label="Short Description" value={shortDesc} onChange={e => setShortDesc(e.target.value)} size="small" sx={{ flex: 2 }} />
-                <FormControl size="small" sx={{ flex: 1 }}>
+                <FormControl size="small" sx={{ flex: 1 }} disabled={!!catalogItemId}>
                   <InputLabel>Category</InputLabel>
                   <Select value={categoryId} onChange={e => handleCategoryChange(e.target.value)} label="Category">
                     <MenuItem value=""><em>None</em></MenuItem>
                     {categories.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                   </Select>
+                  {catalogItemId && <FormHelperText>Set by the linked catalog item</FormHelperText>}
                 </FormControl>
               </Box>
               <TextField label="Long Description" value={longDesc} onChange={e => setLongDesc(e.target.value)} fullWidth multiline minRows={2} size="small" />

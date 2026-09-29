@@ -75,7 +75,11 @@ export default function HardgoodsIntakeScreen({
     if (editItem) return editItem.catalog_prefill || {};
     if (!catalogSource) return {};
     const values = { item: catalogSource.title || '', brand: catalogSource.make_brand || '', model: catalogSource.model_name || '' };
+    // Brand/Model come from the Catalog Item's core make_brand/model_name; a
+    // same-keyed Field Library value must not shadow them (intake hides those
+    // Field Library fields in favour of its fixed core inputs).
     (catalogSource.field_values || []).forEach(f => {
+      if (['item', 'brand', 'model', 'type'].includes(f.field_key)) return;
       if (f.value !== null && f.value !== '') values[f.field_key] = f.value;
     });
     return values;

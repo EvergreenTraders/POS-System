@@ -86,6 +86,22 @@ CREATE TABLE IF NOT EXISTS catalog_item_identifiers (
     CONSTRAINT uq_catalog_identifier_per_item UNIQUE (catalog_item_id, identifier_type, normalized_value)
 );
 
+-- identifiers.company_id is denormalized for the lookup index, so the database
+-- (not just the API) guarantees it always equals the owning item's company:
+-- composite FK (catalog_item_id, company_id) → catalog_items(id, company_id).
+-- ON UPDATE CASCADE carries identifiers along if an item ever changes company.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_catalog_items_id_company') THEN
+    ALTER TABLE catalog_items ADD CONSTRAINT uq_catalog_items_id_company UNIQUE (id, company_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_catalog_identifiers_item_company') THEN
+    ALTER TABLE catalog_item_identifiers
+      ADD CONSTRAINT fk_catalog_identifiers_item_company
+      FOREIGN KEY (catalog_item_id, company_id) REFERENCES catalog_items(id, company_id)
+      ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_catalog_identifiers_lookup
     ON catalog_item_identifiers(normalized_value, identifier_type, company_id);
 CREATE INDEX IF NOT EXISTS idx_catalog_identifiers_item
@@ -188,6 +204,42 @@ DO $$ BEGIN
     ALTER TABLE jewelry
       ADD CONSTRAINT fk_jewelry_catalog_item
       FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id) ON DELETE RESTRICT NOT VALID;
+  END IF;
+END $$;
+
+-- Validate the NOT VALID FKs as soon as a table has no orphaned links
+-- (catalog_item_id pointing at a non-existent catalog item). Runs on every
+-- migration, so a database with legacy orphans validates automatically on the
+-- first run after they're cleaned up. Orphans raise a WARNING (with a count)
+-- instead of failing the migration. Find them with:
+--   SELECT item_id, catalog_item_id FROM hardgoods h
+--   WHERE catalog_item_id IS NOT NULL
+--     AND NOT EXISTS (SELECT 1 FROM catalog_items c WHERE c.id = h.catalog_item_id);
+-- (same query against jewelry).
+DO $$
+DECLARE
+  orphan_count BIGINT;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_hardgoods_catalog_item' AND NOT convalidated) THEN
+    SELECT COUNT(*) INTO orphan_count FROM hardgoods h
+    WHERE h.catalog_item_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM catalog_items c WHERE c.id = h.catalog_item_id);
+    IF orphan_count = 0 THEN
+      ALTER TABLE hardgoods VALIDATE CONSTRAINT fk_hardgoods_catalog_item;
+    ELSE
+      RAISE WARNING 'fk_hardgoods_catalog_item left NOT VALID: % hardgoods row(s) reference a missing catalog item', orphan_count;
+    END IF;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_jewelry_catalog_item' AND NOT convalidated) THEN
+    SELECT COUNT(*) INTO orphan_count FROM jewelry j
+    WHERE j.catalog_item_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM catalog_items c WHERE c.id = j.catalog_item_id);
+    IF orphan_count = 0 THEN
+      ALTER TABLE jewelry VALIDATE CONSTRAINT fk_jewelry_catalog_item;
+    ELSE
+      RAISE WARNING 'fk_jewelry_catalog_item left NOT VALID: % jewelry row(s) reference a missing catalog item', orphan_count;
+    END IF;
   END IF;
 END $$;
 
