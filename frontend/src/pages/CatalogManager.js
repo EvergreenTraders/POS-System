@@ -47,6 +47,8 @@ import config from '../config';
 import { flattenCategoryTree } from '../utils/categoryTree';
 
 const API = config.apiUrl;
+// Stored image paths are server-relative (/uploads/…); the API base ends in /api.
+const assetUrl = (url) => (url && url.startsWith('/uploads') ? `${API.replace(/\/api$/, '')}${url}` : url);
 
 // "Search by" → the search API's mode (doc §9 priorities).
 const SEARCH_MODES = [
@@ -155,8 +157,8 @@ function IdentifierList({ label, values }) {
 // ─────────────────────────────────────────────────────────────────────────
 // Catalog Manager — search / browse Catalog Items (server-side, paginated),
 // preview the selected item, then "Open in Catalog Item Editor" or create a
-// "New Catalog Item". Intelligence, reference images, Advanced Search and
-// Suggest New Item are not built yet and are shown as unavailable.
+// "New Catalog Item". Intelligence, Advanced Search and Suggest New Item
+// are not built yet and are shown as unavailable.
 // ─────────────────────────────────────────────────────────────────────────
 export default function CatalogManager() {
   const navigate = useNavigate();
@@ -490,9 +492,11 @@ export default function CatalogManager() {
                           : <Typography variant="caption" color="text.disabled">—</Typography>}
                       </TableCell>
                       <TableCell>
-                        {/* Catalog reference images are a later phase */}
-                        <Box sx={{ width: 44, height: 44, borderRadius: 1, bgcolor: 'grey.100', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <LocalOfferOutlinedIcon sx={{ color: 'grey.400' }} />
+                        {/* Thumbnail = the item's primary reference image */}
+                        <Box sx={{ width: 44, height: 44, borderRadius: 1, overflow: 'hidden', bgcolor: 'grey.100', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {r.primary_image_url
+                            ? <Box component="img" src={assetUrl(r.primary_image_url)} alt="" sx={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                            : <LocalOfferOutlinedIcon sx={{ color: 'grey.400' }} />}
                         </Box>
                       </TableCell>
                       <TableCell>
@@ -570,11 +574,19 @@ export default function CatalogManager() {
           ) : (
             <>
               <Box sx={{
-                height: 160, mb: 1.5, borderRadius: 1, bgcolor: 'grey.50', border: 1, borderColor: 'divider', borderStyle: 'dashed',
+                height: 180, mb: 1.5, borderRadius: 1, overflow: 'hidden', bgcolor: 'grey.50', border: 1, borderColor: 'divider',
+                borderStyle: preview.primary_image ? 'solid' : 'dashed',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0.5,
               }}>
-                <ImageNotSupportedOutlinedIcon sx={{ fontSize: 36, color: 'text.disabled' }} />
-                <Typography variant="caption" color="text.secondary">Reference images are not available yet</Typography>
+                {preview.primary_image ? (
+                  <Box component="img" src={assetUrl(preview.primary_image.image_url)} alt={preview.title}
+                    sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                ) : (
+                  <>
+                    <ImageNotSupportedOutlinedIcon sx={{ fontSize: 36, color: 'text.disabled' }} />
+                    <Typography variant="caption" color="text.secondary">No reference image — add one in the Catalog Item Editor</Typography>
+                  </>
+                )}
               </Box>
 
               <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.3 }}>{preview.title}</Typography>

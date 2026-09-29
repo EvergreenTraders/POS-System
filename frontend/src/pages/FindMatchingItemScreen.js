@@ -20,6 +20,8 @@ const MATCH_TYPE_LABELS = {
 };
 
 const IDENTIFIER_LABELS = { UPC: 'UPC', EAN: 'EAN', MANUFACTURER_MODEL: 'Model', OTHER: 'ID' };
+// Stored image paths are server-relative (/uploads/…); the API base ends in /api.
+const assetUrl = (url) => (url && url.startsWith('/uploads') ? `${config.apiUrl.replace(/\/api$/, '')}${url}` : url);
 
 // Intake step 1–2: Search Catalog → Select Catalog Item.
 // Search runs server-side against the Catalog (GET /api/catalog-items/search):
@@ -257,9 +259,11 @@ export default function FindMatchingItemScreen({
               display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1, borderBottom: '1px solid #f0f0f0',
               bgcolor: matchType === 'IDENTIFIER' ? '#f1f8e9' : 'transparent', '&:hover': { bgcolor: '#fafafa' },
             }}>
-              {/* Catalog reference images are a later phase — placeholder thumbnail */}
-              <Box sx={{ width: 56, height: 56, borderRadius: 1.5, bgcolor: '#f5f6fa', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <MuiIcons.LocalOfferOutlined sx={{ color: '#bbb' }} />
+              {/* Thumbnail = the catalog item's primary reference image (doc §9: image in the match popup) */}
+              <Box sx={{ width: 56, height: 56, borderRadius: 1.5, overflow: 'hidden', bgcolor: '#f5f6fa', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {r.primary_image_url
+                  ? <Box component="img" src={assetUrl(r.primary_image_url)} alt="" sx={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                  : <MuiIcons.LocalOfferOutlined sx={{ color: '#bbb' }} />}
               </Box>
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

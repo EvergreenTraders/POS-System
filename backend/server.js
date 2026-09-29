@@ -102,6 +102,30 @@ if (!fs.existsSync(hardgoodsUploadDir)) {
   fs.mkdirSync(hardgoodsUploadDir, { recursive: true });
 }
 
+// Catalog reference images (Evergreen-controlled storage, doc §12).
+const catalogUploadDir = 'uploads/catalog/';
+if (!fs.existsSync(catalogUploadDir)) {
+  fs.mkdirSync(catalogUploadDir, { recursive: true });
+}
+const CATALOG_IMAGE_EXTENSIONS = {
+  'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
+};
+// One image per request, images only, 10 MB max. Multer errors (e.g. too
+// large) are returned as a 400 instead of falling through to Express.
+const catalogImageMulter = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, Object.prototype.hasOwnProperty.call(CATALOG_IMAGE_EXTENSIONS, file.mimetype)),
+}).single('image');
+const uploadCatalogImage = (req, res, next) => catalogImageMulter(req, res, (err) => {
+  if (err) {
+    return res.status(400).json({
+      error: err.code === 'LIMIT_FILE_SIZE' ? 'Image must be 10 MB or smaller' : `Image upload failed: ${err.message}`,
+    });
+  }
+  next();
+});
+
 const scrapUploadDir = 'uploads/scrap/';
 if (!fs.existsSync(scrapUploadDir)) {
   fs.mkdirSync(scrapUploadDir, { recursive: true });
@@ -16898,7 +16922,7 @@ async function snapshotCatalogItem(client, catalogItemId) {
   const [itemRes, identRes, aliasRes, valueRes] = await Promise.all([
     client.query('SELECT * FROM catalog_items WHERE id = $1', [catalogItemId]),
     client.query(
-      `SELECT identifier_type, raw_value FROM catalog_item_identifiers
+      `SELECT identifier_type, raw_value, source, provider FROM catalog_item_identifiers
        WHERE catalog_item_id = $1 AND is_active = true ORDER BY identifier_type, normalized_value`,
       [catalogItemId]
     ),
@@ -16908,7 +16932,11 @@ async function snapshotCatalogItem(client, catalogItemId) {
       [catalogItemId]
     ),
     client.query(
-      'SELECT field_definition_id, value FROM catalog_item_field_values WHERE catalog_item_id = $1 ORDER BY field_definition_id',
+      `SELECT f.label, v.value
+       FROM catalog_item_field_values v
+       JOIN category_field_definitions f ON f.id = v.field_definition_id
+       WHERE v.catalog_item_id = $1
+       ORDER BY f.label`,
       [catalogItemId]
     ),
   ]);
@@ -16918,9 +16946,15 @@ async function snapshotCatalogItem(client, catalogItemId) {
     const v = item[col];
     snap[col] = CATALOG_MONEY_COLUMNS.includes(col) && v !== null ? Number(v) : v;
   }
-  snap.identifiers = identRes.rows.map(r => `${r.identifier_type}:${r.raw_value}`);
+  // Readable forms for the History dialog: "UPC 711719541028", with a
+  // non-manual source/provider appended so a source-only change still shows.
+  snap.identifiers = identRes.rows.map(r => {
+    const origin = r.source && r.source !== 'MANUAL' ? ` [${[r.source, r.provider].filter(Boolean).join(': ')}]` : '';
+    return `${r.identifier_type} ${r.raw_value}${origin}`;
+  });
   snap.aliases = aliasRes.rows.map(r => r.alias);
-  snap.field_values = Object.fromEntries(valueRes.rows.map(r => [r.field_definition_id, r.value]));
+  // Keyed by field label (not id) so history reads "Storage Capacity: 1 TB → 2 TB".
+  snap.field_values = Object.fromEntries(valueRes.rows.map(r => [r.label, r.value]));
   return snap;
 }
 
@@ -16967,7 +17001,7 @@ async function loadCatalogItem(catalogItemId) {
   if (!itemRes.rows.length) return null;
   const item = itemRes.rows[0];
 
-  const [identRes, aliasRes, valueMap, catalogFields, linkedRes] = await Promise.all([
+  const [identRes, aliasRes, valueMap, catalogFields, linkedRes, imageRes] = await Promise.all([
     pool.query(
       `SELECT id, identifier_type, raw_value, normalized_value, is_active, source, provider, created_at, updated_at
        FROM catalog_item_identifiers WHERE catalog_item_id = $1
@@ -16984,6 +17018,15 @@ async function loadCatalogItem(catalogItemId) {
     pool.query(
       `SELECT (SELECT COUNT(*) FROM hardgoods WHERE catalog_item_id = $1)
             + (SELECT COUNT(*) FROM jewelry   WHERE catalog_item_id = $1) AS n`,
+      [catalogItemId]
+    ),
+    pool.query(
+      `SELECT i.id, i.image_url, i.is_primary, i.source, i.source_url, i.provider, i.created_at,
+              NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS uploaded_by_name
+       FROM catalog_item_images i
+       LEFT JOIN employees e ON e.employee_id = i.uploaded_by
+       WHERE i.catalog_item_id = $1
+       ORDER BY i.is_primary DESC, i.created_at DESC, i.id DESC`,
       [catalogItemId]
     ),
   ]);
@@ -17017,6 +17060,8 @@ async function loadCatalogItem(catalogItemId) {
     identifiers: identRes.rows,
     aliases: aliasRes.rows,
     field_values: fieldValues,
+    images: imageRes.rows,
+    primary_image: imageRes.rows.find(r => r.is_primary) || null,
     summary: {
       identifiers: identRes.rows.filter(r => r.is_active).length,
       aliases: aliasRes.rows.filter(r => r.is_active).length,
@@ -17281,6 +17326,8 @@ async function hydrateCatalogSearchResults(ids) {
             COALESCE(ci.title_override, ci.generated_title, ci.model_name) AS title,
             ci.category_id, c.name AS category_name, ci.default_inventory_mode,
             ci.suggested_cost, ci.suggested_retail, ci.updated_at,
+            (SELECT image_url FROM catalog_item_images
+             WHERE catalog_item_id = ci.id AND is_primary LIMIT 1) AS primary_image_url,
             COALESCE((
               SELECT json_agg(json_build_object('identifier_type', x.identifier_type, 'raw_value', x.raw_value))
               FROM (
@@ -17497,8 +17544,9 @@ app.get('/api/catalog-items/:id/history', async (req, res) => {
 // provided key is a direct SET (undefined = keep current) so intentional
 // clears (e.g. blank pricing → NULL) work. identifiers / aliases are
 // replace-sets when provided; field_values upserts the submitted fields.
-// generated_title is server-owned: recomputed only when regenerate_title is
-// true (or it's still empty). Editing never touches linked inventory's
+// generated_title is server-owned and recomputed on every save from Make,
+// Model, the Category title template and Catalog field values (any
+// regenerate_title flag is ignored). Editing never touches linked inventory's
 // descriptive values; only a Category move reclassifies linked inventory.
 app.put('/api/catalog-items/:id', async (req, res) => {
   const client = await pool.connect();
@@ -17572,12 +17620,12 @@ app.put('/api/catalog-items/:id', async (req, res) => {
     if (b.identifiers !== undefined) await saveCatalogIdentifiers(client, catalogItemId, current.company_id, b.identifiers);
     if (b.aliases !== undefined) await saveCatalogAliases(client, catalogItemId, b.aliases);
 
-    if (b.regenerate_title === true || !current.generated_title) {
-      const generatedTitle = await buildCatalogGeneratedTitle(
-        categoryId, makeBrand, modelName, await loadCatalogFieldValueMap(client, catalogItemId)
-      );
-      await client.query('UPDATE catalog_items SET generated_title = $1 WHERE id = $2', [generatedTitle, catalogItemId]);
-    }
+    // Generated title always follows its inputs (Make, Model, Category title
+    // template, Catalog field values) — recomputed on every save.
+    const generatedTitle = await buildCatalogGeneratedTitle(
+      categoryId, makeBrand, modelName, await loadCatalogFieldValueMap(client, catalogItemId)
+    );
+    await client.query('UPDATE catalog_items SET generated_title = $1 WHERE id = $2', [generatedTitle, catalogItemId]);
 
     if (status === 'ACTIVE') await assertNoActiveIdentifierConflicts(client, catalogItemId);
 
@@ -17665,6 +17713,66 @@ app.patch('/api/catalog-items/:id/status', async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     sendCatalogError(res, err, 'Failed to update catalog item status');
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/catalog-items/:id/images — set the reference image (multipart:
+// image=<file>, source=UPLOAD|CAMERA, employee_id). The new image becomes
+// primary; the previous primary is kept (non-primary) so nothing is lost.
+// Recorded in the Catalog Item's History.
+app.post('/api/catalog-items/:id/images', uploadCatalogImage, async (req, res) => {
+  const client = await pool.connect();
+  let writtenPath = null;
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    if (!req.file) throw new CatalogValidationError('Choose a JPG, PNG, WebP or GIF image');
+    const source = ['UPLOAD', 'CAMERA'].includes(String(req.body.source || '').toUpperCase())
+      ? String(req.body.source).toUpperCase()
+      : 'UPLOAD';
+    const employeeId = parseEmployeeId(req.body.employee_id);
+
+    await client.query('BEGIN');
+    const itemRes = await client.query('SELECT status FROM catalog_items WHERE id = $1 FOR UPDATE', [catalogItemId]);
+    if (!itemRes.rows.length) throw new CatalogValidationError('Catalog item not found', 404);
+    if (itemRes.rows[0].status === 'MERGED') throw new CatalogValidationError('Merged catalog items are read-only', 409);
+
+    const previousRes = await client.query(
+      'SELECT image_url FROM catalog_item_images WHERE catalog_item_id = $1 AND is_primary',
+      [catalogItemId]
+    );
+
+    const filename = `catalog-${catalogItemId}-${Date.now()}${CATALOG_IMAGE_EXTENSIONS[req.file.mimetype]}`;
+    writtenPath = path.join(catalogUploadDir, filename);
+    await fs.promises.writeFile(writtenPath, req.file.buffer);
+    const imageUrl = `/uploads/catalog/${filename}`;
+
+    await client.query(
+      'UPDATE catalog_item_images SET is_primary = false WHERE catalog_item_id = $1 AND is_primary',
+      [catalogItemId]
+    );
+    await client.query(
+      `INSERT INTO catalog_item_images (catalog_item_id, image_url, is_primary, source, uploaded_by)
+       VALUES ($1, $2, true, $3, $4)`,
+      [catalogItemId, imageUrl, source, employeeId]
+    );
+    await client.query(
+      'UPDATE catalog_items SET updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [employeeId, catalogItemId]
+    );
+    await writeCatalogAudit(client, catalogItemId, 'UPDATE', {
+      reference_image: { from: previousRes.rows[0]?.image_url || null, to: imageUrl, source },
+    }, employeeId);
+
+    await client.query('COMMIT');
+    writtenPath = null;
+    res.status(201).json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    // Don't leave an orphaned file behind when the database write failed.
+    if (writtenPath) fs.promises.unlink(writtenPath).catch(() => {});
+    sendCatalogError(res, err, 'Failed to save reference image');
   } finally {
     client.release();
   }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, Fragment } from 'react';
+import React, { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
@@ -35,12 +35,13 @@ import {
 import HistoryIcon from '@mui/icons-material/History';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SaveIcon from '@mui/icons-material/Save';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ImageNotSupportedOutlinedIcon from '@mui/icons-material/ImageNotSupportedOutlined';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import FileUploadIcon from '@mui/icons-material/FileUpload';
 import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined';
 import MergeTypeIcon from '@mui/icons-material/MergeType';
 import CallSplitIcon from '@mui/icons-material/CallSplit';
@@ -50,6 +51,7 @@ import { useSnackbar } from 'notistack';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
 import { flattenCategoryTree } from '../utils/categoryTree';
+import CameraCaptureDialog from '../components/CameraCaptureDialog';
 
 const API = config.apiUrl;
 
@@ -86,6 +88,7 @@ const HISTORY_FIELD_LABELS = {
   aliases: 'Aliases',
   field_values: 'Catalog Field Values',
   reclassified_inventory: 'Inventory Reclassified',
+  reference_image: 'Reference Image',
 };
 const HISTORY_ACTION_LABELS = {
   CREATE: 'Created',
@@ -156,6 +159,100 @@ function SummaryRow({ label, value, indent }) {
   );
 }
 
+const IMAGE_SOURCE_LABELS = {
+  UPLOAD: 'Uploaded',
+  CAMERA: 'Camera photo',
+  MANUFACTURER_API: 'Manufacturer',
+  EXTERNAL_PROVIDER: 'External provider',
+};
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+// Stored image paths are server-relative (/uploads/…); the API base ends in /api.
+const assetUrl = (url) => (url && url.startsWith('/uploads') ? `${API.replace(/\/api$/, '')}${url}` : url);
+
+// Reference image + "Change Image" (Upload Image / Take Photo). The upload is
+// saved immediately (independent of Save Changes) and recorded in History.
+function ReferenceImagePanel({ image, disabledReason, uploading, onUpload }) {
+  const [menuAnchor, setMenuAnchor] = useState(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const pickFile = () => {
+    setMenuAnchor(null);
+    fileInputRef.current?.click();
+  };
+  const openCamera = () => {
+    setMenuAnchor(null);
+    setCameraOpen(true);
+  };
+
+  return (
+    <Paper variant="outlined" sx={{ p: 2.5, mb: 2 }}>
+      <SectionTitle>Reference Image</SectionTitle>
+      <Box sx={{
+        height: 220, mb: 1.5, borderRadius: 1, overflow: 'hidden', bgcolor: 'grey.50',
+        border: 1, borderColor: 'divider', borderStyle: image ? 'solid' : 'dashed',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+      }}>
+        {image ? (
+          <Box component="img" src={assetUrl(image.image_url)} alt="Catalog reference"
+            sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+        ) : (
+          <Box sx={{ textAlign: 'center' }}>
+            <ImageNotSupportedOutlinedIcon sx={{ fontSize: 40, color: 'text.disabled' }} />
+            <Typography variant="body2" color="text.secondary">No reference image yet</Typography>
+          </Box>
+        )}
+        {uploading && (
+          <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CircularProgress size={28} />
+          </Box>
+        )}
+      </Box>
+
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+        <Tooltip title={disabledReason || ''}>
+          <span>
+            <Button variant="contained" size="small" endIcon={<ArrowDropDownIcon />}
+              disabled={!!disabledReason || uploading}
+              onClick={e => setMenuAnchor(e.currentTarget)}>
+              {image ? 'Change Image' : 'Add Image'}
+            </Button>
+          </span>
+        </Tooltip>
+        <Box sx={{ flex: 1 }} />
+        {image && (
+          <Typography variant="body2" color="text.secondary">
+            Source: {IMAGE_SOURCE_LABELS[image.source] || image.source}{image.provider ? ` · ${image.provider}` : ''}
+          </Typography>
+        )}
+      </Box>
+      {image && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+          Image last updated: {formatDate(image.created_at)}
+          {image.uploaded_by_name && <> by {image.uploaded_by_name}</>}
+        </Typography>
+      )}
+
+      <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)}>
+        <MenuItem onClick={pickFile}><FileUploadIcon fontSize="small" sx={{ mr: 1 }} /> Upload Image</MenuItem>
+        <MenuItem onClick={openCamera}><PhotoCameraIcon fontSize="small" sx={{ mr: 1 }} /> Take Photo</MenuItem>
+      </Menu>
+      <input ref={fileInputRef} type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif"
+        onChange={e => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) onUpload(file, 'UPLOAD');
+        }} />
+      <CameraCaptureDialog
+        open={cameraOpen}
+        title="Take Reference Photo"
+        onClose={() => setCameraOpen(false)}
+        onCapture={file => { setCameraOpen(false); onUpload(file, 'CAMERA'); }}
+      />
+    </Paper>
+  );
+}
+
 function LaterPhasePanel({ title, message, icon }) {
   return (
     <Paper variant="outlined" sx={{ p: 2.5, mb: 2 }}>
@@ -176,9 +273,47 @@ function historyValue(key, v, categoryNameById) {
   if (key === 'category_id') return categoryNameById[v] || `#${v}`;
   if (['suggested_cost', 'suggested_retail', 'retails_new_for'].includes(key)) return formatMoney(v);
   if (Array.isArray(v)) return v.length ? v.join(', ') : '—';
-  if (typeof v === 'object') return `${Object.keys(v).length} value(s)`;
+  if (typeof v === 'object') {
+    const entries = Object.entries(v);
+    return entries.length ? entries.map(([k, val]) => `${k}: ${val}`).join(', ') : '—';
+  }
   return String(v);
 }
+
+// One line per change: lists show what was added/removed, field values show
+// each changed field, everything else "old → new". A CREATE shows the values set.
+function describeHistoryChange(action, key, change, categoryNameById) {
+  const { from, to } = change;
+  if (key === 'reference_image') {
+    return `${from ? 'replaced' : 'added'} (${(IMAGE_SOURCE_LABELS[change.source] || 'image').toLowerCase()})`;
+  }
+  if (action === 'CREATE' || key === 'reclassified_inventory') return historyValue(key, to, categoryNameById);
+
+  if (Array.isArray(from) || Array.isArray(to)) {
+    const before = from || [];
+    const after = to || [];
+    const added = after.filter(x => !before.includes(x));
+    const removed = before.filter(x => !after.includes(x));
+    return [
+      added.length ? `added ${added.join(', ')}` : null,
+      removed.length ? `removed ${removed.join(', ')}` : null,
+    ].filter(Boolean).join('; ') || '—';
+  }
+
+  if ((from && typeof from === 'object') || (to && typeof to === 'object')) {
+    const before = from || {};
+    const after = to || {};
+    const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+      .filter(k => before[k] !== after[k]);
+    return keys.map(k => `${k}: ${before[k] ?? '—'} → ${after[k] ?? '—'}`).join('; ') || '—';
+  }
+
+  return `${historyValue(key, from, categoryNameById)} → ${historyValue(key, to, categoryNameById)}`;
+}
+
+// The generated title is derived (the server recomputes it on save), so it
+// never makes the form "dirty" on its own.
+const withoutGeneratedTitle = ({ generated_title, ...rest }) => rest;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Catalog Item Editor (Phase 1: General tab). Routes:
@@ -199,9 +334,8 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
   const [item, setItem] = useState(null);
   const [draft, setDraft] = useState(duplicate?.draft || EMPTY_DRAFT);
   const [savedDraft, setSavedDraft] = useState(duplicate?.draft || EMPTY_DRAFT);
-  const [regenerateRequested, setRegenerateRequested] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
   const [errors, setErrors] = useState({});
 
   const [categoryTree, setCategoryTree] = useState([]);
@@ -250,10 +384,8 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
   const categoryNameById = useMemo(() => Object.fromEntries(categories.map(c => [c.id, c.name])), [categories]);
 
   const isMerged = item?.status === 'MERGED';
-  const dirty = regenerateRequested || JSON.stringify(draft) !== JSON.stringify(savedDraft);
+  const dirty = JSON.stringify(withoutGeneratedTitle(draft)) !== JSON.stringify(withoutGeneratedTitle(savedDraft));
   const categoryChanged = !isNew && item && Number(draft.category_id) !== item.category_id;
-  const makeOrModelChanged = !isNew && item
-    && (draft.make_brand.trim() !== (item.make_brand || '') || draft.model_name.trim() !== (item.model_name || ''));
 
   const setField = (key) => (e) => {
     const value = e.target.value;
@@ -267,25 +399,59 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
     ? (duplicate?.fieldValues || [])
     : (item?.field_values || []).filter(f => f.value !== null).map(f => ({ field_definition_id: f.field_definition_id, value: f.value })));
 
-  const handleRegenerate = async () => {
-    if (!draft.category_id) {
-      setErrors(prev => ({ ...prev, category_id: 'Select a category first' }));
+  // Generated title follows its inputs automatically: previewed live
+  // (debounced) whenever Make, Model or Category change, and recomputed by the
+  // server on every save. Unchanged inputs just show the saved title.
+  const titleInputs = `${draft.category_id}|${draft.make_brand.trim()}|${draft.model_name.trim()}`;
+  useEffect(() => {
+    if (loading || !draft.category_id) return undefined;
+    const matchesSaved = !isNew && item
+      && Number(draft.category_id) === item.category_id
+      && draft.make_brand.trim() === (item.make_brand || '')
+      && draft.model_name.trim() === (item.model_name || '');
+    if (matchesSaved) {
+      const savedTitle = item.generated_title || '';
+      setDraft(prev => (prev.generated_title === savedTitle ? prev : { ...prev, generated_title: savedTitle }));
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await axios.post(`${API}/catalog-items/generate-title`, {
+          category_id: Number(draft.category_id),
+          make_brand: draft.make_brand,
+          model_name: draft.model_name,
+          field_values: currentFieldValues(),
+        });
+        if (!cancelled) setDraft(prev => ({ ...prev, generated_title: res.data.generated_title || '' }));
+      } catch (err) {
+        // Preview only — the server generates the real title on save.
+      }
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [titleInputs, loading]);
+
+  // Saved straight away (not part of Save Changes). Only the item record is
+  // refreshed, so any unsaved edits in the form are kept.
+  const handleImageUpload = async (file, source) => {
+    if (file.size > MAX_IMAGE_BYTES) {
+      enqueueSnackbar('Image must be 10 MB or smaller', { variant: 'warning' });
       return;
     }
-    setRegenerating(true);
+    setImageUploading(true);
     try {
-      const res = await axios.post(`${API}/catalog-items/generate-title`, {
-        category_id: Number(draft.category_id),
-        make_brand: draft.make_brand,
-        model_name: draft.model_name,
-        field_values: currentFieldValues(),
-      });
-      setDraft(prev => ({ ...prev, generated_title: res.data.generated_title || '' }));
-      if (!isNew) setRegenerateRequested(true);
+      const form = new FormData();
+      form.append('image', file);
+      form.append('source', source);
+      if (user?.id) form.append('employee_id', user.id);
+      const res = await axios.post(`${API}/catalog-items/${itemId}/images`, form);
+      setItem(res.data);
+      enqueueSnackbar('Reference image updated', { variant: 'success' });
     } catch (err) {
-      enqueueSnackbar(err.response?.data?.error || 'Failed to generate title', { variant: 'error' });
+      enqueueSnackbar(err.response?.data?.error || 'Failed to upload image', { variant: 'error' });
     } finally {
-      setRegenerating(false);
+      setImageUploading(false);
     }
   };
 
@@ -345,15 +511,11 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
         navigate(`/catalog/items/${res.data.id}`, { replace: true });
         return;
       }
-      const res = await axios.put(`${API}/catalog-items/${itemId}`, {
-        ...buildPayload(),
-        regenerate_title: regenerateRequested,
-      });
+      const res = await axios.put(`${API}/catalog-items/${itemId}`, buildPayload());
       const d = draftFromItem(res.data);
       setItem(res.data);
       setDraft(d);
       setSavedDraft(d);
-      setRegenerateRequested(false);
       enqueueSnackbar('Catalog item saved', { variant: 'success' });
     } catch (err) {
       enqueueSnackbar(err.response?.data?.error || 'Failed to save catalog item', { variant: 'error' });
@@ -396,7 +558,6 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
   const handleDiscard = () => {
     setSaveMenuAnchor(null);
     setDraft(savedDraft);
-    setRegenerateRequested(false);
     setErrors({});
   };
 
@@ -517,16 +678,13 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
 
         <Box sx={{ flex: 1 }} />
 
-        <Button variant="text" startIcon={<ArrowBackIcon />} onClick={() => navigate(CATALOG_MANAGER_PATH)}>
-          Back to Catalog Manager
-        </Button>
         {!isNew && (
           <>
             <Button variant="outlined" startIcon={<HistoryIcon />} onClick={openHistory}>History</Button>
             <Tooltip title={dirty ? 'Save your changes before duplicating' : ''}>
               <span>
                 <Button variant="outlined" startIcon={<ContentCopyIcon />} onClick={handleDuplicate} disabled={dirty}>
-                  Duplicate
+                  Copy
                 </Button>
               </span>
             </Tooltip>
@@ -608,25 +766,14 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
                   inputProps={{ maxLength: 200 }}
                 />
 
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', mb: 2 }}>
-                  <TextField
-                    fullWidth size="small" label="Title (generated)"
-                    value={draft.generated_title}
-                    placeholder={isNew ? 'Generated on create' : ''}
-                    InputProps={{ readOnly: true }}
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ '& .MuiInputBase-root': { bgcolor: 'grey.100' } }}
-                    helperText={makeOrModelChanged && !regenerateRequested
-                      ? 'Make/Model changed — Regenerate to update the title'
-                      : (regenerateRequested ? 'Regenerated — applied on save' : '')}
-                  />
-                  <Button variant="outlined" size="small" onClick={handleRegenerate}
-                    disabled={readOnly || regenerating}
-                    startIcon={regenerating ? <CircularProgress size={14} /> : <RefreshIcon />}
-                    sx={{ whiteSpace: 'nowrap', height: 40 }}>
-                    Regenerate
-                  </Button>
-                </Box>
+                <TextField
+                  fullWidth size="small" label="Title (generated)" sx={{ mb: 2, '& .MuiInputBase-root': { bgcolor: 'grey.100' } }}
+                  value={draft.generated_title}
+                  placeholder="Generated from Make / Brand and Model Name"
+                  InputProps={{ readOnly: true }}
+                  InputLabelProps={{ shrink: true }}
+                  helperText="Updates automatically when Make / Brand, Model Name or Category change."
+                />
 
                 <TextField
                   fullWidth size="small" label="Title Override (optional)"
@@ -707,7 +854,6 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
                 ) : (
                   <>
                     <SummaryRow label="Identifiers" value={`${item.summary.identifiers} total`} />
-                    <SummaryRow label="Fields Defined" value={`${item.summary.fields_defined} of ${item.summary.fields_available}`} />
                     <SummaryRow label="Aliases" value={item.summary.aliases} />
                     <SummaryRow label="Suggested Cost" value={formatMoney(item.pricing.suggested_cost)} />
                     <SummaryRow label="Suggested Retail" value={formatMoney(item.pricing.suggested_retail)} />
@@ -815,10 +961,13 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
 
         {/* ── Right column ─────────────────────────────────────────────── */}
         <Grid item xs={24} lg={7}>
-          <LaterPhasePanel
-            title="Reference Image"
-            icon={<ImageNotSupportedOutlinedIcon sx={{ fontSize: 40, color: 'text.disabled' }} />}
-            message="Catalog reference images are not available yet."
+          <ReferenceImagePanel
+            image={item?.primary_image || null}
+            uploading={imageUploading}
+            disabledReason={isNew
+              ? 'Create the catalog item first, then add its reference image'
+              : (isMerged ? 'Merged catalog items are read-only' : '')}
+            onUpload={handleImageUpload}
           />
           <LaterPhasePanel
             title="Item Intelligence"
@@ -923,9 +1072,7 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
                           {i > 0 && <Divider sx={{ my: 0.5 }} />}
                           <Typography variant="body2">
                             <strong>{HISTORY_FIELD_LABELS[key] || key}:</strong>{' '}
-                            {h.action === 'CREATE' || key === 'reclassified_inventory'
-                              ? historyValue(key, change.to, categoryNameById)
-                              : <>{historyValue(key, change.from, categoryNameById)} → {historyValue(key, change.to, categoryNameById)}</>}
+                            {describeHistoryChange(h.action, key, change, categoryNameById)}
                           </Typography>
                         </Fragment>
                       ))}

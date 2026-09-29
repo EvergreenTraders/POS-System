@@ -485,3 +485,31 @@ DROP TRIGGER IF EXISTS trg_catalog_items_assign_codes ON catalog_items;
 CREATE TRIGGER trg_catalog_items_assign_codes
   BEFORE INSERT ON catalog_items
   FOR EACH ROW EXECUTE PROCEDURE catalog_items_assign_codes();
+
+
+-- ============================================================
+-- 10. CATALOG ITEM IMAGES (doc §2 Catalog Image, §12)
+-- Reference/stock images for a Catalog Item — not intake photos, which stay
+-- on the inventory record. Files live in Evergreen-controlled storage
+-- (uploads/catalog/), never hot-linked. One image may be primary; replacing
+-- it keeps the previous row (non-primary) for history.
+-- source: how it was added — UPLOAD / CAMERA by staff, or a provider import
+-- (MANUFACTURER_API / EXTERNAL_PROVIDER, with source_url + provider).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS catalog_item_images (
+    id              SERIAL       PRIMARY KEY,
+    catalog_item_id INTEGER      NOT NULL REFERENCES catalog_items(id) ON DELETE CASCADE,
+    image_url       VARCHAR(500) NOT NULL,
+    is_primary      BOOLEAN      NOT NULL DEFAULT false,
+    source          VARCHAR(20)  NOT NULL DEFAULT 'UPLOAD'
+                        CHECK (source IN ('UPLOAD', 'CAMERA', 'MANUFACTURER_API', 'EXTERNAL_PROVIDER')),
+    source_url      TEXT,
+    provider        VARCHAR(100),
+    uploaded_by     INTEGER      REFERENCES employees(employee_id) ON DELETE SET NULL,
+    created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_images_item ON catalog_item_images(catalog_item_id);
+-- At most one primary image per Catalog Item.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_catalog_images_primary
+    ON catalog_item_images(catalog_item_id) WHERE is_primary;
