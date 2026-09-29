@@ -7,6 +7,7 @@ import {
 import * as MuiIcons from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
+import CameraCaptureDialog, { ImageFileInput } from '../components/CameraCaptureDialog';
 
 const GREEN      = '#2e5c3e';
 const DARK_GREEN = '#1a3d28';
@@ -122,6 +123,7 @@ export default function HardgoodsIntakeScreen({
   const [activeView, setActiveView] = useState(0);
   const [addViewOpen, setAddViewOpen] = useState(false);
   const [newViewLabel, setNewViewLabel] = useState('');
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   const [selectedSuggestion, setSelectedSuggestion] = useState('buy');
   const [paidAmount,   setPaidAmount]   = useState(editItem?.paid_amount != null ? String(editItem.paid_amount) : (editItem?.amount != null ? String(editItem.amount) : ''));
@@ -317,12 +319,11 @@ export default function HardgoodsIntakeScreen({
   }, [category]);
 
   // ── Photos ─────────────────────────────────────────────────────────────────
-  const handleFileSelected = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Photo for the active view — from the shared ImageFileInput (Upload) or
+  // CameraCaptureDialog (Take Photo); both report { file }.
+  const handleFileSelected = ({ file }) => {
     const url = URL.createObjectURL(file);
     setViews(prev => prev.map((v, i) => (i === activeView ? { ...v, image: { url, file } } : v)));
-    e.target.value = '';
   };
 
   const handleRemovePhoto = (idx) => {
@@ -607,16 +608,23 @@ export default function HardgoodsIntakeScreen({
               <Box sx={{ flex: 1 }} />
               {!readOnly && (
                 <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button size="small" variant="outlined" component="label" startIcon={<MuiIcons.PhotoCamera sx={{ fontSize: 16 }} />}
+                  <Button size="small" variant="outlined" startIcon={<MuiIcons.PhotoCamera sx={{ fontSize: 16 }} />}
+                    onClick={() => setCameraOpen(true)}
                     sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12.5 }}>
                     Take Photo
-                    <input type="file" hidden accept="image/*" capture="environment" onChange={handleFileSelected} />
                   </Button>
                   <Button size="small" variant="outlined" component="label" startIcon={<MuiIcons.Upload sx={{ fontSize: 16 }} />}
                     sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12.5 }}>
                     Upload
-                    <input type="file" hidden accept="image/*" onChange={handleFileSelected} />
+                    <ImageFileInput readAsDataUrl={false} onSelect={([picked]) => handleFileSelected(picked)} />
                   </Button>
+                  <CameraCaptureDialog
+                    open={cameraOpen}
+                    title={`Take Photo — ${views[activeView]?.label || 'Item'}`}
+                    onClose={() => setCameraOpen(false)}
+                    onCapture={result => { handleFileSelected(result); setCameraOpen(false); }}
+                    captureButtonSx={{ bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN } }}
+                  />
                   <Button size="small" variant="outlined" startIcon={<MuiIcons.Add sx={{ fontSize: 16 }} />}
                     onClick={() => setAddViewOpen(o => !o)}
                     sx={{ textTransform: 'none', borderRadius: 2, fontSize: 12.5 }}>

@@ -50,6 +50,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useAuth } from '../context/AuthContext';
 import { useSnackbar } from 'notistack';
 import config from '../config';
+import { ImageFileInput } from '../components/CameraCaptureDialog';
 import GemEstimator from './GemEstimator';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
 
@@ -2306,21 +2307,14 @@ function JewelryEdit() {
                     sx={{ mt: 1, width: '100%' }}
                   >
                     Upload Image
-                    <input
-                      type="file"
-                      hidden
-                      accept="image/*"
+                    <ImageFileInput
                       multiple
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files);
-                        if (files.length === 0) return;
-
+                      readAsDataUrl={false}
+                      onSelect={(results) => {
+                        const files = results.map(r => r.file);
                         // Store files locally for manual save
                         setPendingImages(prev => [...prev, ...files]);
                         enqueueSnackbar(`${files.length} image(s) selected. Click Save to upload.`, { variant: 'info' });
-
-                        // Clear the input value so the same file can be selected again
-                        e.target.value = '';
                       }}
                     />
                   </Button>

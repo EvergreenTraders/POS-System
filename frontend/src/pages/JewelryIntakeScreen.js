@@ -8,6 +8,7 @@ import {
 import * as MuiIcons from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
+import { CameraView, ImageFileInput } from '../components/CameraCaptureDialog';
 import { RadioGroup, Radio, Slider } from '@mui/material';
 
 const GREEN      = '#2e5c3e';
@@ -468,14 +469,8 @@ function ScrapPhotoCell({ image, onChange }) {
   const inputRef = useRef(null);
   return (
     <Box sx={{ width: 40, height: 40 }}>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        style={{ display: 'none' }}
-        onChange={e => { const f = e.target.files?.[0]; if (f) onChange(f); e.target.value = ''; }}
-      />
+      <ImageFileInput ref={inputRef} capture="environment" readAsDataUrl={false}
+        onSelect={([picked]) => onChange(picked.file)} />
       {image ? (
         <Box
           component="img"
@@ -513,13 +508,10 @@ export default function JewelryIntakeScreen({
   const [images,            setImages]            = useState([]);
   const [selectedImg,       setSelectedImg]       = useState(0);
   const [showCamera,        setShowCamera]        = useState(false);
-  const [stream,            setStream]            = useState(null);
-  const [isVideoReady,      setIsVideoReady]      = useState(false);
   const [isPopupOpen,       setIsPopupOpen]       = useState(false);
   const [popupImageIndex,   setPopupImageIndex]   = useState(0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isCameraEnabled,   setIsCameraEnabled]   = useState(false);
-  const videoRef          = useRef(null);
   const pendingPurityRef  = useRef(null);
   const parsedAppliedRef  = useRef(false);
   const editAppliedRef    = useRef(false);
@@ -920,63 +912,24 @@ export default function JewelryIntakeScreen({
 
   // ── Camera / image handlers (ported from JewelEstimator) ─────────────────
 
-  const handleFileUpload = (e) => {
-    const files = Array.from(e.target.files);
-    if (!files.length) return;
-    // Read as a data URL (not a blob: object URL) so the image survives being
-    // persisted to the workspace/localStorage and reopening the ticket later —
-    // blob URLs die on reload and a File object can't survive a JSON round-trip.
-    Promise.all(files.map(file => new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = () => resolve({ url: reader.result, isPrimary: false });
-      reader.readAsDataURL(file);
-    }))).then(newImages => {
-      setImages(prev => {
-        if (prev.length === 0 && newImages.length > 0) newImages[0].isPrimary = true;
-        const next = [...prev, ...newImages];
-        setSelectedImg(prev.length);
-        return next;
-      });
+  // Images keep their data URL (not a blob: object URL) so they survive being
+  // persisted to the workspace/localStorage and reopening the ticket later —
+  // blob URLs die on reload and a File object can't survive a JSON round-trip.
+  // Picking and capturing go through the shared ImageFileInput / CameraView.
+  const handleFileUpload = (results) => {
+    const newImages = results.map(r => ({ url: r.dataUrl, isPrimary: false }));
+    setImages(prev => {
+      if (prev.length === 0 && newImages.length > 0) newImages[0].isPrimary = true;
+      const next = [...prev, ...newImages];
+      setSelectedImg(prev.length);
+      return next;
     });
-    e.target.value = '';
   };
 
-  const startCamera = async () => {
-    setIsVideoReady(false);
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-      });
-      setStream(mediaStream);
-      setShowCamera(true);
-    } catch (err) {
-      console.error('Error accessing camera:', err);
-      alert('Could not access camera. Please check camera permissions.');
-    }
-  };
+  const startCamera = () => setShowCamera(true);
+  const stopCamera = () => setShowCamera(false);
 
-  const stopCamera = () => {
-    setIsVideoReady(false);
-    if (stream) stream.getTracks().forEach(t => t.stop());
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setStream(null);
-    setShowCamera(false);
-  };
-
-  const captureImage = () => {
-    if (!videoRef.current || !isVideoReady) {
-      alert('Camera is not ready yet. Please wait a moment.');
-      return;
-    }
-    const canvas = document.createElement('canvas');
-    canvas.width  = videoRef.current.videoWidth  || 1280;
-    canvas.height = videoRef.current.videoHeight || 720;
-    canvas.getContext('2d').drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    // Use a data URL (not a blob: object URL) so the captured photo survives
-    // being persisted to the workspace/localStorage and reopening the ticket
-    // later — blob URLs die on reload and a File object can't survive a JSON
-    // round-trip.
-    const url = canvas.toDataURL('image/jpeg', 0.9);
+  const captureImage = ({ dataUrl: url }) => {
     setImages(prev => {
       const newImg = { url, type: 'capture', isPrimary: prev.length === 0 };
       setSelectedImg(prev.length);
@@ -984,18 +937,6 @@ export default function JewelryIntakeScreen({
     });
     stopCamera();
   };
-
-  useEffect(() => {
-    if (stream && videoRef.current) {
-      videoRef.current.srcObject = stream;
-      const handleCanPlay = () => setIsVideoReady(true);
-      videoRef.current.addEventListener('canplay', handleCanPlay);
-      return () => videoRef.current?.removeEventListener('canplay', handleCanPlay);
-    }
-  }, [stream]);
-
-  // Stop camera on unmount
-  useEffect(() => () => { if (stream) stream.getTracks().forEach(t => t.stop()); }, [stream]);
 
   const openPopup  = (idx) => { setPopupImageIndex(idx); setIsPopupOpen(true); };
   const closePopup = ()    => setIsPopupOpen(false);
@@ -1498,14 +1439,13 @@ export default function JewelryIntakeScreen({
               {/* Main view: camera OR image OR placeholder */}
               <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
                 {showCamera ? (
-                  <Box sx={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
-                    <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '160px', objectFit: 'cover' }} />
-                    <Button size="small" variant="contained" startIcon={<MuiIcons.PhotoCamera sx={{ fontSize: 13 }} />}
-                      onClick={captureImage}
-                      sx={{ textTransform: 'none', fontSize: 12, bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN }, borderRadius: 1.5 }}>
-                      Capture
-                    </Button>
-                  </Box>
+                  <CameraView
+                    resolution={{ width: 1280, height: 720 }}
+                    onCapture={captureImage}
+                    videoStyle={{ height: '160px', objectFit: 'cover' }}
+                    captureButtonProps={{ sx: { textTransform: 'none', fontSize: 12, bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN }, borderRadius: 1.5 } }}
+                    sx={{ width: '100%' }}
+                  />
                 ) : images.length > 0 ? (
                   <>
                     <Box component="img" src={images[selectedImg]?.url} alt="Item"
@@ -1551,7 +1491,7 @@ export default function JewelryIntakeScreen({
             </Box>
 
             {/* Buttons */}
-            <input id="jewelry-upload-input" type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleFileUpload} />
+            <ImageFileInput id="jewelry-upload-input" multiple onSelect={handleFileUpload} />
             <Box sx={{ display: 'flex', gap: 1, p: 1.25, alignItems: 'center' }}>
               <Button size="small"
                 variant={showCamera ? 'outlined' : 'contained'}

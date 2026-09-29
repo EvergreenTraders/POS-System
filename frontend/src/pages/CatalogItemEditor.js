@@ -51,7 +51,7 @@ import { useSnackbar } from 'notistack';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
 import { flattenCategoryTree } from '../utils/categoryTree';
-import CameraCaptureDialog from '../components/CameraCaptureDialog';
+import CameraCaptureDialog, { ImageFileInput } from '../components/CameraCaptureDialog';
 
 const API = config.apiUrl;
 
@@ -237,17 +237,14 @@ function ReferenceImagePanel({ image, disabledReason, uploading, onUpload }) {
         <MenuItem onClick={pickFile}><FileUploadIcon fontSize="small" sx={{ mr: 1 }} /> Upload Image</MenuItem>
         <MenuItem onClick={openCamera}><PhotoCameraIcon fontSize="small" sx={{ mr: 1 }} /> Take Photo</MenuItem>
       </Menu>
-      <input ref={fileInputRef} type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif"
-        onChange={e => {
-          const file = e.target.files?.[0];
-          e.target.value = '';
-          if (file) onUpload(file, 'UPLOAD');
-        }} />
+      <ImageFileInput ref={fileInputRef} accept="image/jpeg,image/png,image/webp,image/gif" readAsDataUrl={false}
+        onSelect={([picked]) => onUpload(picked.file, 'UPLOAD')} />
       <CameraCaptureDialog
         open={cameraOpen}
         title="Take Reference Photo"
+        fileNamePrefix="catalog-reference"
         onClose={() => setCameraOpen(false)}
-        onCapture={file => { setCameraOpen(false); onUpload(file, 'CAMERA'); }}
+        onCapture={({ file }) => { setCameraOpen(false); onUpload(file, 'CAMERA'); }}
       />
     </Paper>
   );

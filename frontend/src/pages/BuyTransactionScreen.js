@@ -17,6 +17,7 @@ import { parseQuickScrapEntry } from '../utils/quickScrapEntry';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
 import HardgoodsIntakeScreen from './HardgoodsIntakeScreen';
 import FindMatchingItemScreen from './FindMatchingItemScreen';
+import CameraCaptureDialog, { ITEM_PHOTO_DIALOG_PROPS } from '../components/CameraCaptureDialog';
 
 const BUY_BLUE  = '#0284c7';
 const BUY_DARK  = '#0369a1';
@@ -176,12 +177,9 @@ export default function BuyTransactionScreen({
   const [pendingConvert,   setPendingConvert]   = useState(null); // { type, item, targetTicketId }
   const prevItemCountRef = useRef(buyItems.length);
   const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
-  const [cameraStream,     setCameraStream]     = useState(null);
   const [photoTargetId,    setPhotoTargetId]    = useState(null);
-  const [isCamReady,       setIsCamReady]       = useState(false);
   const [snackbar, setSnackbar]         = useState({ open: false, message: '', severity: 'success' });
   const quickInputRef  = useRef(null);
-  const cameraVideoRef = useRef(null);
 
   const showSnackbar = (msg, sev = 'success') => setSnackbar({ open: true, message: msg, severity: sev });
   const fmt = (n) => `$${Number(n).toFixed(2)}`;
@@ -566,45 +564,23 @@ export default function BuyTransactionScreen({
     setIntakeOpen(false);
   };
 
+  // Item photo — camera handled by the shared CameraCaptureDialog.
   const openItemCamera = (_lineId) => {
     setPhotoTargetId(_lineId);
-    setIsCamReady(false);
     setCameraDialogOpen(true);
   };
 
-  const handleCameraDialogEntered = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      setCameraStream(stream);
-      if (cameraVideoRef.current) cameraVideoRef.current.srcObject = stream;
-    } catch (err) {
-      console.error('Camera error:', err);
-      closeItemCamera();
-    }
-  };
-
-  const captureItemPhoto = () => {
-    const video = cameraVideoRef.current;
-    if (!video) return;
-    const canvas = document.createElement('canvas');
-    canvas.width  = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    canvas.toBlob(blob => {
-      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      const url  = URL.createObjectURL(file);
-      setBuyItems(prev => prev.map(item =>
-        item._lineId === photoTargetId
-          ? { ...item, images: [...(item.images || []), { url, file, isPrimary: !(item.images?.length), type: 'capture' }] }
-          : item
-      ));
-      closeItemCamera();
-    }, 'image/jpeg', 0.9);
+  const captureItemPhoto = ({ file }) => {
+    const url = URL.createObjectURL(file);
+    setBuyItems(prev => prev.map(item =>
+      item._lineId === photoTargetId
+        ? { ...item, images: [...(item.images || []), { url, file, isPrimary: !(item.images?.length), type: 'capture' }] }
+        : item
+    ));
+    closeItemCamera();
   };
 
   const closeItemCamera = () => {
-    if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); setCameraStream(null); }
-    setIsCamReady(false);
     setCameraDialogOpen(false);
     setPhotoTargetId(null);
   };
@@ -1237,21 +1213,13 @@ export default function BuyTransactionScreen({
       </Paper>
 
       {/* Camera dialog */}
-      <Dialog open={cameraDialogOpen} onClose={closeItemCamera} maxWidth="sm" fullWidth
-        TransitionProps={{ onEntered: handleCameraDialogEntered }}>
-        <DialogContent sx={{ p: 1.5, bgcolor: '#000' }}>
-          <video ref={cameraVideoRef} autoPlay playsInline onCanPlay={() => setIsCamReady(true)}
-            style={{ width: '100%', borderRadius: 8, display: 'block' }} />
-        </DialogContent>
-        <DialogActions sx={{ justifyContent: 'space-between', px: 2 }}>
-          <Button onClick={closeItemCamera} color="inherit">Cancel</Button>
-          <Button variant="contained" onClick={captureItemPhoto} disabled={!isCamReady}
-            startIcon={<MuiIcons.PhotoCamera />}
-            sx={{ bgcolor: BUY_BLUE, '&:hover': { bgcolor: BUY_DARK }, textTransform: 'none' }}>
-            Capture
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <CameraCaptureDialog
+        {...ITEM_PHOTO_DIALOG_PROPS}
+        open={cameraDialogOpen}
+        onClose={closeItemCamera}
+        onCapture={captureItemPhoto}
+        captureButtonSx={{ bgcolor: BUY_BLUE, '&:hover': { bgcolor: BUY_DARK } }}
+      />
 
       {/* Convert menu */}
       <Menu anchorEl={convertAnchor} open={Boolean(convertAnchor)} onClose={() => { setConvertAnchor(null); setConvertRow(null); }}>

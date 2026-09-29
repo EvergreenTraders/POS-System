@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Grid, Paper, TextField, Button, FormControl,
   InputLabel, Select, MenuItem, CircularProgress, Snackbar, Alert,
-  Dialog, DialogTitle, DialogContent, DialogActions, Container,
-  FormControlLabel, Checkbox
+  Container, FormControlLabel, Checkbox
 } from '@mui/material';
 import { Country, State, City } from 'country-state-city';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
+import CameraCaptureDialog from '../components/CameraCaptureDialog';
 
 // Converts a Buffer-like object (from backend) to a base64 data URL for image preview
 function bufferToDataUrl(bufferObj) {
@@ -30,11 +30,7 @@ const CustomerEditor = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
   const [showCamera, setShowCamera] = useState(false);
   const [currentCaptureMode, setCurrentCaptureMode] = useState('customer'); // 'customer', 'id_front', or 'id_back'
-  
-  // Refs for camera functionality
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  
+
   // Get customer data from location state if available
   useEffect(() => {
     if (location.state?.customer) {
@@ -64,71 +60,17 @@ const CustomerEditor = () => {
     }
   };
 
-  // Camera functions
-  useEffect(() => {
-    if (showCamera) {
-      startCamera();
-    } else {
-      stopCamera();
+  // Camera (start/stop/capture) is the shared CameraCaptureDialog; the file
+  // lands in the form field for the current capture mode.
+  const captureImage = ({ file }) => {
+    if (currentCaptureMode === 'customer') {
+      setFormData(prev => ({ ...prev, image: file }));
+    } else if (currentCaptureMode === 'id_front') {
+      setFormData(prev => ({ ...prev, id_image_front: file }));
+    } else if (currentCaptureMode === 'id_back') {
+      setFormData(prev => ({ ...prev, id_image_back: file }));
     }
-    return () => { stopCamera(); };
-    // eslint-disable-next-line
-  }, [showCamera]);
-
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-    } catch (err) {
-      alert('Unable to access camera.');
-      setShowCamera(false);
-    }
-  };
-  
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  };
-  
-  const captureImage = () => {
-    if (!videoRef.current) return;
-    const video = videoRef.current;
-    
-    // Create a canvas element to capture the image
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    // Convert the canvas to a data URL
-    const dataUrl = canvas.toDataURL('image/jpeg');
-    
-    // Convert data URL to File object for easier handling
-    fetch(dataUrl)
-      .then(res => res.blob())
-      .then(blob => {
-        const file = new File([blob], `${currentCaptureMode}_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        
-        // Set the appropriate image based on the capture mode
-        if (currentCaptureMode === 'customer') {
-          setFormData(prev => ({ ...prev, image: file }));
-        } else if (currentCaptureMode === 'id_front') {
-          setFormData(prev => ({ ...prev, id_image_front: file }));
-        } else if (currentCaptureMode === 'id_back') {
-          setFormData(prev => ({ ...prev, id_image_back: file }));
-        }
-        
-        setShowCamera(false);
-      });
+    setShowCamera(false);
   };
 
   // Country / state / city derived lists
@@ -773,34 +715,17 @@ const CustomerEditor = () => {
       </Paper>
 
       {/* Camera Dialog */}
-      <Dialog open={showCamera} onClose={() => { stopCamera(); setShowCamera(false); }} maxWidth="xs" fullWidth>
-        <DialogTitle>
-          {currentCaptureMode === 'id_front' ? 'Capture ID Front' : 
-           currentCaptureMode === 'id_back' ? 'Capture ID Back' : 
-           'Capture Customer Photo'}
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              style={{ width: '100%', maxHeight: 200, background: '#222', borderRadius: 8 }}
-            />
-            <Button
-              variant="contained"
-              color="primary"
-              sx={{ mt: 2 }}
-              onClick={captureImage}
-            >
-              Capture
-            </Button>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => { stopCamera(); setShowCamera(false); }}>Cancel</Button>
-        </DialogActions>
-      </Dialog>
+      <CameraCaptureDialog
+        open={showCamera}
+        title={currentCaptureMode === 'id_front' ? 'Capture ID Front'
+          : currentCaptureMode === 'id_back' ? 'Capture ID Back'
+          : 'Capture Customer Photo'}
+        facingMode="user"
+        maxWidth="xs"
+        fileNamePrefix={currentCaptureMode}
+        onClose={() => setShowCamera(false)}
+        onCapture={captureImage}
+      />
 
       {/* Snackbar for notifications */}
       <Snackbar

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
 import config from '../config';
 import { openPawnReceiptPDF } from '../utils/ticketReceiptUtils';
+import CameraCaptureDialog, { ImageFileInput } from '../components/CameraCaptureDialog';
 import {
   Box, Typography, Paper, CircularProgress, Button, Chip,
   TextField, FormControl, InputLabel, Select, MenuItem,
@@ -45,7 +46,7 @@ export default function RePawnIntakeScreen({
     String(parseFloat(selectedItem?.amount || selectedItem?.item_price || 0).toFixed(2))
   );
   const photoInputRef  = useRef(null);
-  const cameraInputRef = useRef(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   const backendBase = config.apiUrl.replace('/api', '');
 
@@ -84,17 +85,11 @@ export default function RePawnIntakeScreen({
     };
   }, [pawnHistory]);
 
-  const handlePhotoChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // Read as a data URL (not a blob: object URL) so the intake photo survives
-    // being persisted to the workspace/localStorage and reopening the ticket
-    // later — blob URLs die on reload and a File object can't survive a JSON
-    // round-trip.
-    const reader = new FileReader();
-    reader.onload = () => setPhotoPreview(reader.result);
-    reader.readAsDataURL(file);
-  };
+  // Keep the data URL (not a blob: object URL) so the intake photo survives
+  // being persisted to the workspace/localStorage and reopening the ticket
+  // later — blob URLs die on reload and a File object can't survive a JSON
+  // round-trip. Fed by the shared ImageFileInput / CameraCaptureDialog.
+  const handlePhotoChange = ({ dataUrl }) => setPhotoPreview(dataUrl);
 
   const buildItem = () => {
     // item_id is intentionally dropped here — a re-pawned item gets a brand
@@ -308,11 +303,16 @@ export default function RePawnIntakeScreen({
                     </Box>
                   )}
                 </Box>
-                <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handlePhotoChange} />
-                <input ref={photoInputRef}  type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoChange} />
+                <ImageFileInput ref={photoInputRef} onSelect={([picked]) => handlePhotoChange(picked)} />
+                <CameraCaptureDialog
+                  open={cameraOpen}
+                  title="Take Intake Photo"
+                  onClose={() => setCameraOpen(false)}
+                  onCapture={result => { handlePhotoChange(result); setCameraOpen(false); }}
+                />
                 <Box sx={{ display: 'flex', gap: 0.75 }}>
                   <Button size="small" variant="outlined" startIcon={<MuiIcons.PhotoCamera sx={{ fontSize: 13 }} />}
-                    onClick={() => cameraInputRef.current?.click()}
+                    onClick={() => setCameraOpen(true)}
                     sx={{ flex: 1, textTransform: 'none', fontSize: 11, borderRadius: 1.5 }}>
                     Take Photo
                   </Button>

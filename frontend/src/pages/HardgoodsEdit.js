@@ -27,6 +27,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useSnackbar } from 'notistack';
 import config from '../config';
+import { ImageFileInput } from '../components/CameraCaptureDialog';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -518,13 +519,10 @@ function HardgoodsEdit() {
         ))}
         <Button variant="outlined" size="small" component="label" startIcon={<AddIcon />} sx={{ height: 80, minWidth: 100, flexShrink: 0 }}>
           Add Photos
-          <input type="file" hidden multiple accept="image/*" onChange={e => {
-            const files = Array.from(e.target.files);
-            if (files.length) {
-              setPendingImages(prev => [...prev, ...files]);
-              enqueueSnackbar(`${files.length} photo(s) selected — click Save to upload`, { variant: 'info' });
-            }
-            e.target.value = '';
+          <ImageFileInput multiple readAsDataUrl={false} onSelect={results => {
+            const files = results.map(r => r.file);
+            setPendingImages(prev => [...prev, ...files]);
+            enqueueSnackbar(`${files.length} photo(s) selected — click Save to upload`, { variant: 'info' });
           }} />
         </Button>
         {pendingImages.length > 0 && (

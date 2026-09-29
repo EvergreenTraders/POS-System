@@ -8,6 +8,7 @@ import {
 } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import config from '../config';
+import CameraCaptureDialog from '../components/CameraCaptureDialog';
 import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
 import { useStoreStatus } from '../context/StoreStatusContext';
@@ -80,9 +81,6 @@ const CustomerTicket = () => {
   const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
   const [currentCaptureItemId, setCurrentCaptureItemId] = useState(null);
   const [currentCaptureItemType, setCurrentCaptureItemType] = useState(null); // 'pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund', 'redeem'
-  const [videoStream, setVideoStream] = useState(null);
-  const videoRef = React.useRef(null);
-  const canvasRef = React.useRef(null);
 
   // Combined estimator dialog state
   const [combinedDialogOpen, setCombinedDialogOpen] = useState(false);
@@ -276,45 +274,14 @@ const CustomerTicket = () => {
     setCameraDialogOpen(true);
   };
 
+  // The camera itself (start/stop/capture) is the shared CameraCaptureDialog.
   const handleCloseCamera = () => {
-    // Stop video stream
-    if (videoStream) {
-      videoStream.getTracks().forEach(track => track.stop());
-      setVideoStream(null);
-    }
     setCameraDialogOpen(false);
     setCurrentCaptureItemId(null);
     setCurrentCaptureItemType(null);
   };
 
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' } // Prefer back camera on mobile
-      });
-      setVideoStream(stream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-    } catch (error) {
-      console.error('Error accessing camera:', error);
-      showSnackbar('Unable to access camera. Please check permissions.', 'error');
-    }
-  };
-
-  const captureImage = () => {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    // Convert canvas to data URL
-    const imageDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+  const captureImage = ({ dataUrl: imageDataUrl }) => {
 
     // Update the appropriate item type with the captured image
     const updateItemImages = (prevItems) =>
@@ -359,22 +326,6 @@ const CustomerTicket = () => {
     showSnackbar('Image captured successfully', 'success');
     handleCloseCamera();
   };
-
-  // Start camera when dialog opens
-  React.useEffect(() => {
-    if (cameraDialogOpen) {
-      startCamera();
-    }
-  }, [cameraDialogOpen]);
-
-  // Cleanup camera stream on unmount
-  React.useEffect(() => {
-    return () => {
-      if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [videoStream]);
 
   // Fetch metal categories, colors, and types on component mount
   React.useEffect(() => {
@@ -6087,43 +6038,14 @@ return (
       </Menu>
 
       {/* Camera Capture Dialog */}
-      <Dialog
+      <CameraCaptureDialog
         open={cameraDialogOpen}
-        onClose={handleCloseCamera}
+        title="Capture Image"
         maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>
-          Capture Image
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, pt: 1 }}>
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              style={{
-                width: '100%',
-                maxWidth: '500px',
-                borderRadius: '8px',
-                backgroundColor: '#000'
-              }}
-            />
-            <canvas
-              ref={canvasRef}
-              style={{ display: 'none' }}
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseCamera} color="secondary">
-            Cancel
-          </Button>
-          <Button onClick={captureImage} variant="contained" color="primary">
-            Capture
-          </Button>
-        </DialogActions>
-      </Dialog>
+        quality={0.8}
+        onClose={handleCloseCamera}
+        onCapture={captureImage}
+      />
 
       {/* Combined Jewelry Estimator Dialog */}
       <Dialog

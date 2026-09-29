@@ -13,6 +13,7 @@ import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
+import CameraCaptureDialog, { ITEM_PHOTO_DIALOG_PROPS } from '../components/CameraCaptureDialog';
 import { generateBuyTicketId, commitBuyTicketId, parseItemDescription } from './BuyTransactionScreen';
 import { generateSaleTicketId, commitSaleTicketId } from './SaleTransactionScreen';
 
@@ -161,11 +162,8 @@ export default function TradeTransactionScreen({
 
   // Camera
   const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
-  const [cameraStream,     setCameraStream]     = useState(null);
   const [photoTargetType,  setPhotoTargetType]  = useState(null); // 'trade' or 'sale'
   const [photoTargetId,    setPhotoTargetId]    = useState(null);
-  const [isCamReady,       setIsCamReady]       = useState(false);
-  const cameraVideoRef = useRef(null);
 
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   // null | 'noSale' | 'noTradeIn'
@@ -564,55 +562,33 @@ export default function TradeTransactionScreen({
 
   // ── Camera ───────────────────────────────────────────────────────────────────
 
+  // Camera handled by the shared CameraCaptureDialog.
   const openCamera = (type, _lineId) => {
     setPhotoTargetType(type);
     setPhotoTargetId(_lineId);
-    setIsCamReady(false);
     setCameraDialogOpen(true);
   };
 
-  const handleCameraEntered = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      setCameraStream(stream);
-      if (cameraVideoRef.current) cameraVideoRef.current.srcObject = stream;
-    } catch (err) {
-      console.error('Camera error:', err);
-      closeCamera();
+  const capturePhoto = ({ file }) => {
+    const url = URL.createObjectURL(file);
+    const newImg = { url, file, isPrimary: true, type: 'capture' };
+    if (photoTargetType === 'trade') {
+      setTradeItems(prev => prev.map(i =>
+        i._lineId === photoTargetId
+          ? { ...i, images: [...(i.images || []), { ...newImg, isPrimary: !(i.images?.length) }] }
+          : i
+      ));
+    } else {
+      setSaleItems(prev => prev.map(i =>
+        i._lineId === photoTargetId
+          ? { ...i, images: [...(i.images || []), { ...newImg, isPrimary: !(i.images?.length) }] }
+          : i
+      ));
     }
-  };
-
-  const capturePhoto = () => {
-    const video = cameraVideoRef.current;
-    if (!video) return;
-    const canvas = document.createElement('canvas');
-    canvas.width  = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    canvas.toBlob(blob => {
-      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      const url  = URL.createObjectURL(file);
-      const newImg = { url, file, isPrimary: true, type: 'capture' };
-      if (photoTargetType === 'trade') {
-        setTradeItems(prev => prev.map(i =>
-          i._lineId === photoTargetId
-            ? { ...i, images: [...(i.images || []), { ...newImg, isPrimary: !(i.images?.length) }] }
-            : i
-        ));
-      } else {
-        setSaleItems(prev => prev.map(i =>
-          i._lineId === photoTargetId
-            ? { ...i, images: [...(i.images || []), { ...newImg, isPrimary: !(i.images?.length) }] }
-            : i
-        ));
-      }
-      closeCamera();
-    }, 'image/jpeg', 0.9);
+    closeCamera();
   };
 
   const closeCamera = () => {
-    if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); setCameraStream(null); }
-    setIsCamReady(false);
     setCameraDialogOpen(false);
     setPhotoTargetType(null);
     setPhotoTargetId(null);
@@ -1736,21 +1712,13 @@ export default function TradeTransactionScreen({
       </Dialog>
 
       {/* Camera dialog */}
-      <Dialog open={cameraDialogOpen} onClose={closeCamera} maxWidth="sm" fullWidth
-        TransitionProps={{ onEntered: handleCameraEntered }}>
-        <DialogContent sx={{ p: 1.5, bgcolor: '#000' }}>
-          <video ref={cameraVideoRef} autoPlay playsInline onCanPlay={() => setIsCamReady(true)}
-            style={{ width: '100%', borderRadius: 8, display: 'block' }} />
-        </DialogContent>
-        <DialogActions sx={{ justifyContent: 'space-between', px: 2 }}>
-          <Button onClick={closeCamera} color="inherit">Cancel</Button>
-          <Button variant="contained" onClick={capturePhoto} disabled={!isCamReady}
-            startIcon={<MuiIcons.PhotoCamera />}
-            sx={{ bgcolor: TRADE_TEAL, '&:hover': { bgcolor: TRADE_DARK }, textTransform: 'none' }}>
-            Capture
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <CameraCaptureDialog
+        {...ITEM_PHOTO_DIALOG_PROPS}
+        open={cameraDialogOpen}
+        onClose={closeCamera}
+        onCapture={capturePhoto}
+        captureButtonSx={{ bgcolor: TRADE_TEAL, '&:hover': { bgcolor: TRADE_DARK } }}
+      />
 
       {/* Wrong ticket type warning */}
       <Dialog

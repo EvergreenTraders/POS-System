@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Grid, Paper, List, ListItem, ListItemText, Divider, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, IconButton, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Container, Avatar
 } from '@mui/material';
@@ -15,6 +15,7 @@ import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
 import { useWorkingDate } from '../context/WorkingDateContext';
+import CameraCaptureDialog from '../components/CameraCaptureDialog';
 import axios from 'axios';
 
 const messages = [
@@ -62,9 +63,7 @@ const Home = () => {
   const [currentCaptureMode, setCurrentCaptureMode] = useState('customer'); // 'customer', 'id_front', or 'id_back'
   // Hover state for search results dialog
   const [hoveredCustomerIdx, setHoveredCustomerIdx] = useState(null);
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  
+
   // Helper function to convert dataURL to File object (moved from handleEdit scope to component scope)
   const urlToFile = async (url, filename = 'customer-photo.jpg') => {
     try {
@@ -75,64 +74,18 @@ const Home = () => {
     } catch (e) { return null; }
   };
 
-  // Start camera when dialog opens
-  useEffect(() => {
-    if (showCamera) {
-      startCamera();
+  // Camera (start/stop/capture) is the shared CameraCaptureDialog; the file
+  // lands in the form field for the current capture mode.
+  const captureImage = ({ file }) => {
+    if (currentCaptureMode === 'id_front') {
+      setFormData(prev => ({ ...prev, id_image_front: file }));
+    } else if (currentCaptureMode === 'id_back') {
+      setFormData(prev => ({ ...prev, id_image_back: file }));
     } else {
-      stopCamera();
+      // Default to customer photo
+      setFormData(prev => ({ ...prev, image: file }));
     }
-    return () => { stopCamera(); };
-    // eslint-disable-next-line
-  }, [showCamera]);
-
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-    } catch (err) {
-      alert('Unable to access camera.');
-      setShowCamera(false);
-    }
-  };
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  };
-  const captureImage = () => {
-    if (!videoRef.current) return;
-    const video = videoRef.current;
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 320;
-    canvas.height = video.videoHeight || 240;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob(blob => {
-      if (blob) {
-        // Create different filenames based on capture mode
-        const filename = `${currentCaptureMode}-${Date.now()}.jpg`;
-        const file = new File([blob], filename, { type: 'image/jpeg' });
-        
-        // Update the appropriate form field based on capture mode
-        if (currentCaptureMode === 'id_front') {
-          setFormData(prev => ({ ...prev, id_image_front: file }));
-        } else if (currentCaptureMode === 'id_back') {
-          setFormData(prev => ({ ...prev, id_image_back: file }));
-        } else {
-          // Default to customer photo
-          setFormData(prev => ({ ...prev, image: file }));
-        }
-        setShowCamera(false);
-      }
-    }, 'image/jpeg', 0.9);
+    setShowCamera(false);
   };
 
   const navigate = useNavigate();
@@ -1133,34 +1086,17 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                       </Button>
                     )}
                     {/* Camera Dialog */}
-                    <Dialog open={showCamera} onClose={() => { stopCamera(); setShowCamera(false); }} maxWidth="xs" fullWidth>
-                       <DialogTitle>
-                         {currentCaptureMode === 'id_front' ? 'Capture ID Front' : 
-                          currentCaptureMode === 'id_back' ? 'Capture ID Back' : 
-                          'Capture Customer Photo'}
-                       </DialogTitle>
-                      <DialogContent>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <video
-                            ref={videoRef}
-                            autoPlay
-                            playsInline
-                            style={{ width: '100%', maxHeight: 240, background: '#222', borderRadius: 8 }}
-                          />
-                          <Button
-                            variant="contained"
-                            color="primary"
-                            sx={{ mt: 2 }}
-                            onClick={captureImage}
-                          >
-                            Capture
-                          </Button>
-                        </Box>
-                      </DialogContent>
-                      <DialogActions>
-                        <Button onClick={() => { stopCamera(); setShowCamera(false); }}>Cancel</Button>
-                      </DialogActions>
-                    </Dialog>
+                    <CameraCaptureDialog
+                      open={showCamera}
+                      title={currentCaptureMode === 'id_front' ? 'Capture ID Front'
+                        : currentCaptureMode === 'id_back' ? 'Capture ID Back'
+                        : 'Capture Customer Photo'}
+                      facingMode="user"
+                      maxWidth="xs"
+                      fileNamePrefix={currentCaptureMode}
+                      onClose={() => setShowCamera(false)}
+                      onCapture={captureImage}
+                    />
                   </Grid>
                   {/* Main Fields on the right */}
                   <Grid item xs={12} sm={9} md={9}>

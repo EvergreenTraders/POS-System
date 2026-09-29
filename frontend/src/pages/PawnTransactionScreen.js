@@ -14,6 +14,7 @@ import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
 import HardgoodsIntakeScreen from './HardgoodsIntakeScreen';
 import FindMatchingItemScreen from './FindMatchingItemScreen';
+import CameraCaptureDialog, { ITEM_PHOTO_DIALOG_PROPS } from '../components/CameraCaptureDialog';
 import RePawnSelector from './RePawnSelector';
 import RePawnIntakeScreen from './RePawnIntakeScreen';
 import { useAuth } from '../context/AuthContext';
@@ -167,7 +168,6 @@ export default function PawnTransactionScreen({
   const [emptyTicketDialogOpen, setEmptyTicketDialogOpen] = useState(false);
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
-  const [cameraStream,     setCameraStream]     = useState(null);
   const [customizeOpen,    setCustomizeOpen]    = useState(false);
   const [localConfig,      setLocalConfig]      = useState(null);
   const [savingConfig,     setSavingConfig]     = useState(false);
@@ -176,7 +176,6 @@ export default function PawnTransactionScreen({
   const [mgmtPassword,     setMgmtPassword]     = useState('');
   const [mgmtError,        setMgmtError]        = useState('');
   const [mgmtLoading,      setMgmtLoading]      = useState(false);
-  const [isCamReady,       setIsCamReady]       = useState(false);
   const [snackbar,         setSnackbar]         = useState({ open: false, message: '', severity: 'success' });
   const [pawnFilter,       setPawnFilter]       = useState('active');
   const [itemViewOpen,     setItemViewOpen]     = useState(false);
@@ -184,7 +183,6 @@ export default function PawnTransactionScreen({
   const [receiptLoading,   setReceiptLoading]   = useState(false);
   const [pawnRequiredFields,      setPawnRequiredFields]      = useState([]);
   const [customerValidationErrors, setCustomerValidationErrors] = useState([]);
-  const cameraVideoRef  = useRef(null);
   const quickDescRef    = useRef(null);
   const quickSerialRef  = useRef(null);
   const quickAmtRef     = useRef(null);
@@ -551,37 +549,17 @@ export default function PawnTransactionScreen({
     }
   };
 
+  // Item photo — camera handled by the shared CameraCaptureDialog.
   const openItemCamera = (itemId) => {
     setPhotoTargetId(itemId);
-    setIsCamReady(false);
     setCameraDialogOpen(true);
   };
 
-  const handleCameraDialogEntered = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      setCameraStream(stream);
-      if (cameraVideoRef.current) {
-        cameraVideoRef.current.srcObject = stream;
-      }
-    } catch (err) {
-      console.error('Camera error:', err);
-      closeItemCamera();
-    }
-  };
-
-  const captureItemPhoto = () => {
-    const video = cameraVideoRef.current;
-    if (!video) return;
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    // Use a data URL (not a blob: object URL) so the captured photo survives
-    // being persisted to the workspace/localStorage and reopening the ticket
-    // later — blob URLs die on reload and a File object can't survive a JSON
-    // round-trip.
-    const url = canvas.toDataURL('image/jpeg', 0.9);
+  // Keep the data URL (not a blob: object URL) so the captured photo survives
+  // being persisted to the workspace/localStorage and reopening the ticket
+  // later — blob URLs die on reload and a File object can't survive a JSON
+  // round-trip.
+  const captureItemPhoto = ({ dataUrl: url }) => {
     setPawnItems(prev => prev.map(item =>
       item.id === photoTargetId
         ? { ...item, images: [...(item.images || []), { url, isPrimary: !(item.images?.length), type: 'capture' }] }
@@ -591,8 +569,6 @@ export default function PawnTransactionScreen({
   };
 
   const closeItemCamera = () => {
-    if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); setCameraStream(null); }
-    setIsCamReady(false);
     setCameraDialogOpen(false);
     setPhotoTargetId(null);
   };
@@ -1500,21 +1476,13 @@ export default function PawnTransactionScreen({
       </Paper>
 
       {/* Camera dialog for item photos */}
-      <Dialog open={cameraDialogOpen} onClose={closeItemCamera} maxWidth="sm" fullWidth
-        TransitionProps={{ onEntered: handleCameraDialogEntered }}>
-        <DialogContent sx={{ p: 1.5, bgcolor: '#000' }}>
-          <video ref={cameraVideoRef} autoPlay playsInline onCanPlay={() => setIsCamReady(true)}
-            style={{ width: '100%', borderRadius: 8, display: 'block' }} />
-        </DialogContent>
-        <DialogActions sx={{ justifyContent: 'space-between', px: 2 }}>
-          <Button onClick={closeItemCamera} color="inherit">Cancel</Button>
-          <Button variant="contained" onClick={captureItemPhoto} disabled={!isCamReady}
-            startIcon={<MuiIcons.PhotoCamera />}
-            sx={{ bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK }, textTransform: 'none' }}>
-            Capture
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <CameraCaptureDialog
+        {...ITEM_PHOTO_DIALOG_PROPS}
+        open={cameraDialogOpen}
+        onClose={closeItemCamera}
+        onCapture={captureItemPhoto}
+        captureButtonSx={{ bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}
+      />
 
       {/* Convert menu */}
       <Menu anchorEl={convertAnchor} open={Boolean(convertAnchor)} onClose={() => { setConvertAnchor(null); setConvertRow(null); }}>
