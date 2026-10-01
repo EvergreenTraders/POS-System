@@ -16623,6 +16623,239 @@ app.post('/api/categories/:id/description-config/reset', async (req, res) => {
 });
 
 // ============================================================
+// PROCESSING COMPLETION RULES (Category Manager Processing doc, §3)
+// * Fields a category marks "Required At: Processing" must be filled in on
+//   the item before Processing can complete.
+// * Completing Processing is the action that makes the item sellable.
+// processing_status / processing_queue / current_location / sellable_status
+// stay separate columns on the item record.
+// ============================================================
+
+// Labels of the item's Required-At-Processing fields that are still empty.
+async function missingProcessingFields(client, itemId, categoryId) {
+  if (!categoryId) return [];
+  const { fields } = await resolveEffectiveFields(categoryId);
+  const required = fields.filter(f => f.required_at === 'PROCESSING');
+  if (!required.length) return [];
+  const attrs = await client.query(
+    'SELECT field_key, field_value FROM hardgoods_attributes WHERE item_id = $1',
+    [itemId]
+  );
+  const filled = new Set(attrs.rows
+    .filter(a => a.field_value !== null && String(a.field_value).trim() !== '')
+    .map(a => a.field_key));
+  return required.filter(f => !filled.has(f.field_key)).map(f => f.label_override || f.field_label || f.field_key);
+}
+
+const processingIncompleteResponse = (res, missing) => res.status(409).json({
+  error: `Processing can't be completed — required fields are missing: ${missing.join(', ')}`,
+  missing_fields: missing,
+});
+
+// ============================================================
+// CATEGORY PROCESSING — Category Manager "Processing" tab. A staff-built
+// library of processing requirements (nothing hard-coded), which each
+// category turns on/off, plus an editable per-category checklist. Both
+// inherit from the parent category. Stored as defaults only — no per-item
+// checklist tracking exists yet, so nothing is enforced from these.
+// ============================================================
+
+const cleanRequirementName = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
+
+// GET /api/processing-requirements — the library
+app.get('/api/processing-requirements', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, name, description FROM processing_requirements ORDER BY lower(name)');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching processing requirements:', err);
+    res.status(500).json({ error: 'Failed to fetch processing requirements' });
+  }
+});
+
+// POST /api/processing-requirements — { name, description }
+app.post('/api/processing-requirements', async (req, res) => {
+  try {
+    const name = cleanRequirementName(req.body.name);
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    if (name.length > 100) return res.status(400).json({ error: 'Name must be 100 characters or fewer' });
+    const result = await pool.query(
+      'INSERT INTO processing_requirements (name, description) VALUES ($1, $2) RETURNING id, name, description',
+      [name, trimOrNull(req.body.description)]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'A requirement with this name already exists' });
+    console.error('Error creating processing requirement:', err);
+    res.status(500).json({ error: 'Failed to create processing requirement' });
+  }
+});
+
+// PUT /api/processing-requirements/:id — { name, description } (all categories see the change)
+app.put('/api/processing-requirements/:id', async (req, res) => {
+  try {
+    const name = cleanRequirementName(req.body.name);
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    if (name.length > 100) return res.status(400).json({ error: 'Name must be 100 characters or fewer' });
+    const result = await pool.query(
+      `UPDATE processing_requirements SET name = $1, description = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3 RETURNING id, name, description`,
+      [name, trimOrNull(req.body.description), req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Requirement not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'A requirement with this name already exists' });
+    console.error('Error updating processing requirement:', err);
+    res.status(500).json({ error: 'Failed to update processing requirement' });
+  }
+});
+
+// DELETE /api/processing-requirements/:id — removes it from every category too
+app.delete('/api/processing-requirements/:id', async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM processing_requirements WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Requirement not found' });
+    res.json({ message: 'Requirement deleted' });
+  } catch (err) {
+    console.error('Error deleting processing requirement:', err);
+    res.status(500).json({ error: 'Failed to delete processing requirement' });
+  }
+});
+
+// Resolves a category's requirements and checklist against its ancestors.
+async function resolveCategoryProcessing(categoryId) {
+  const chain = await getCategoryAncestorChain(categoryId); // root-first … self-last
+  const chainIds = chain.map(c => c.id);
+  const nearestFirst = [...chain].reverse();
+  const [libraryRes, choicesRes, settingsRes] = await Promise.all([
+    pool.query('SELECT id, name, description FROM processing_requirements ORDER BY lower(name)'),
+    pool.query('SELECT * FROM category_processing_requirements WHERE category_id = ANY($1)', [chainIds]),
+    pool.query('SELECT category_id, checklist FROM category_processing_settings WHERE category_id = ANY($1)', [chainIds]),
+  ]);
+
+  // `inherited_*` = what applies if this category had no setting of its own
+  // (nearest ancestor only), so the UI can show "Use inherited" correctly.
+  const ancestorsNearestFirst = nearestFirst.filter(c => c.id !== categoryId);
+  const requirements = libraryRes.rows.map(r => {
+    const own = choicesRes.rows.find(c => c.category_id === categoryId && c.requirement_id === r.id);
+    let inherited = false;
+    let source = null;
+    for (const cat of ancestorsNearestFirst) {
+      const row = choicesRes.rows.find(c => c.category_id === cat.id && c.requirement_id === r.id);
+      if (row) { inherited = row.required; source = cat; break; }
+    }
+    return {
+      ...r,
+      own: own ? own.required : null,
+      required: own ? own.required : inherited,
+      inherited_required: inherited,
+      inherited_from: source?.name ?? null,
+    };
+  });
+
+  const settingsByCategory = Object.fromEntries(settingsRes.rows.map(s => [s.category_id, s.checklist]));
+  let checklistSource = null;
+  for (const cat of ancestorsNearestFirst) {
+    if (settingsByCategory[cat.id] !== null && settingsByCategory[cat.id] !== undefined) { checklistSource = cat; break; }
+  }
+  const ownChecklist = settingsByCategory[categoryId] ?? null;
+  const inheritedChecklist = checklistSource ? settingsByCategory[checklistSource.id] : [];
+
+  return {
+    requirements,
+    checklist: {
+      own: ownChecklist,
+      effective: ownChecklist ?? inheritedChecklist,
+      inherited: inheritedChecklist,
+      inherited_from: checklistSource?.name ?? null,
+    },
+  };
+}
+
+// GET /api/categories/:id/processing
+app.get('/api/categories/:id/processing', async (req, res) => {
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    const catRes = await pool.query('SELECT id FROM categories WHERE id = $1', [categoryId]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+    res.json(await resolveCategoryProcessing(categoryId));
+  } catch (err) {
+    console.error('Error fetching category processing:', err);
+    res.status(500).json({ error: 'Failed to fetch category processing settings' });
+  }
+});
+
+// PUT /api/categories/:id/processing — this category's own settings:
+//   requirements: [{ requirement_id, required: true | false | null (inherit) }]
+//   checklist:    [{ requirement, required, must_pass }] | null (inherit)
+app.put('/api/categories/:id/processing', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    const catRes = await client.query('SELECT id FROM categories WHERE id = $1', [categoryId]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+
+    const requirements = Array.isArray(req.body.requirements) ? req.body.requirements : [];
+    let checklist = req.body.checklist;
+    if (checklist !== null && checklist !== undefined) {
+      if (!Array.isArray(checklist)) return res.status(400).json({ error: 'checklist must be a list' });
+      checklist = checklist
+        .map(row => ({
+          requirement: String(row?.requirement ?? '').trim(),
+          required: row?.required !== false,
+          must_pass: row?.must_pass !== false,
+        }))
+        .filter(row => row.requirement);
+      if (checklist.some(row => row.requirement.length > 200)) {
+        return res.status(400).json({ error: 'Checklist requirements must be 200 characters or fewer' });
+      }
+    } else {
+      checklist = null;
+    }
+
+    await client.query('BEGIN');
+    for (const r of requirements) {
+      const requirementId = parseInt(r?.requirement_id, 10);
+      if (!requirementId) continue;
+      if (r.required === null || r.required === undefined) {
+        await client.query(
+          'DELETE FROM category_processing_requirements WHERE category_id = $1 AND requirement_id = $2',
+          [categoryId, requirementId]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO category_processing_requirements (category_id, requirement_id, required)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (category_id, requirement_id) DO UPDATE SET required = EXCLUDED.required`,
+          [categoryId, requirementId, !!r.required]
+        );
+      }
+    }
+    if (checklist === null) {
+      await client.query('DELETE FROM category_processing_settings WHERE category_id = $1', [categoryId]);
+    } else {
+      await client.query(
+        `INSERT INTO category_processing_settings (category_id, checklist, updated_by, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (category_id) DO UPDATE SET
+           checklist = EXCLUDED.checklist, updated_by = EXCLUDED.updated_by, updated_at = CURRENT_TIMESTAMP`,
+        [categoryId, JSON.stringify(checklist), parseEmployeeId(req.body.employee_id)]
+      );
+    }
+    await client.query('COMMIT');
+    res.json(await resolveCategoryProcessing(categoryId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23503') return res.status(400).json({ error: 'One of the requirements no longer exists — reload and try again' });
+    console.error('Error saving category processing:', err);
+    res.status(500).json({ error: 'Failed to save category processing settings' });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
 // CATEGORY PRICING — Category Manager "Pricing" tab. Category Buy / Pawn /
 // Trade % (applied to a Catalog Item's Suggested Cost, doc §7), intelligence
 // source priority, valuation and retail-suggestion logic. NULL = inherit from
@@ -18129,7 +18362,7 @@ app.put('/api/hardgoods/:id', async (req, res) => {
     } = req.body;
 
     const currentRes = await client.query(
-      'SELECT category_id, catalog_item_id FROM hardgoods WHERE item_id = $1 FOR UPDATE',
+      'SELECT category_id, catalog_item_id, processing_status FROM hardgoods WHERE item_id = $1 FOR UPDATE',
       [req.params.id]
     );
     if (!currentRes.rows.length) {
@@ -18227,6 +18460,23 @@ app.put('/api/hardgoods/:id', async (req, res) => {
           );
         }
       }
+    }
+
+    // Moving into PROCESSING_COMPLETE: Required-At-Processing fields must be
+    // filled (checked after this save's attributes are written), and
+    // completion makes the item sellable.
+    if (processing_status === 'PROCESSING_COMPLETE' && current.processing_status !== 'PROCESSING_COMPLETE') {
+      const missing = await missingProcessingFields(client, req.params.id, result.rows[0].category_id);
+      if (missing.length) {
+        await client.query('ROLLBACK');
+        return processingIncompleteResponse(res, missing);
+      }
+      const sellableRes = await client.query(
+        `UPDATE hardgoods SET sellable_status = 'SELLABLE', updated_at = CURRENT_TIMESTAMP
+         WHERE item_id = $1 RETURNING *`,
+        [req.params.id]
+      );
+      result.rows[0] = sellableRes.rows[0];
     }
 
     await client.query('COMMIT');
@@ -18364,6 +18614,21 @@ app.put('/api/hardgoods/:id/status', async (req, res) => {
         RETURNING item_id, status, item_price, processing_status, sellable_status, blocking_reason, next_action`;
       queryParams = [item_price ?? null, req.params.id];
     } else {
+      // Moving into PROCESSING_COMPLETE: Required-At-Processing fields must be
+      // filled, and completion makes the item sellable.
+      let finalSellable = sellable_status;
+      if (processing_status === 'PROCESSING_COMPLETE') {
+        const currentRes = await pool.query(
+          'SELECT category_id, processing_status FROM hardgoods WHERE item_id = $1',
+          [req.params.id]
+        );
+        if (!currentRes.rows.length) return res.status(404).json({ error: 'Item not found' });
+        if (currentRes.rows[0].processing_status !== 'PROCESSING_COMPLETE') {
+          const missing = await missingProcessingFields(pool, req.params.id, currentRes.rows[0].category_id);
+          if (missing.length) return processingIncompleteResponse(res, missing);
+          finalSellable = 'SELLABLE';
+        }
+      }
       updateQuery = `
         UPDATE hardgoods SET
           status            = COALESCE($1, status),
@@ -18374,7 +18639,7 @@ app.put('/api/hardgoods/:id/status', async (req, res) => {
           updated_at        = CURRENT_TIMESTAMP
         WHERE item_id = $6
         RETURNING item_id, status, processing_status, sellable_status, blocking_reason, next_action`;
-      queryParams = [status, processing_status, sellable_status, blocking_reason, next_action, req.params.id];
+      queryParams = [status, processing_status, finalSellable, blocking_reason, next_action, req.params.id];
     }
 
     const result = await pool.query(updateQuery, queryParams);

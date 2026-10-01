@@ -57,6 +57,7 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { useSnackbar } from 'notistack';
 import config from '../config';
 import CategoryPricingTab from './CategoryPricingTab';
+import CategoryProcessingTab from './CategoryProcessingTab';
 
 const API = config.apiUrl;
 
@@ -1589,9 +1590,7 @@ function CategoryManager() {
 
               {/* ── Tab 3: Processing (placeholder) ──────────────────── */}
               {tab === 3 && (
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', py: 6 }}>
-                  <Typography color="text.secondary">Processing configuration is coming soon.</Typography>
-                </Box>
+                <CategoryProcessingTab key={selected.id} category={selected} onOpenFieldsTab={() => setTab(1)} />
               )}
 
               {/* ── Tab 4: Pricing ──────────────────────────────────── */}

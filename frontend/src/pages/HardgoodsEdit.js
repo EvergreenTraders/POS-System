@@ -314,7 +314,8 @@ function HardgoodsEdit() {
       enqueueSnackbar('Item saved', { variant: 'success' });
     } catch (err) {
       console.error('Error saving hardgoods item:', err);
-      enqueueSnackbar('Failed to save item', { variant: 'error' });
+      // e.g. "Processing can't be completed — required fields are missing: …"
+      enqueueSnackbar(err.response?.data?.error || 'Failed to save item', { variant: 'error' });
     } finally {
       setSaving(false);
     }
