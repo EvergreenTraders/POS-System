@@ -16252,9 +16252,10 @@ async function resolveEffectiveFields(categoryId) {
   const divisionName = divisionRow.rows[0]?.name || null;
 
   const rulesRes = await pool.query(
-    `SELECT r.*, ${FIELD_RULE_SELECT_COLUMNS}
+    `SELECT r.*, ${FIELD_RULE_SELECT_COLUMNS}, cf.name AS copied_from_category_name
      FROM category_field_rules r
      JOIN category_field_definitions f ON f.id = r.field_definition_id
+     LEFT JOIN categories cf ON cf.id = r.copied_from_category_id
      WHERE r.category_id = ANY($1)`,
     [chainIds]
   );
@@ -16990,6 +16991,186 @@ app.put('/api/categories/:id/pricing', async (req, res) => {
   } catch (err) {
     console.error('Error saving category pricing:', err);
     res.status(500).json({ error: 'Failed to save category pricing' });
+  }
+});
+
+// ============================================================
+// COPY CATEGORY CONFIGURATION — Category Manager "Copy Configuration".
+// Makes a child category use the same configuration as another category on
+// every tab, so similar categories (PS4 / PS5 / PS6 Consoles) start from a
+// copy and are then edited. Identity is kept: name, code, numeric code,
+// parent, division, status and display order are never copied.
+//
+// It copies what the source EFFECTIVELY uses — its own settings plus
+// everything it inherits from its ancestors — not just the source's own
+// rows (a category like PS4 Console may set nothing itself and inherit it
+// all). The target's own settings are replaced, and it gets an own setting
+// only where the source's effective value differs from what the target
+// already inherits from its own parent; matching values stay inherited.
+// Fields the target inherits from its own parent are kept (nothing hidden).
+// ============================================================
+
+// Field-rule settings compared/copied (identity = field_definition_id).
+const COPY_FIELD_SETTINGS = [
+  'scope', 'required_at', 'default_value', 'label_override', 'help_text',
+  'short_description', 'long_description', 'search', 'web_filter',
+];
+const sameFieldSettings = (a, b) => COPY_FIELD_SETTINGS.every(k => (a[k] ?? null) === (b[k] ?? null));
+const sameValue = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+// Copies a table's rows keyed by category_id (columns read from the schema).
+const CATEGORY_CONFIG_SKIP_COLUMNS = ['id', 'category_id', 'created_at', 'updated_at'];
+async function copyCategoryTableRows(client, table, sourceId, targetId) {
+  const colsRes = await client.query(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position`,
+    [table]
+  );
+  const columns = colsRes.rows.map(r => r.column_name).filter(c => !CATEGORY_CONFIG_SKIP_COLUMNS.includes(c));
+  await client.query(`DELETE FROM ${table} WHERE category_id = $1`, [targetId]);
+  if (!columns.length) return 0;
+  const list = columns.map(c => `"${c}"`).join(', ');
+  const result = await client.query(
+    `INSERT INTO ${table} (category_id, ${list})
+     SELECT $1, ${list} FROM ${table} WHERE category_id = $2`,
+    [targetId, sourceId]
+  );
+  return result.rowCount;
+}
+
+// POST /api/categories/:id/copy-configuration — body: { source_category_id }
+app.post('/api/categories/:id/copy-configuration', async (req, res) => {
+  const targetId = parseInt(req.params.id, 10);
+  const sourceId = parseInt(req.body?.source_category_id, 10);
+  if (!sourceId) return res.status(400).json({ error: 'Choose a category to copy from' });
+  if (sourceId === targetId) return res.status(400).json({ error: 'A category cannot copy from itself' });
+
+  const client = await pool.connect();
+  try {
+    const catsRes = await client.query(
+      'SELECT id, name, parent_category_id, description, alternate_names, internal_notes FROM categories WHERE id = ANY($1)',
+      [[targetId, sourceId]]
+    );
+    const target = catsRes.rows.find(c => c.id === targetId);
+    const source = catsRes.rows.find(c => c.id === sourceId);
+    if (!target) return res.status(404).json({ error: 'Category not found' });
+    if (!source) return res.status(404).json({ error: 'Category to copy from not found' });
+    if (!target.parent_category_id) {
+      return res.status(400).json({ error: 'Copy Configuration is only available for child categories' });
+    }
+
+    // What the source effectively uses vs. what the target inherits from its parent.
+    const parentId = target.parent_category_id;
+    const [srcFields, inhFields, srcPricing, inhPricing, srcProcessing, inhProcessing] = await Promise.all([
+      resolveEffectiveFields(sourceId),
+      resolveEffectiveFields(parentId),
+      resolveCategoryPricing(sourceId),
+      resolveCategoryPricing(parentId),
+      resolveCategoryProcessing(sourceId),
+      resolveCategoryProcessing(parentId),
+    ]);
+
+    await client.query('BEGIN');
+    const counts = { details: 0, fields: 0, descriptions: 0, pricing: 0, processing_requirements: 0, checklist: 0 };
+
+    // Details — descriptive settings only (not inherited, so the source's own).
+    await client.query(
+      `UPDATE categories SET description = $1, alternate_names = $2, internal_notes = $3, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4`,
+      [source.description, source.alternate_names, source.internal_notes, targetId]
+    );
+    counts.details = [source.description, (source.alternate_names || []).length ? 1 : null, source.internal_notes]
+      .filter(Boolean).length;
+
+    // Fields — add the source's effective fields the target doesn't inherit,
+    // override the ones it inherits with different settings.
+    await client.query('DELETE FROM category_field_rules WHERE category_id = $1', [targetId]);
+    const inheritedById = Object.fromEntries(inhFields.fields.map(f => [f.field_definition_id, f]));
+    for (const f of srcFields.fields) {
+      const inherited = inheritedById[f.field_definition_id];
+      if (inherited && sameFieldSettings(inherited, f)) continue;
+      await client.query(
+        `INSERT INTO category_field_rules
+           (category_id, field_definition_id, action, scope, required_at, default_value, label_override, help_text,
+            short_description, long_description, search, web_filter, display_order, applies_to_modes,
+            required_for_catalog, required_for_inventory, copied_from_category_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+         ON CONFLICT (category_id, field_definition_id, scope) DO NOTHING`,
+        [
+          targetId, f.field_definition_id, inherited ? 'OVERRIDE' : 'ADD', f.scope, f.required_at || 'OPTIONAL',
+          f.default_value ?? null, f.label_override ?? null, f.help_text ?? null,
+          !!f.short_description, !!f.long_description, !!f.search || !!f.web_filter, !!f.web_filter,
+          f.display_order ?? 0, f.applies_to_modes || [], !!f.required_for_catalog, !!f.required_for_inventory,
+          sourceId, // shown as "Copied from <source>" in the Fields tab
+        ]
+      );
+      counts.fields += 1;
+    }
+
+    // Descriptions — title template / search settings belong to the category
+    // itself (not inherited): take the source's own settings row.
+    counts.descriptions = await copyCategoryTableRows(client, 'category_description_settings', sourceId, targetId);
+
+    // Pricing — own value only where the source's effective value differs
+    // from what the target would inherit.
+    await client.query('DELETE FROM category_pricing_settings WHERE category_id = $1', [targetId]);
+    const pricing = {};
+    for (const field of CATEGORY_PRICING_FIELDS) {
+      const value = srcPricing.effective[field].value;
+      pricing[field] = sameValue(value, inhPricing.effective[field].value) ? null : value;
+      if (pricing[field] !== null) counts.pricing += 1;
+    }
+    if (counts.pricing) {
+      await client.query(
+        `INSERT INTO category_pricing_settings
+           (category_id, suggested_buy_pct, suggested_pawn_pct, suggested_trade_pct,
+            source_priority, valuation_method, retail_logic, updated_by, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)`,
+        [
+          targetId, pricing.suggested_buy_pct, pricing.suggested_pawn_pct, pricing.suggested_trade_pct,
+          pricing.source_priority, pricing.valuation_method, pricing.retail_logic, parseEmployeeId(req.body.employee_id),
+        ]
+      );
+    }
+
+    // Processing — requirement ticks and checklist, same rule.
+    await client.query('DELETE FROM category_processing_requirements WHERE category_id = $1', [targetId]);
+    const inheritedRequired = Object.fromEntries(inhProcessing.requirements.map(r => [r.id, r.required]));
+    for (const r of srcProcessing.requirements) {
+      if (r.required === (inheritedRequired[r.id] ?? false)) continue;
+      await client.query(
+        'INSERT INTO category_processing_requirements (category_id, requirement_id, required) VALUES ($1, $2, $3)',
+        [targetId, r.id, r.required]
+      );
+      counts.processing_requirements += 1;
+    }
+    await client.query('DELETE FROM category_processing_settings WHERE category_id = $1', [targetId]);
+    if (!sameValue(srcProcessing.checklist.effective, inhProcessing.checklist.effective)) {
+      await client.query(
+        `INSERT INTO category_processing_settings (category_id, checklist, updated_by, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`,
+        [targetId, JSON.stringify(srcProcessing.checklist.effective || []), parseEmployeeId(req.body.employee_id)]
+      );
+      counts.checklist = (srcProcessing.checklist.effective || []).length;
+    }
+
+    await client.query('COMMIT');
+
+    const changed = Object.values(counts).some(Boolean);
+    res.json({
+      copied_anything: changed,
+      message: changed
+        ? `Configuration copied from ${source.name} to ${target.name}`
+        : `${source.name} has nothing different to copy — ${target.name} already inherits the same configuration`,
+      source: { id: source.id, name: source.name },
+      copied: counts,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error copying category configuration:', err);
+    res.status(500).json({ error: 'Failed to copy configuration' });
+  } finally {
+    client.release();
   }
 });
 

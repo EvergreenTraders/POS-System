@@ -17,6 +17,7 @@ import {
   Grid,
   IconButton,
   InputLabel,
+  ListSubheader,
   Menu,
   MenuItem,
   Paper,
@@ -47,6 +48,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
@@ -263,6 +265,11 @@ function CategoryManager() {
   const [descSaving, setDescSaving]   = useState(false);
   const [addTokenAnchor, setAddTokenAnchor] = useState(null);
   const [pillMenu, setPillMenu]       = useState(null); // { anchorEl, index }
+  // Copy Configuration: { sourceId } while the dialog is open.
+  const [copyConfig, setCopyConfig]   = useState(null);
+  const [copying, setCopying]         = useState(false);
+  // Bumped after a copy so the self-loading Pricing / Processing tabs reload.
+  const [configVersion, setConfigVersion] = useState(0);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -298,6 +305,53 @@ function CategoryManager() {
     loadFields('category', cat.id);
     loadDescriptionConfig(cat.id);
     loadCategoryDetails(cat.id);
+  };
+
+  // ── Copy Configuration ───────────────────────────────────────────────
+  // Categories that can be copied from: same division, siblings first.
+  const copySourceOptions = () => {
+    if (!selected) return [];
+    const flat = flattenCategoryTree(tree);
+    const byId = Object.fromEntries(flat.map(c => [c.id, c]));
+    const pathOf = (c) => {
+      const names = [];
+      let cur = c;
+      let guard = 0;
+      while (cur && guard++ < 20) { names.unshift(cur.name); cur = byId[cur.parent_category_id]; }
+      return names.join(' › ');
+    };
+    return flat
+      .filter(c => c.id !== selected.id && c.division_id === selected.division_id)
+      .map(c => ({ ...c, path: pathOf(c), sibling: c.parent_category_id === selected.parent_category_id }))
+      .sort((a, b) => (Number(b.sibling) - Number(a.sibling)) || a.path.localeCompare(b.path));
+  };
+
+  const openCopyConfig = () => {
+    const options = copySourceOptions();
+    setCopyConfig({ sourceId: options[0]?.id || '' });
+  };
+
+  const handleCopyConfig = async () => {
+    setCopying(true);
+    try {
+      const res = await axios.post(`${API}/categories/${selected.id}/copy-configuration`, {
+        source_category_id: copyConfig.sourceId,
+      });
+      enqueueSnackbar(
+        res.data.copied_anything ? `${res.data.message} — review each tab and edit as needed` : res.data.message,
+        { variant: res.data.copied_anything ? 'success' : 'info' }
+      );
+      setCopyConfig(null);
+      // Reload every tab with the copied values, staying on the current tab.
+      const currentTab = tab;
+      await handleSelectCategory(selected);
+      setTab(currentTab);
+      setConfigVersion(v => v + 1);
+    } catch (err) {
+      enqueueSnackbar(err.response?.data?.error || 'Failed to copy configuration', { variant: 'error' });
+    } finally {
+      setCopying(false);
+    }
   };
 
   // ── Details tab ──────────────────────────────────────────────────────
@@ -387,7 +441,7 @@ function CategoryManager() {
 
   const handleOverrideField = (row) => {
     setFieldsRows(prev => prev.map(r => (r.field_definition_id === row.field_definition_id
-      ? { ...r, is_own: true, id: null, action: 'OVERRIDE' }
+      ? { ...r, is_own: true, id: null, action: 'OVERRIDE', copied_from_category_name: null }
       : r)));
     setActiveFieldKey(row.field_definition_id);
   };
@@ -402,7 +456,7 @@ function CategoryManager() {
 
   const handleHideField = (row) => {
     setFieldsRows(prev => prev.map(r => (r.field_definition_id === row.field_definition_id
-      ? { ...r, is_own: true, id: null, action: 'SUPPRESS', hidden: true }
+      ? { ...r, is_own: true, id: null, action: 'SUPPRESS', hidden: true, copied_from_category_name: null }
       : r)));
     if (activeFieldKey === row.field_definition_id) setActiveFieldKey(null);
   };
@@ -447,7 +501,7 @@ function CategoryManager() {
       const withOrder = reordered.map((r, i) => (
         r.is_own
           ? { ...r, display_order: i }
-          : { ...r, is_own: true, id: null, action: 'OVERRIDE', display_order: i }
+          : { ...r, is_own: true, id: null, action: 'OVERRIDE', display_order: i, copied_from_category_name: null }
       ));
       return [...withOrder, ...hiddenRows];
     });
@@ -836,7 +890,11 @@ function CategoryManager() {
                   <TableCell align="center">{row.web_filter && <CheckIcon fontSize="small" color="success" />}</TableCell>
                   <TableCell>
                     <Typography variant="caption" color="text.secondary">
-                      {row.is_own ? `This ${entityWord === 'division' ? 'Division' : 'Category'}` : `Inherited from ${row.origin_category_name}`}
+                      {!row.is_own
+                        ? `Inherited from ${row.origin_category_name}`
+                        : row.copied_from_category_name
+                          ? `Copied from ${row.copied_from_category_name}`
+                          : `This ${entityWord === 'division' ? 'Division' : 'Category'}`}
                     </Typography>
                   </TableCell>
                   <TableCell align="right" onClick={e => e.stopPropagation()}>
@@ -1142,6 +1200,18 @@ function CategoryManager() {
                   <Typography variant="h5" sx={{ fontWeight: 600 }}>{selected.name}</Typography>
                   <Chip size="small" label={selected.is_active === false ? 'Inactive' : 'Active'}
                     color={selected.is_active === false ? 'default' : 'success'} variant="outlined" />
+                  <Box sx={{ flex: 1 }} />
+                  <Tooltip title={selected.parent_category_id
+                    ? 'Copy every tab’s configuration from another category, then edit it'
+                    : 'Available for child categories only'}>
+                    <span>
+                      <Button variant="outlined" startIcon={<ContentCopyIcon />}
+                        disabled={!selected.parent_category_id}
+                        onClick={openCopyConfig}>
+                        Copy Configuration
+                      </Button>
+                    </span>
+                  </Tooltip>
                 </Box>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                   Category Code: <Box component="span" sx={{ color: 'text.primary', fontFamily: 'monospace' }}>{selected.numeric_code || '—'}</Box>
@@ -1590,16 +1660,68 @@ function CategoryManager() {
 
               {/* ── Tab 3: Processing (placeholder) ──────────────────── */}
               {tab === 3 && (
-                <CategoryProcessingTab key={selected.id} category={selected} onOpenFieldsTab={() => setTab(1)} />
+                <CategoryProcessingTab key={`${selected.id}-${configVersion}`} category={selected} onOpenFieldsTab={() => setTab(1)} />
               )}
 
               {/* ── Tab 4: Pricing ──────────────────────────────────── */}
-              {tab === 4 && <CategoryPricingTab key={selected.id} category={selected} />}
+              {tab === 4 && <CategoryPricingTab key={`${selected.id}-${configVersion}`} category={selected} />}
             </>
           )}
         </Box>
 
       {/* ── Add Category Dialog ────────────────────────────────────────── */}
+      {/* ── Copy Configuration ───────────────────────────────────────── */}
+      <Dialog open={!!copyConfig} onClose={() => !copying && setCopyConfig(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Copy Configuration{selected ? ` to ${selected.name}` : ''}</DialogTitle>
+        <DialogContent>
+          {copyConfig && selected && (() => {
+            const options = copySourceOptions();
+            const source = options.find(o => o.id === copyConfig.sourceId);
+            return (
+              <>
+                <FormControl fullWidth size="small" sx={{ mt: 1, mb: 2 }}>
+                  <InputLabel>Copy from</InputLabel>
+                  <Select label="Copy from" value={copyConfig.sourceId}
+                    onChange={e => setCopyConfig({ sourceId: e.target.value })}
+                    MenuProps={{ PaperProps: { sx: { maxHeight: 400 } } }}>
+                    {options.map((o, i) => [
+                      i === 0 && o.sibling && <ListSubheader key="sib">Same parent ({selected.parent_category_name || 'siblings'})</ListSubheader>,
+                      !o.sibling && (i === 0 || options[i - 1].sibling) && (
+                        <ListSubheader key="other">Other categories in {selected.division_name}</ListSubheader>
+                      ),
+                      <MenuItem key={o.id} value={o.id}>{o.sibling ? o.name : o.path}</MenuItem>,
+                    ])}
+                  </Select>
+                </FormControl>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>{selected.name}</strong> will use the configuration{' '}
+                  <strong>{source?.name || 'the selected category'}</strong> uses — including what it inherits from its
+                  parents — on every tab. {selected.name}’s own settings on these tabs are replaced:
+                </Typography>
+                <Box component="ul" sx={{ mt: 0, mb: 1.5, pl: 3, '& li': { typography: 'body2' } }}>
+                  <li><strong>Details</strong> — description, alternate names, internal notes</li>
+                  <li><strong>Fields</strong> — field rules, required-at and overrides</li>
+                  <li><strong>Descriptions</strong> — title template and search / web settings</li>
+                  <li><strong>Processing</strong> — required work and checklist</li>
+                  <li><strong>Pricing</strong> — Buy / Pawn / Trade %, source priority and logic</li>
+                </Box>
+                <Typography variant="body2" color="text.secondary">
+                  Name, codes, parent and status stay the same. Fields {selected.name} inherits from its own parent
+                  are kept. After copying, edit any tab as usual.
+                </Typography>
+              </>
+            );
+          })()}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCopyConfig(null)} disabled={copying}>Cancel</Button>
+          <Button variant="contained" startIcon={copying ? <CircularProgress size={16} color="inherit" /> : <ContentCopyIcon />}
+            disabled={!copyConfig?.sourceId || copying} onClick={handleCopyConfig}>
+            Copy Configuration
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={catDialogOpen} onClose={() => setCatDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Add Category</DialogTitle>
         <DialogContent sx={{ pt: 1 }}>
