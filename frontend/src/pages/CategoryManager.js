@@ -270,6 +270,9 @@ function CategoryManager() {
   const [copying, setCopying]         = useState(false);
   // Bumped after a copy so the self-loading Pricing / Processing tabs reload.
   const [configVersion, setConfigVersion] = useState(0);
+  // Delete / deactivate: null | { loading } | { usage, can_delete }
+  const [deleteState, setDeleteState] = useState(null);
+  const [deleteBusy, setDeleteBusy]   = useState(false);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -354,6 +357,59 @@ function CategoryManager() {
     }
   };
 
+  // ── Delete / Mark Inactive ───────────────────────────────────────────
+  // Delete only when nothing uses the category; otherwise offer Inactive.
+  const openDeleteCategory = async () => {
+    setDeleteState({ loading: true });
+    try {
+      const res = await axios.get(`${API}/categories/${selected.id}/usage`);
+      setDeleteState(res.data);
+    } catch (err) {
+      setDeleteState(null);
+      enqueueSnackbar(err.response?.data?.error || 'Failed to check whether the category is in use', { variant: 'error' });
+    }
+  };
+
+  const handleDeleteCategory = async () => {
+    setDeleteBusy(true);
+    try {
+      const res = await axios.delete(`${API}/categories/${selected.id}`);
+      enqueueSnackbar(res.data.message, { variant: 'success' });
+      setDeleteState(null);
+      setSelected(null);
+      loadAll();
+    } catch (err) {
+      // Something started using it since the check — show the latest usage.
+      if (err.response?.status === 409 && err.response.data.usage) {
+        setDeleteState({ usage: err.response.data.usage, can_delete: false });
+      }
+      enqueueSnackbar(err.response?.data?.error || 'Failed to delete category', { variant: 'error' });
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
+  // Deactivating a category also deactivates its subcategories (server-side).
+  const subcategoriesNote = (data) => {
+    const n = data?.deactivated_children || 0;
+    return n ? ` — ${n} subcategor${n === 1 ? 'y' : 'ies'} also marked inactive` : '';
+  };
+
+  const handleMarkInactive = async () => {
+    setDeleteBusy(true);
+    try {
+      const res = await axios.put(`${API}/categories/${selected.id}`, { is_active: false });
+      enqueueSnackbar(`${selected.name} marked inactive${subcategoriesNote(res.data)}`, { variant: 'success' });
+      setDeleteState(null);
+      loadAll();
+      loadCategoryDetails(selected.id);
+    } catch (err) {
+      enqueueSnackbar(err.response?.data?.error || 'Failed to mark category inactive', { variant: 'error' });
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   // ── Details tab ──────────────────────────────────────────────────────
   const loadCategoryDetails = async (categoryId) => {
     try {
@@ -374,7 +430,7 @@ function CategoryManager() {
   const handleSaveDetails = async () => {
     try {
       setDetailsSaving(true);
-      await axios.put(`${API}/categories/${selected.id}`, {
+      const res = await axios.put(`${API}/categories/${selected.id}`, {
         name: detailsDraft.name,
         is_active: detailsDraft.is_active,
         display_order: parseInt(detailsDraft.display_order, 10) || 0,
@@ -385,7 +441,7 @@ function CategoryManager() {
       });
       await loadCategoryDetails(selected.id);
       loadAll(); // tree name/order/parent may have changed
-      enqueueSnackbar('Category details saved', { variant: 'success' });
+      enqueueSnackbar(`Category details saved${subcategoriesNote(res.data)}`, { variant: 'success' });
     } catch (err) {
       enqueueSnackbar(err.response?.data?.error || 'Failed to save category details', { variant: 'error' });
     } finally {
@@ -400,6 +456,14 @@ function CategoryManager() {
   const detailsDirty = detailsSaved && detailsDraft
     ? JSON.stringify(detailsDraft) !== JSON.stringify(detailsSaved)
     : false;
+
+  // Inactive (as saved) categories are read-only: only the Details tab is
+  // reachable and only its Status can change, until it's reactivated. The
+  // server enforces the same rule.
+  const isInactive = !selectedDivision && selected?.is_active === false;
+  useEffect(() => {
+    if (isInactive && tab !== 0) setTab(0);
+  }, [isInactive, tab]);
 
   const handleSelectDivision = (div) => {
     setSelected(null);
@@ -1201,16 +1265,23 @@ function CategoryManager() {
                   <Chip size="small" label={selected.is_active === false ? 'Inactive' : 'Active'}
                     color={selected.is_active === false ? 'default' : 'success'} variant="outlined" />
                   <Box sx={{ flex: 1 }} />
-                  <Tooltip title={selected.parent_category_id
-                    ? 'Copy every tab’s configuration from another category, then edit it'
-                    : 'Available for child categories only'}>
+                  <Tooltip title={isInactive
+                    ? 'Inactive categories are read-only — reactivate it first'
+                    : selected.parent_category_id
+                      ? 'Copy every tab’s configuration from another category, then edit it'
+                      : 'Available for child categories only'}>
                     <span>
                       <Button variant="outlined" startIcon={<ContentCopyIcon />}
-                        disabled={!selected.parent_category_id}
+                        disabled={!selected.parent_category_id || isInactive}
                         onClick={openCopyConfig}>
                         Copy Configuration
                       </Button>
                     </span>
+                  </Tooltip>
+                  <Tooltip title="Delete if unused — otherwise mark inactive">
+                    <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={openDeleteCategory}>
+                      Delete
+                    </Button>
                   </Tooltip>
                 </Box>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -1227,11 +1298,17 @@ function CategoryManager() {
 
               <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
                 <Tab label="Details" />
-                <Tab label={`Fields (${fieldsRows.filter(r => !r.hidden).length})`} />
-                <Tab label="Descriptions" />
-                <Tab label="Processing" />
-                <Tab label="Pricing" />
+                <Tab label={`Fields (${fieldsRows.filter(r => !r.hidden).length})`} disabled={isInactive} />
+                <Tab label="Descriptions" disabled={isInactive} />
+                <Tab label="Processing" disabled={isInactive} />
+                <Tab label="Pricing" disabled={isInactive} />
               </Tabs>
+              {isInactive && (
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  This category is inactive, so its configuration is read-only and the other tabs are unavailable.
+                  To make changes, set <strong>Status</strong> to <strong>Active</strong> and save.
+                </Alert>
+              )}
 
               {/* ── Tab 0: Details ──────────────────────────────────── */}
               {tab === 0 && (
@@ -1271,7 +1348,7 @@ function CategoryManager() {
                         <Grid container spacing={2.5}>
                           <Grid item xs={12} sm={6} md={4}>
                             <TextField
-                              label="Category Name" required fullWidth size="small"
+                              label="Category Name" required fullWidth size="small" disabled={isInactive}
                               value={detailsDraft.name}
                               onChange={e => updateDetailsDraft({ name: e.target.value })}
                             />
@@ -1307,7 +1384,7 @@ function CategoryManager() {
                           </Grid>
                           <Grid item xs={12} sm={6} md={3}>
                             <TextField
-                              label="Display Order" type="number" fullWidth size="small"
+                              label="Display Order" type="number" fullWidth size="small" disabled={isInactive}
                               value={detailsDraft.display_order}
                               onChange={e => updateDetailsDraft({ display_order: e.target.value })}
                               helperText="Lower numbers appear first."
@@ -1316,7 +1393,7 @@ function CategoryManager() {
                           </Grid>
 
                           <Grid item xs={12} sm={6} md={4}>
-                            <FormControl fullWidth size="small">
+                            <FormControl fullWidth size="small" disabled={isInactive}>
                               <InputLabel>Parent Category</InputLabel>
                               <Select
                                 label="Parent Category"
@@ -1331,7 +1408,7 @@ function CategoryManager() {
                             </FormControl>
                           </Grid>
                           <Grid item xs={12} sm={6} md={4}>
-                            <FormControl fullWidth size="small">
+                            <FormControl fullWidth size="small" disabled={isInactive}>
                               <InputLabel>Division</InputLabel>
                               <Select
                                 label="Division"
@@ -1352,7 +1429,7 @@ function CategoryManager() {
                               </Tooltip>
                             </Box>
                             <TextField
-                              fullWidth size="small" multiline minRows={2}
+                              fullWidth size="small" multiline minRows={2} disabled={isInactive}
                               value={detailsDraft.alternate_names}
                               onChange={e => updateDetailsDraft({ alternate_names: e.target.value })}
                               placeholder="e.g. PlayStation 5, PS5, Sony PS5, PS 5"
@@ -1375,7 +1452,7 @@ function CategoryManager() {
                               Internal Notes / Admin Notes
                             </Typography>
                             <TextField
-                              fullWidth size="small" multiline minRows={3}
+                              fullWidth size="small" multiline minRows={3} disabled={isInactive}
                               value={detailsDraft.internal_notes}
                               onChange={e => updateDetailsDraft({ internal_notes: e.target.value })}
                               helperText="These notes are for internal use only and are not visible on receipts or to customers."
@@ -1670,6 +1747,54 @@ function CategoryManager() {
         </Box>
 
       {/* ── Add Category Dialog ────────────────────────────────────────── */}
+      {/* ── Delete / Mark Inactive ───────────────────────────────────── */}
+      <Dialog open={!!deleteState} onClose={() => !deleteBusy && setDeleteState(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          {deleteState?.can_delete === false ? `${selected?.name} is in use` : `Delete ${selected?.name || 'category'}?`}
+        </DialogTitle>
+        <DialogContent>
+          {deleteState?.loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}><CircularProgress size={24} /></Box>
+          ) : deleteState?.can_delete ? (
+            <Typography variant="body2">
+              Nothing uses this category, so it can be deleted. Its configuration (fields, descriptions, processing and
+              pricing settings) will be deleted with it. This can’t be undone.
+            </Typography>
+          ) : deleteState ? (
+            <>
+              <Typography variant="body2" sx={{ mb: 1 }}>It can’t be deleted because it has:</Typography>
+              <Box component="ul" sx={{ mt: 0, mb: 1.5, pl: 3 }}>
+                {deleteState.usage.map(u => (
+                  <li key={u.table}><Typography variant="body2">{u.count} {u.label}</Typography></li>
+                ))}
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                {selected?.is_active === false
+                  ? 'It is already inactive.'
+                  : 'You can mark it inactive instead — it and everything linked to it are kept, and you can reactivate it later from the Details tab.'}
+                {selected?.is_active !== false && deleteState.usage.some(u => u.table === 'categories') &&
+                  ' Its subcategories will be marked inactive too.'}
+              </Typography>
+            </>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteState(null)} disabled={deleteBusy}>Cancel</Button>
+          {deleteState?.can_delete && (
+            <Button color="error" variant="contained" onClick={handleDeleteCategory} disabled={deleteBusy}
+              startIcon={deleteBusy ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}>
+              Delete
+            </Button>
+          )}
+          {deleteState?.can_delete === false && selected?.is_active !== false && (
+            <Button variant="contained" onClick={handleMarkInactive} disabled={deleteBusy}
+              startIcon={deleteBusy ? <CircularProgress size={16} color="inherit" /> : null}>
+              Mark as Inactive
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
       {/* ── Copy Configuration ───────────────────────────────────────── */}
       <Dialog open={!!copyConfig} onClose={() => !copying && setCopyConfig(null)} maxWidth="sm" fullWidth>
         <DialogTitle>Copy Configuration{selected ? ` to ${selected.name}` : ''}</DialogTitle>
