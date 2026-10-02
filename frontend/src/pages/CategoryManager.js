@@ -16,7 +16,9 @@ import {
   FormControlLabel,
   Grid,
   IconButton,
+  InputAdornment,
   InputLabel,
+  ListSubheader,
   Menu,
   MenuItem,
   Paper,
@@ -47,6 +49,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
@@ -54,8 +57,12 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
 import CheckIcon from '@mui/icons-material/Check';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
 import { useSnackbar } from 'notistack';
 import config from '../config';
+import CategoryPricingTab from './CategoryPricingTab';
+import CategoryProcessingTab from './CategoryProcessingTab';
 
 const API = config.apiUrl;
 
@@ -140,9 +147,26 @@ function flattenCategoryTree(tree) {
   return out;
 }
 
+// Tree search: a category matches on its name, code or numeric code.
+// Returns the nodes that match or have a matching descendant (pruned to
+// just those branches), so each match is shown with its parent path.
+function categoryMatches(node, q) {
+  return [node.name, node.code, node.numeric_code]
+    .some(v => v != null && String(v).toLowerCase().includes(q));
+}
+function filterCategoryNodes(nodes, q) {
+  return nodes.reduce((out, n) => {
+    const children = filterCategoryNodes(n.children || [], q);
+    if (children.length || categoryMatches(n, q)) out.push({ ...n, children });
+    return out;
+  }, []);
+}
+
 // ── Recursive tree node ────────────────────────────────────────────────
-function CategoryNode({ node, depth, selected, onSelect, onAddChild }) {
-  const [open, setOpen] = useState(false);
+function CategoryNode({ node, depth, selected, onSelect, onAddChild, searching }) {
+  const [manualOpen, setOpen] = useState(false);
+  // While searching, every branch shown leads to a match, so keep it expanded.
+  const open = searching || manualOpen;
   const hasChildren = node.children && node.children.length > 0;
   const isSelected  = selected?.id === node.id;
 
@@ -196,6 +220,7 @@ function CategoryNode({ node, depth, selected, onSelect, onAddChild }) {
               selected={selected}
               onSelect={onSelect}
               onAddChild={onAddChild}
+              searching={searching}
             />
           ))}
         </Box>
@@ -261,6 +286,16 @@ function CategoryManager() {
   const [descSaving, setDescSaving]   = useState(false);
   const [addTokenAnchor, setAddTokenAnchor] = useState(null);
   const [pillMenu, setPillMenu]       = useState(null); // { anchorEl, index }
+  // Copy Configuration: { sourceId } while the dialog is open.
+  const [copyConfig, setCopyConfig]   = useState(null);
+  const [copying, setCopying]         = useState(false);
+  // Bumped after a copy so the self-loading Pricing / Processing tabs reload.
+  const [configVersion, setConfigVersion] = useState(0);
+  // Delete / deactivate: null | { loading } | { usage, can_delete }
+  const [deleteState, setDeleteState] = useState(null);
+  const [deleteBusy, setDeleteBusy]   = useState(false);
+  // Category tree search (filters the left panel).
+  const [treeSearch, setTreeSearch]   = useState('');
 
   useEffect(() => { loadAll(); }, []);
 
@@ -298,6 +333,106 @@ function CategoryManager() {
     loadCategoryDetails(cat.id);
   };
 
+  // ── Copy Configuration ───────────────────────────────────────────────
+  // Categories that can be copied from: same division, siblings first.
+  const copySourceOptions = () => {
+    if (!selected) return [];
+    const flat = flattenCategoryTree(tree);
+    const byId = Object.fromEntries(flat.map(c => [c.id, c]));
+    const pathOf = (c) => {
+      const names = [];
+      let cur = c;
+      let guard = 0;
+      while (cur && guard++ < 20) { names.unshift(cur.name); cur = byId[cur.parent_category_id]; }
+      return names.join(' › ');
+    };
+    return flat
+      .filter(c => c.id !== selected.id && c.division_id === selected.division_id)
+      .map(c => ({ ...c, path: pathOf(c), sibling: c.parent_category_id === selected.parent_category_id }))
+      .sort((a, b) => (Number(b.sibling) - Number(a.sibling)) || a.path.localeCompare(b.path));
+  };
+
+  const openCopyConfig = () => {
+    const options = copySourceOptions();
+    setCopyConfig({ sourceId: options[0]?.id || '' });
+  };
+
+  const handleCopyConfig = async () => {
+    setCopying(true);
+    try {
+      const res = await axios.post(`${API}/categories/${selected.id}/copy-configuration`, {
+        source_category_id: copyConfig.sourceId,
+      });
+      enqueueSnackbar(
+        res.data.copied_anything ? `${res.data.message} — review each tab and edit as needed` : res.data.message,
+        { variant: res.data.copied_anything ? 'success' : 'info' }
+      );
+      setCopyConfig(null);
+      // Reload every tab with the copied values, staying on the current tab.
+      const currentTab = tab;
+      await handleSelectCategory(selected);
+      setTab(currentTab);
+      setConfigVersion(v => v + 1);
+    } catch (err) {
+      enqueueSnackbar(err.response?.data?.error || 'Failed to copy configuration', { variant: 'error' });
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  // ── Delete / Mark Inactive ───────────────────────────────────────────
+  // Delete only when nothing uses the category; otherwise offer Inactive.
+  const openDeleteCategory = async () => {
+    setDeleteState({ loading: true });
+    try {
+      const res = await axios.get(`${API}/categories/${selected.id}/usage`);
+      setDeleteState(res.data);
+    } catch (err) {
+      setDeleteState(null);
+      enqueueSnackbar(err.response?.data?.error || 'Failed to check whether the category is in use', { variant: 'error' });
+    }
+  };
+
+  const handleDeleteCategory = async () => {
+    setDeleteBusy(true);
+    try {
+      const res = await axios.delete(`${API}/categories/${selected.id}`);
+      enqueueSnackbar(res.data.message, { variant: 'success' });
+      setDeleteState(null);
+      setSelected(null);
+      loadAll();
+    } catch (err) {
+      // Something started using it since the check — show the latest usage.
+      if (err.response?.status === 409 && err.response.data.usage) {
+        setDeleteState({ usage: err.response.data.usage, can_delete: false });
+      }
+      enqueueSnackbar(err.response?.data?.error || 'Failed to delete category', { variant: 'error' });
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
+  // Deactivating a category also deactivates its subcategories (server-side).
+  const subcategoriesNote = (data) => {
+    const n = data?.deactivated_children || 0;
+    return n ? ` — ${n} subcategor${n === 1 ? 'y' : 'ies'} also marked inactive` : '';
+  };
+
+  const handleMarkInactive = async () => {
+    setDeleteBusy(true);
+    try {
+      const res = await axios.put(`${API}/categories/${selected.id}`, { is_active: false });
+      enqueueSnackbar(`${selected.name} marked inactive${subcategoriesNote(res.data)}`, { variant: 'success' });
+      setDeleteState(null);
+      loadAll();
+      loadCategoryDetails(selected.id);
+    } catch (err) {
+      enqueueSnackbar(err.response?.data?.error || 'Failed to mark category inactive', { variant: 'error' });
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   // ── Details tab ──────────────────────────────────────────────────────
   const loadCategoryDetails = async (categoryId) => {
     try {
@@ -318,7 +453,7 @@ function CategoryManager() {
   const handleSaveDetails = async () => {
     try {
       setDetailsSaving(true);
-      await axios.put(`${API}/categories/${selected.id}`, {
+      const res = await axios.put(`${API}/categories/${selected.id}`, {
         name: detailsDraft.name,
         is_active: detailsDraft.is_active,
         display_order: parseInt(detailsDraft.display_order, 10) || 0,
@@ -329,7 +464,7 @@ function CategoryManager() {
       });
       await loadCategoryDetails(selected.id);
       loadAll(); // tree name/order/parent may have changed
-      enqueueSnackbar('Category details saved', { variant: 'success' });
+      enqueueSnackbar(`Category details saved${subcategoriesNote(res.data)}`, { variant: 'success' });
     } catch (err) {
       enqueueSnackbar(err.response?.data?.error || 'Failed to save category details', { variant: 'error' });
     } finally {
@@ -344,6 +479,14 @@ function CategoryManager() {
   const detailsDirty = detailsSaved && detailsDraft
     ? JSON.stringify(detailsDraft) !== JSON.stringify(detailsSaved)
     : false;
+
+  // Inactive (as saved) categories are read-only: only the Details tab is
+  // reachable and only its Status can change, until it's reactivated. The
+  // server enforces the same rule.
+  const isInactive = !selectedDivision && selected?.is_active === false;
+  useEffect(() => {
+    if (isInactive && tab !== 0) setTab(0);
+  }, [isInactive, tab]);
 
   const handleSelectDivision = (div) => {
     setSelected(null);
@@ -385,7 +528,7 @@ function CategoryManager() {
 
   const handleOverrideField = (row) => {
     setFieldsRows(prev => prev.map(r => (r.field_definition_id === row.field_definition_id
-      ? { ...r, is_own: true, id: null, action: 'OVERRIDE' }
+      ? { ...r, is_own: true, id: null, action: 'OVERRIDE', copied_from_category_name: null }
       : r)));
     setActiveFieldKey(row.field_definition_id);
   };
@@ -400,7 +543,7 @@ function CategoryManager() {
 
   const handleHideField = (row) => {
     setFieldsRows(prev => prev.map(r => (r.field_definition_id === row.field_definition_id
-      ? { ...r, is_own: true, id: null, action: 'SUPPRESS', hidden: true }
+      ? { ...r, is_own: true, id: null, action: 'SUPPRESS', hidden: true, copied_from_category_name: null }
       : r)));
     if (activeFieldKey === row.field_definition_id) setActiveFieldKey(null);
   };
@@ -445,7 +588,7 @@ function CategoryManager() {
       const withOrder = reordered.map((r, i) => (
         r.is_own
           ? { ...r, display_order: i }
-          : { ...r, is_own: true, id: null, action: 'OVERRIDE', display_order: i }
+          : { ...r, is_own: true, id: null, action: 'OVERRIDE', display_order: i, copied_from_category_name: null }
       ));
       return [...withOrder, ...hiddenRows];
     });
@@ -834,7 +977,11 @@ function CategoryManager() {
                   <TableCell align="center">{row.web_filter && <CheckIcon fontSize="small" color="success" />}</TableCell>
                   <TableCell>
                     <Typography variant="caption" color="text.secondary">
-                      {row.is_own ? `This ${entityWord === 'division' ? 'Division' : 'Category'}` : `Inherited from ${row.origin_category_name}`}
+                      {!row.is_own
+                        ? `Inherited from ${row.origin_category_name}`
+                        : row.copied_from_category_name
+                          ? `Copied from ${row.copied_from_category_name}`
+                          : `This ${entityWord === 'division' ? 'Division' : 'Category'}`}
                     </Typography>
                   </TableCell>
                   <TableCell align="right" onClick={e => e.stopPropagation()}>
@@ -1044,6 +1191,17 @@ function CategoryManager() {
     );
   }
 
+  // Left-panel tree, filtered by the search box. A division whose own name
+  // or code matches is shown whole; otherwise only its matching branches.
+  const searchQuery = treeSearch.trim().toLowerCase();
+  const visibleTree = !searchQuery ? tree : tree.reduce((out, div) => {
+    const divMatches = [div.name, div.code].some(v => v && v.toLowerCase().includes(searchQuery));
+    const categories = divMatches ? div.categories : filterCategoryNodes(div.categories, searchQuery);
+    // expandAll: open every branch shown (they all lead to a match).
+    if (divMatches || categories.length) out.push({ ...div, categories, expandAll: !divMatches });
+    return out;
+  }, []);
+
   return (
     <Box sx={{ height: '100vh', display: 'flex', overflow: 'hidden' }}>
 
@@ -1054,10 +1212,30 @@ function CategoryManager() {
       }}>
         <Paper elevation={1} square sx={{ px: 2, py: 1, flexShrink: 0 }}>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>Category Manager</Typography>
+          <TextField
+            size="small" fullWidth placeholder="Search categories"
+            value={treeSearch}
+            onChange={e => setTreeSearch(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Escape') setTreeSearch(''); }}
+            sx={{ mt: 1 }}
+            InputProps={{
+              startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
+              endAdornment: treeSearch ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setTreeSearch('')}><ClearIcon fontSize="small" /></IconButton>
+                </InputAdornment>
+              ) : null,
+            }}
+          />
         </Paper>
 
         <Box sx={{ flex: 1, overflow: 'auto', bgcolor: 'background.paper' }}>
-          {tree.map(division => (
+          {searchQuery && visibleTree.length === 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+              No categories match “{treeSearch.trim()}”
+            </Typography>
+          )}
+          {visibleTree.map(division => (
               <Box key={division.id} sx={{ mb: 1 }}>
                 {/* Division header — clickable to manage division-level Fields
                     (inherited by every category in the division) */}
@@ -1106,6 +1284,7 @@ function CategoryManager() {
                           division_id: node.division_id,
                           parent_id:   node.id,
                         })}
+                        searching={!!division.expandAll}
                       />
                     ))
                   )}
@@ -1135,24 +1314,56 @@ function CategoryManager() {
           ) : (
             <>
               {/* Category header */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <Chip label={selected.division_code} size="small" color="primary" />
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>{selected.name}</Typography>
-                <Chip label={selected.code} size="small" variant="outlined" sx={{ fontFamily: 'monospace' }} />
-                {selected.numeric_code && (
-                  <Tooltip title="Unique numeric category code">
-                    <Chip label={`#${selected.numeric_code}`} size="small" variant="outlined" sx={{ fontFamily: 'monospace' }} />
+              <Box sx={{ mb: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <Typography variant="h5" sx={{ fontWeight: 600 }}>{selected.name}</Typography>
+                  <Chip size="small" label={selected.is_active === false ? 'Inactive' : 'Active'}
+                    color={selected.is_active === false ? 'default' : 'success'} variant="outlined" />
+                  <Box sx={{ flex: 1 }} />
+                  <Tooltip title={isInactive
+                    ? 'Inactive categories are read-only — reactivate it first'
+                    : selected.parent_category_id
+                      ? 'Copy every tab’s configuration from another category, then edit it'
+                      : 'Available for child categories only'}>
+                    <span>
+                      <Button variant="outlined" startIcon={<ContentCopyIcon />}
+                        disabled={!selected.parent_category_id || isInactive}
+                        onClick={openCopyConfig}>
+                        Copy Configuration
+                      </Button>
+                    </span>
                   </Tooltip>
-                )}
+                  <Tooltip title="Delete if unused — otherwise mark inactive">
+                    <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={openDeleteCategory}>
+                      Delete
+                    </Button>
+                  </Tooltip>
+                </Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Category Code: <Box component="span" sx={{ color: 'text.primary', fontFamily: 'monospace' }}>{selected.numeric_code || '—'}</Box>
+                  {' '}(<Box component="span" sx={{ fontFamily: 'monospace' }}>{selected.code}</Box>)
+                  <Box component="span" sx={{ mx: 1.5, color: 'divider' }}>|</Box>
+                  Parent: <Box component="span" sx={{ color: 'text.primary' }}>
+                    {flattenCategoryTree(tree).find(c => c.id === selected.parent_category_id)?.name || 'None (root)'}
+                  </Box>
+                  <Box component="span" sx={{ mx: 1.5, color: 'divider' }}>|</Box>
+                  Division: <Box component="span" sx={{ color: 'text.primary' }}>{selected.division_name}</Box>
+                </Typography>
               </Box>
 
               <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
                 <Tab label="Details" />
-                <Tab label={`Fields (${fieldsRows.filter(r => !r.hidden).length})`} />
-                <Tab label="Descriptions" />
-                <Tab label="Processing" />
-                <Tab label="Pricing" />
+                <Tab label={`Fields (${fieldsRows.filter(r => !r.hidden).length})`} disabled={isInactive} />
+                <Tab label="Descriptions" disabled={isInactive} />
+                <Tab label="Processing" disabled={isInactive} />
+                <Tab label="Pricing" disabled={isInactive} />
               </Tabs>
+              {isInactive && (
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  This category is inactive, so its configuration is read-only and the other tabs are unavailable.
+                  To make changes, set <strong>Status</strong> to <strong>Active</strong> and save.
+                </Alert>
+              )}
 
               {/* ── Tab 0: Details ──────────────────────────────────── */}
               {tab === 0 && (
@@ -1192,7 +1403,7 @@ function CategoryManager() {
                         <Grid container spacing={2.5}>
                           <Grid item xs={12} sm={6} md={4}>
                             <TextField
-                              label="Category Name" required fullWidth size="small"
+                              label="Category Name" required fullWidth size="small" disabled={isInactive}
                               value={detailsDraft.name}
                               onChange={e => updateDetailsDraft({ name: e.target.value })}
                             />
@@ -1228,7 +1439,7 @@ function CategoryManager() {
                           </Grid>
                           <Grid item xs={12} sm={6} md={3}>
                             <TextField
-                              label="Display Order" type="number" fullWidth size="small"
+                              label="Display Order" type="number" fullWidth size="small" disabled={isInactive}
                               value={detailsDraft.display_order}
                               onChange={e => updateDetailsDraft({ display_order: e.target.value })}
                               helperText="Lower numbers appear first."
@@ -1237,7 +1448,7 @@ function CategoryManager() {
                           </Grid>
 
                           <Grid item xs={12} sm={6} md={4}>
-                            <FormControl fullWidth size="small">
+                            <FormControl fullWidth size="small" disabled={isInactive}>
                               <InputLabel>Parent Category</InputLabel>
                               <Select
                                 label="Parent Category"
@@ -1252,7 +1463,7 @@ function CategoryManager() {
                             </FormControl>
                           </Grid>
                           <Grid item xs={12} sm={6} md={4}>
-                            <FormControl fullWidth size="small">
+                            <FormControl fullWidth size="small" disabled={isInactive}>
                               <InputLabel>Division</InputLabel>
                               <Select
                                 label="Division"
@@ -1273,7 +1484,7 @@ function CategoryManager() {
                               </Tooltip>
                             </Box>
                             <TextField
-                              fullWidth size="small" multiline minRows={2}
+                              fullWidth size="small" multiline minRows={2} disabled={isInactive}
                               value={detailsDraft.alternate_names}
                               onChange={e => updateDetailsDraft({ alternate_names: e.target.value })}
                               placeholder="e.g. PlayStation 5, PS5, Sony PS5, PS 5"
@@ -1296,7 +1507,7 @@ function CategoryManager() {
                               Internal Notes / Admin Notes
                             </Typography>
                             <TextField
-                              fullWidth size="small" multiline minRows={3}
+                              fullWidth size="small" multiline minRows={3} disabled={isInactive}
                               value={detailsDraft.internal_notes}
                               onChange={e => updateDetailsDraft({ internal_notes: e.target.value })}
                               helperText="These notes are for internal use only and are not visible on receipts or to customers."
@@ -1581,22 +1792,116 @@ function CategoryManager() {
 
               {/* ── Tab 3: Processing (placeholder) ──────────────────── */}
               {tab === 3 && (
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', py: 6 }}>
-                  <Typography color="text.secondary">Processing configuration is coming soon.</Typography>
-                </Box>
+                <CategoryProcessingTab key={`${selected.id}-${configVersion}`} category={selected} onOpenFieldsTab={() => setTab(1)} />
               )}
 
-              {/* ── Tab 4: Pricing (placeholder) ─────────────────────── */}
-              {tab === 4 && (
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', py: 6 }}>
-                  <Typography color="text.secondary">Pricing configuration is coming soon.</Typography>
-                </Box>
-              )}
+              {/* ── Tab 4: Pricing ──────────────────────────────────── */}
+              {tab === 4 && <CategoryPricingTab key={`${selected.id}-${configVersion}`} category={selected} />}
             </>
           )}
         </Box>
 
       {/* ── Add Category Dialog ────────────────────────────────────────── */}
+      {/* ── Delete / Mark Inactive ───────────────────────────────────── */}
+      <Dialog open={!!deleteState} onClose={() => !deleteBusy && setDeleteState(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          {deleteState?.can_delete === false ? `${selected?.name} is in use` : `Delete ${selected?.name || 'category'}?`}
+        </DialogTitle>
+        <DialogContent>
+          {deleteState?.loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}><CircularProgress size={24} /></Box>
+          ) : deleteState?.can_delete ? (
+            <Typography variant="body2">
+              Nothing uses this category, so it can be deleted. Its configuration (fields, descriptions, processing and
+              pricing settings) will be deleted with it. This can’t be undone.
+            </Typography>
+          ) : deleteState ? (
+            <>
+              <Typography variant="body2" sx={{ mb: 1 }}>It can’t be deleted because it has:</Typography>
+              <Box component="ul" sx={{ mt: 0, mb: 1.5, pl: 3 }}>
+                {deleteState.usage.map(u => (
+                  <li key={u.table}><Typography variant="body2">{u.count} {u.label}</Typography></li>
+                ))}
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                {selected?.is_active === false
+                  ? 'It is already inactive.'
+                  : 'You can mark it inactive instead — it and everything linked to it are kept, and you can reactivate it later from the Details tab.'}
+                {selected?.is_active !== false && deleteState.usage.some(u => u.table === 'categories') &&
+                  ' Its subcategories will be marked inactive too.'}
+              </Typography>
+            </>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteState(null)} disabled={deleteBusy}>Cancel</Button>
+          {deleteState?.can_delete && (
+            <Button color="error" variant="contained" onClick={handleDeleteCategory} disabled={deleteBusy}
+              startIcon={deleteBusy ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}>
+              Delete
+            </Button>
+          )}
+          {deleteState?.can_delete === false && selected?.is_active !== false && (
+            <Button variant="contained" onClick={handleMarkInactive} disabled={deleteBusy}
+              startIcon={deleteBusy ? <CircularProgress size={16} color="inherit" /> : null}>
+              Mark as Inactive
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Copy Configuration ───────────────────────────────────────── */}
+      <Dialog open={!!copyConfig} onClose={() => !copying && setCopyConfig(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Copy Configuration{selected ? ` to ${selected.name}` : ''}</DialogTitle>
+        <DialogContent>
+          {copyConfig && selected && (() => {
+            const options = copySourceOptions();
+            const source = options.find(o => o.id === copyConfig.sourceId);
+            return (
+              <>
+                <FormControl fullWidth size="small" sx={{ mt: 1, mb: 2 }}>
+                  <InputLabel>Copy from</InputLabel>
+                  <Select label="Copy from" value={copyConfig.sourceId}
+                    onChange={e => setCopyConfig({ sourceId: e.target.value })}
+                    MenuProps={{ PaperProps: { sx: { maxHeight: 400 } } }}>
+                    {options.map((o, i) => [
+                      i === 0 && o.sibling && <ListSubheader key="sib">Same parent ({selected.parent_category_name || 'siblings'})</ListSubheader>,
+                      !o.sibling && (i === 0 || options[i - 1].sibling) && (
+                        <ListSubheader key="other">Other categories in {selected.division_name}</ListSubheader>
+                      ),
+                      <MenuItem key={o.id} value={o.id}>{o.sibling ? o.name : o.path}</MenuItem>,
+                    ])}
+                  </Select>
+                </FormControl>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>{selected.name}</strong> will use the configuration{' '}
+                  <strong>{source?.name || 'the selected category'}</strong> uses — including what it inherits from its
+                  parents — on every tab. {selected.name}’s own settings on these tabs are replaced:
+                </Typography>
+                <Box component="ul" sx={{ mt: 0, mb: 1.5, pl: 3, '& li': { typography: 'body2' } }}>
+                  <li><strong>Details</strong> — description, alternate names, internal notes</li>
+                  <li><strong>Fields</strong> — field rules, required-at and overrides</li>
+                  <li><strong>Descriptions</strong> — title template and search / web settings</li>
+                  <li><strong>Processing</strong> — required work and checklist</li>
+                  <li><strong>Pricing</strong> — Buy / Pawn / Trade %, source priority and logic</li>
+                </Box>
+                <Typography variant="body2" color="text.secondary">
+                  Name, codes, parent and status stay the same. Fields {selected.name} inherits from its own parent
+                  are kept. After copying, edit any tab as usual.
+                </Typography>
+              </>
+            );
+          })()}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCopyConfig(null)} disabled={copying}>Cancel</Button>
+          <Button variant="contained" startIcon={copying ? <CircularProgress size={16} color="inherit" /> : <ContentCopyIcon />}
+            disabled={!copyConfig?.sourceId || copying} onClick={handleCopyConfig}>
+            Copy Configuration
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={catDialogOpen} onClose={() => setCatDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Add Category</DialogTitle>
         <DialogContent sx={{ pt: 1 }}>

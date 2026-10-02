@@ -39,3 +39,9 @@ DO $$ BEGIN
     ADD CONSTRAINT category_field_definitions_data_type_check
     CHECK (data_type IN ('TEXT', 'NUMBER', 'CURRENCY', 'ENUM', 'MULTISELECT', 'BOOLEAN', 'DATE', 'MEASUREMENT'));
 END $$;
+
+-- Copy Configuration provenance: the category a rule was copied from (shown
+-- as "Copied from …" in the Fields tab). NULL = added on this category.
+-- Kept when the rule is later edited; cleared if that category is deleted.
+ALTER TABLE category_field_rules
+  ADD COLUMN IF NOT EXISTS copied_from_category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL;

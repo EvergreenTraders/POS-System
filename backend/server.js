@@ -15869,6 +15869,8 @@ app.post('/api/categories', async (req, res) => {
     if (!CATEGORY_CODE_PATTERN.test(code)) {
       return res.status(400).json({ error: CATEGORY_CODE_ERROR });
     }
+    // No new subcategories under an inactive category.
+    if (parent_category_id && await rejectIfCategoryInactive(res, parent_category_id)) return;
     for (let attempt = 1; ; attempt++) {
       try {
         const result = await pool.query(
@@ -15911,10 +15913,24 @@ async function getDescendantCategoryIds(categoryId) {
 // (via undefined-check, not COALESCE) since the Details tab always submits
 // the complete draft, including intentional nulls/clears (e.g. removing the
 // parent to make a category root-level, or clearing internal notes).
+// Inactive categories are read-only: their configuration can't be edited on
+// any tab until they're reactivated (Status → Active). Sends a 409 and
+// returns true when the category is inactive.
+async function rejectIfCategoryInactive(res, categoryId) {
+  const r = await pool.query('SELECT name, is_active FROM categories WHERE id = $1', [categoryId]);
+  if (r.rows.length && r.rows[0].is_active === false) {
+    res.status(409).json({ error: `${r.rows[0].name} is inactive — set its Status to Active to make changes` });
+    return true;
+  }
+  return false;
+}
+
 app.put('/api/categories/:id', async (req, res) => {
   try {
     const categoryId = parseInt(req.params.id, 10);
     const { name, description, is_active, division_id, parent_category_id, display_order, alternate_names, internal_notes } = req.body;
+    // While inactive, the only allowed change is reactivating it.
+    if (is_active !== true && await rejectIfCategoryInactive(res, categoryId)) return;
     // numeric_code is system-assigned and never updated here.
     const code = req.body.code !== undefined ? normalizeCategoryCode(req.body.code) : undefined;
     if (code !== undefined && !CATEGORY_CODE_PATTERN.test(code)) {
@@ -15936,34 +15952,71 @@ app.put('/api/categories/:id', async (req, res) => {
     if (!existing.rows.length) return res.status(404).json({ error: 'Category not found' });
     const current = existing.rows[0];
 
-    const result = await pool.query(
-      `UPDATE categories
-       SET name              = $1,
-           code              = $2,
-           description       = $3,
-           is_active         = $4,
-           division_id       = $5,
-           parent_category_id = $6,
-           display_order     = $7,
-           alternate_names   = $8,
-           internal_notes    = $9,
-           updated_at        = CURRENT_TIMESTAMP
-       WHERE id = $10
-       RETURNING *`,
-      [
-        name !== undefined ? name : current.name,
-        code !== undefined ? code : current.code,
-        description !== undefined ? description : current.description,
-        is_active !== undefined ? is_active : current.is_active,
-        division_id !== undefined ? division_id : current.division_id,
-        parent_category_id !== undefined ? parent_category_id : current.parent_category_id,
-        display_order !== undefined ? display_order : current.display_order,
-        alternate_names !== undefined ? alternate_names : current.alternate_names,
-        internal_notes !== undefined ? internal_notes : current.internal_notes,
-        categoryId,
-      ]
-    );
-    res.json(result.rows[0]);
+    // A category can't be active under an inactive parent — covers both
+    // reactivating a child and moving an active category under one.
+    const nextActive = is_active !== undefined ? is_active : current.is_active;
+    const nextParentId = parent_category_id !== undefined ? parent_category_id : current.parent_category_id;
+    if (nextActive !== false && nextParentId) {
+      const parentRes = await pool.query('SELECT name, is_active FROM categories WHERE id = $1', [nextParentId]);
+      if (parentRes.rows[0]?.is_active === false) {
+        return res.status(409).json({
+          error: `Its parent category ${parentRes.rows[0].name} is inactive — reactivate ${parentRes.rows[0].name} first`,
+        });
+      }
+    }
+
+    // Deactivating a category deactivates all of its subcategories too.
+    const deactivating = is_active === false && current.is_active !== false;
+    const descendantIds = deactivating ? await getDescendantCategoryIds(categoryId) : [];
+
+    const client = await pool.connect();
+    let result;
+    let deactivatedChildren = 0;
+    try {
+      await client.query('BEGIN');
+      result = await client.query(
+        `UPDATE categories
+         SET name              = $1,
+             code              = $2,
+             description       = $3,
+             is_active         = $4,
+             division_id       = $5,
+             parent_category_id = $6,
+             display_order     = $7,
+             alternate_names   = $8,
+             internal_notes    = $9,
+             updated_at        = CURRENT_TIMESTAMP
+         WHERE id = $10
+         RETURNING *`,
+        [
+          name !== undefined ? name : current.name,
+          code !== undefined ? code : current.code,
+          description !== undefined ? description : current.description,
+          is_active !== undefined ? is_active : current.is_active,
+          division_id !== undefined ? division_id : current.division_id,
+          parent_category_id !== undefined ? parent_category_id : current.parent_category_id,
+          display_order !== undefined ? display_order : current.display_order,
+          alternate_names !== undefined ? alternate_names : current.alternate_names,
+          internal_notes !== undefined ? internal_notes : current.internal_notes,
+          categoryId,
+        ]
+      );
+      if (descendantIds.length) {
+        const childRes = await client.query(
+          `UPDATE categories SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ANY($1) AND is_active IS DISTINCT FROM FALSE`,
+          [descendantIds]
+        );
+        deactivatedChildren = childRes.rowCount;
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.json({ ...result.rows[0], deactivated_children: deactivatedChildren });
   } catch (err) {
     if (isCategoryCodeConflict(err)) {
       return res.status(409).json({ error: 'A category with this code already exists under the same parent' });
@@ -16121,6 +16174,7 @@ app.get('/api/category-field-rules/:cat_id', async (req, res) => {
 // POST /api/category-field-rules  — add a rule to a category
 app.post('/api/category-field-rules', async (req, res) => {
   try {
+    if (req.body?.category_id && await rejectIfCategoryInactive(res, req.body.category_id)) return;
     const {
       category_id, field_definition_id, action, scope,
       required_for_catalog, required_for_inventory, applies_to_modes,
@@ -16156,6 +16210,8 @@ app.post('/api/category-field-rules', async (req, res) => {
 // PUT /api/category-field-rules/:id  — update a rule
 app.put('/api/category-field-rules/:id', async (req, res) => {
   try {
+    const ruleRes = await pool.query('SELECT category_id FROM category_field_rules WHERE id = $1', [req.params.id]);
+    if (ruleRes.rows.length && await rejectIfCategoryInactive(res, ruleRes.rows[0].category_id)) return;
     const {
       action, required_for_catalog, required_for_inventory,
       applies_to_modes, display_order, default_value, label_override, help_text
@@ -16187,6 +16243,8 @@ app.put('/api/category-field-rules/:id', async (req, res) => {
 // DELETE /api/category-field-rules/:id  — remove a rule
 app.delete('/api/category-field-rules/:id', async (req, res) => {
   try {
+    const ruleRes = await pool.query('SELECT category_id FROM category_field_rules WHERE id = $1', [req.params.id]);
+    if (ruleRes.rows.length && await rejectIfCategoryInactive(res, ruleRes.rows[0].category_id)) return;
     const result = await pool.query(
       'DELETE FROM category_field_rules WHERE id = $1 RETURNING id',
       [req.params.id]
@@ -16252,9 +16310,10 @@ async function resolveEffectiveFields(categoryId) {
   const divisionName = divisionRow.rows[0]?.name || null;
 
   const rulesRes = await pool.query(
-    `SELECT r.*, ${FIELD_RULE_SELECT_COLUMNS}
+    `SELECT r.*, ${FIELD_RULE_SELECT_COLUMNS}, cf.name AS copied_from_category_name
      FROM category_field_rules r
      JOIN category_field_definitions f ON f.id = r.field_definition_id
+     LEFT JOIN categories cf ON cf.id = r.copied_from_category_id
      WHERE r.category_id = ANY($1)`,
     [chainIds]
   );
@@ -16345,6 +16404,7 @@ app.put('/api/categories/:id/field-rules', async (req, res) => {
   const client = await pool.connect();
   try {
     const categoryId = parseInt(req.params.id, 10);
+    if (await rejectIfCategoryInactive(res, categoryId)) return;
     const incoming = Array.isArray(req.body.rules) ? req.body.rules : [];
 
     await client.query('BEGIN');
@@ -16542,6 +16602,7 @@ app.put('/api/categories/:id/description-config', async (req, res) => {
   const client = await pool.connect();
   try {
     const categoryId = req.params.id;
+    if (await rejectIfCategoryInactive(res, categoryId)) return;
     const s = { ...DEFAULT_DESCRIPTION_SETTINGS, ...req.body.settings };
     const fields = Array.isArray(req.body.fields) ? req.body.fields : [];
 
@@ -16603,6 +16664,7 @@ app.post('/api/categories/:id/description-config/reset', async (req, res) => {
   const client = await pool.connect();
   try {
     const categoryId = req.params.id;
+    if (await rejectIfCategoryInactive(res, categoryId)) return;
     await client.query('BEGIN');
     await client.query('DELETE FROM category_description_settings WHERE category_id = $1', [categoryId]);
     await client.query(
@@ -16617,6 +16679,670 @@ app.post('/api/categories/:id/description-config/reset', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error resetting category description config:', err);
     res.status(500).json({ error: 'Failed to reset category description config' });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// PROCESSING COMPLETION RULES (Category Manager Processing doc, §3)
+// * Fields a category marks "Required At: Processing" must be filled in on
+//   the item before Processing can complete.
+// * Completing Processing is the action that makes the item sellable.
+// processing_status / processing_queue / current_location / sellable_status
+// stay separate columns on the item record.
+// ============================================================
+
+// Labels of the item's Required-At-Processing fields that are still empty.
+async function missingProcessingFields(client, itemId, categoryId) {
+  if (!categoryId) return [];
+  const { fields } = await resolveEffectiveFields(categoryId);
+  const required = fields.filter(f => f.required_at === 'PROCESSING');
+  if (!required.length) return [];
+  const attrs = await client.query(
+    'SELECT field_key, field_value FROM hardgoods_attributes WHERE item_id = $1',
+    [itemId]
+  );
+  const filled = new Set(attrs.rows
+    .filter(a => a.field_value !== null && String(a.field_value).trim() !== '')
+    .map(a => a.field_key));
+  return required.filter(f => !filled.has(f.field_key)).map(f => f.label_override || f.field_label || f.field_key);
+}
+
+const processingIncompleteResponse = (res, missing) => res.status(409).json({
+  error: `Processing can't be completed — required fields are missing: ${missing.join(', ')}`,
+  missing_fields: missing,
+});
+
+// ============================================================
+// CATEGORY PROCESSING — Category Manager "Processing" tab. A staff-built
+// library of processing requirements (nothing hard-coded), which each
+// category turns on/off, plus an editable per-category checklist. Both
+// inherit from the parent category. Stored as defaults only — no per-item
+// checklist tracking exists yet, so nothing is enforced from these.
+// ============================================================
+
+const cleanRequirementName = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
+
+// GET /api/processing-requirements — the library
+app.get('/api/processing-requirements', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, name, description FROM processing_requirements ORDER BY lower(name)');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching processing requirements:', err);
+    res.status(500).json({ error: 'Failed to fetch processing requirements' });
+  }
+});
+
+// POST /api/processing-requirements — { name, description }
+app.post('/api/processing-requirements', async (req, res) => {
+  try {
+    const name = cleanRequirementName(req.body.name);
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    if (name.length > 100) return res.status(400).json({ error: 'Name must be 100 characters or fewer' });
+    const result = await pool.query(
+      'INSERT INTO processing_requirements (name, description) VALUES ($1, $2) RETURNING id, name, description',
+      [name, trimOrNull(req.body.description)]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'A requirement with this name already exists' });
+    console.error('Error creating processing requirement:', err);
+    res.status(500).json({ error: 'Failed to create processing requirement' });
+  }
+});
+
+// PUT /api/processing-requirements/:id — { name, description } (all categories see the change)
+app.put('/api/processing-requirements/:id', async (req, res) => {
+  try {
+    const name = cleanRequirementName(req.body.name);
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    if (name.length > 100) return res.status(400).json({ error: 'Name must be 100 characters or fewer' });
+    const result = await pool.query(
+      `UPDATE processing_requirements SET name = $1, description = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3 RETURNING id, name, description`,
+      [name, trimOrNull(req.body.description), req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Requirement not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'A requirement with this name already exists' });
+    console.error('Error updating processing requirement:', err);
+    res.status(500).json({ error: 'Failed to update processing requirement' });
+  }
+});
+
+// DELETE /api/processing-requirements/:id — removes it from every category too
+app.delete('/api/processing-requirements/:id', async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM processing_requirements WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Requirement not found' });
+    res.json({ message: 'Requirement deleted' });
+  } catch (err) {
+    console.error('Error deleting processing requirement:', err);
+    res.status(500).json({ error: 'Failed to delete processing requirement' });
+  }
+});
+
+// Resolves a category's requirements and checklist against its ancestors.
+async function resolveCategoryProcessing(categoryId) {
+  const chain = await getCategoryAncestorChain(categoryId); // root-first … self-last
+  const chainIds = chain.map(c => c.id);
+  const nearestFirst = [...chain].reverse();
+  const [libraryRes, choicesRes, settingsRes] = await Promise.all([
+    pool.query('SELECT id, name, description FROM processing_requirements ORDER BY lower(name)'),
+    pool.query('SELECT * FROM category_processing_requirements WHERE category_id = ANY($1)', [chainIds]),
+    pool.query('SELECT category_id, checklist FROM category_processing_settings WHERE category_id = ANY($1)', [chainIds]),
+  ]);
+
+  // `inherited_*` = what applies if this category had no setting of its own
+  // (nearest ancestor only), so the UI can show "Use inherited" correctly.
+  const ancestorsNearestFirst = nearestFirst.filter(c => c.id !== categoryId);
+  const requirements = libraryRes.rows.map(r => {
+    const own = choicesRes.rows.find(c => c.category_id === categoryId && c.requirement_id === r.id);
+    let inherited = false;
+    let source = null;
+    for (const cat of ancestorsNearestFirst) {
+      const row = choicesRes.rows.find(c => c.category_id === cat.id && c.requirement_id === r.id);
+      if (row) { inherited = row.required; source = cat; break; }
+    }
+    return {
+      ...r,
+      own: own ? own.required : null,
+      required: own ? own.required : inherited,
+      inherited_required: inherited,
+      inherited_from: source?.name ?? null,
+    };
+  });
+
+  const settingsByCategory = Object.fromEntries(settingsRes.rows.map(s => [s.category_id, s.checklist]));
+  let checklistSource = null;
+  for (const cat of ancestorsNearestFirst) {
+    if (settingsByCategory[cat.id] !== null && settingsByCategory[cat.id] !== undefined) { checklistSource = cat; break; }
+  }
+  const ownChecklist = settingsByCategory[categoryId] ?? null;
+  const inheritedChecklist = checklistSource ? settingsByCategory[checklistSource.id] : [];
+
+  return {
+    requirements,
+    checklist: {
+      own: ownChecklist,
+      effective: ownChecklist ?? inheritedChecklist,
+      inherited: inheritedChecklist,
+      inherited_from: checklistSource?.name ?? null,
+    },
+  };
+}
+
+// GET /api/categories/:id/processing
+app.get('/api/categories/:id/processing', async (req, res) => {
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    const catRes = await pool.query('SELECT id FROM categories WHERE id = $1', [categoryId]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+    res.json(await resolveCategoryProcessing(categoryId));
+  } catch (err) {
+    console.error('Error fetching category processing:', err);
+    res.status(500).json({ error: 'Failed to fetch category processing settings' });
+  }
+});
+
+// PUT /api/categories/:id/processing — this category's own settings:
+//   requirements: [{ requirement_id, required: true | false | null (inherit) }]
+//   checklist:    [{ requirement, required, must_pass }] | null (inherit)
+app.put('/api/categories/:id/processing', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    if (await rejectIfCategoryInactive(res, categoryId)) return;
+    const catRes = await client.query('SELECT id FROM categories WHERE id = $1', [categoryId]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+
+    const requirements = Array.isArray(req.body.requirements) ? req.body.requirements : [];
+    let checklist = req.body.checklist;
+    if (checklist !== null && checklist !== undefined) {
+      if (!Array.isArray(checklist)) return res.status(400).json({ error: 'checklist must be a list' });
+      checklist = checklist
+        .map(row => ({
+          requirement: String(row?.requirement ?? '').trim(),
+          required: row?.required !== false,
+          must_pass: row?.must_pass !== false,
+        }))
+        .filter(row => row.requirement);
+      if (checklist.some(row => row.requirement.length > 200)) {
+        return res.status(400).json({ error: 'Checklist requirements must be 200 characters or fewer' });
+      }
+    } else {
+      checklist = null;
+    }
+
+    await client.query('BEGIN');
+    for (const r of requirements) {
+      const requirementId = parseInt(r?.requirement_id, 10);
+      if (!requirementId) continue;
+      if (r.required === null || r.required === undefined) {
+        await client.query(
+          'DELETE FROM category_processing_requirements WHERE category_id = $1 AND requirement_id = $2',
+          [categoryId, requirementId]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO category_processing_requirements (category_id, requirement_id, required)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (category_id, requirement_id) DO UPDATE SET required = EXCLUDED.required`,
+          [categoryId, requirementId, !!r.required]
+        );
+      }
+    }
+    if (checklist === null) {
+      await client.query('DELETE FROM category_processing_settings WHERE category_id = $1', [categoryId]);
+    } else {
+      await client.query(
+        `INSERT INTO category_processing_settings (category_id, checklist, updated_by, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (category_id) DO UPDATE SET
+           checklist = EXCLUDED.checklist, updated_by = EXCLUDED.updated_by, updated_at = CURRENT_TIMESTAMP`,
+        [categoryId, JSON.stringify(checklist), parseEmployeeId(req.body.employee_id)]
+      );
+    }
+    await client.query('COMMIT');
+    res.json(await resolveCategoryProcessing(categoryId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23503') return res.status(400).json({ error: 'One of the requirements no longer exists — reload and try again' });
+    console.error('Error saving category processing:', err);
+    res.status(500).json({ error: 'Failed to save category processing settings' });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// CATEGORY PRICING — Category Manager "Pricing" tab. Category Buy / Pawn /
+// Trade % (applied to a Catalog Item's Suggested Cost, doc §7), intelligence
+// source priority, valuation and retail-suggestion logic. NULL = inherit from
+// the nearest ancestor category that sets it.
+// ============================================================
+
+const CATEGORY_PRICING_PCT_FIELDS = ['suggested_buy_pct', 'suggested_pawn_pct', 'suggested_trade_pct'];
+const CATEGORY_PRICING_FIELDS = [...CATEGORY_PRICING_PCT_FIELDS, 'source_priority', 'valuation_method', 'retail_logic'];
+const PRICING_SOURCES = ['STORE', 'COMPANY', 'NETWORK'];
+const PRICING_VALUATION_METHODS = ['AUTOMATIC'];
+const PRICING_RETAIL_LOGIC = ['CATALOG_THEN_INTELLIGENCE'];
+// Used when neither the category nor any ancestor sets a value. Percentages
+// have no default — a category must configure them before Buy/Pawn can be
+// calculated from Suggested Cost.
+const CATEGORY_PRICING_DEFAULTS = {
+  suggested_buy_pct: null,
+  suggested_pawn_pct: null,
+  suggested_trade_pct: null,
+  source_priority: PRICING_SOURCES,
+  valuation_method: 'AUTOMATIC',
+  retail_logic: 'CATALOG_THEN_INTELLIGENCE',
+};
+
+function toPricingSetting(row, field) {
+  const v = row?.[field];
+  if (v === null || v === undefined) return null;
+  return CATEGORY_PRICING_PCT_FIELDS.includes(field) ? Number(v) : v;
+}
+
+// { own, effective: { field: { value, source_category_id, source_category_name } } }
+async function resolveCategoryPricing(categoryId) {
+  const chain = await getCategoryAncestorChain(categoryId); // root-first … self-last
+  const rowsRes = await pool.query(
+    'SELECT * FROM category_pricing_settings WHERE category_id = ANY($1)',
+    [chain.map(c => c.id)]
+  );
+  const rowByCategory = Object.fromEntries(rowsRes.rows.map(r => [r.category_id, r]));
+  const ownRow = rowByCategory[categoryId] || null;
+
+  const effective = {};
+  for (const field of CATEGORY_PRICING_FIELDS) {
+    effective[field] = { value: CATEGORY_PRICING_DEFAULTS[field], source_category_id: null, source_category_name: null };
+    for (let i = chain.length - 1; i >= 0; i -= 1) { // nearest first
+      const value = toPricingSetting(rowByCategory[chain[i].id], field);
+      if (value !== null) {
+        effective[field] = { value, source_category_id: chain[i].id, source_category_name: chain[i].name };
+        break;
+      }
+    }
+  }
+
+  return {
+    own: Object.fromEntries(CATEGORY_PRICING_FIELDS.map(f => [f, toPricingSetting(ownRow, f)])),
+    effective,
+    updated_at: ownRow?.updated_at || null,
+  };
+}
+
+// GET /api/categories/:id/pricing
+app.get('/api/categories/:id/pricing', async (req, res) => {
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    const catRes = await pool.query('SELECT id FROM categories WHERE id = $1', [categoryId]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+    res.json(await resolveCategoryPricing(categoryId));
+  } catch (err) {
+    console.error('Error fetching category pricing:', err);
+    res.status(500).json({ error: 'Failed to fetch category pricing' });
+  }
+});
+
+// PUT /api/categories/:id/pricing — body: this category's own settings
+// (null / omitted = inherit), employee_id. A category with nothing of its own
+// left has its row removed so it inherits everything.
+app.put('/api/categories/:id/pricing', async (req, res) => {
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    if (await rejectIfCategoryInactive(res, categoryId)) return;
+    const catRes = await pool.query('SELECT id FROM categories WHERE id = $1', [categoryId]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+
+    const b = req.body || {};
+    const values = {};
+    for (const field of CATEGORY_PRICING_PCT_FIELDS) {
+      const raw = b[field];
+      if (raw === null || raw === undefined || raw === '') { values[field] = null; continue; }
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || n > 200) {
+        return res.status(400).json({ error: `${field.replace(/_/g, ' ')} must be between 0 and 200` });
+      }
+      values[field] = Math.round(n * 100) / 100;
+    }
+    if (b.source_priority === null || b.source_priority === undefined) {
+      values.source_priority = null;
+    } else if (!Array.isArray(b.source_priority)
+      || b.source_priority.length !== PRICING_SOURCES.length
+      || !PRICING_SOURCES.every(s => b.source_priority.includes(s))) {
+      return res.status(400).json({ error: `source_priority must list each of ${PRICING_SOURCES.join(', ')} once` });
+    } else {
+      values.source_priority = b.source_priority;
+    }
+    for (const [field, allowed] of [['valuation_method', PRICING_VALUATION_METHODS], ['retail_logic', PRICING_RETAIL_LOGIC]]) {
+      const raw = b[field];
+      if (raw === null || raw === undefined || raw === '') { values[field] = null; continue; }
+      if (!allowed.includes(raw)) return res.status(400).json({ error: `${field} must be one of: ${allowed.join(', ')}` });
+      values[field] = raw;
+    }
+
+    if (CATEGORY_PRICING_FIELDS.every(f => values[f] === null)) {
+      await pool.query('DELETE FROM category_pricing_settings WHERE category_id = $1', [categoryId]);
+    } else {
+      await pool.query(
+        `INSERT INTO category_pricing_settings
+           (category_id, suggested_buy_pct, suggested_pawn_pct, suggested_trade_pct,
+            source_priority, valuation_method, retail_logic, updated_by, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+         ON CONFLICT (category_id) DO UPDATE SET
+           suggested_buy_pct   = EXCLUDED.suggested_buy_pct,
+           suggested_pawn_pct  = EXCLUDED.suggested_pawn_pct,
+           suggested_trade_pct = EXCLUDED.suggested_trade_pct,
+           source_priority     = EXCLUDED.source_priority,
+           valuation_method    = EXCLUDED.valuation_method,
+           retail_logic        = EXCLUDED.retail_logic,
+           updated_by          = EXCLUDED.updated_by,
+           updated_at          = CURRENT_TIMESTAMP`,
+        [
+          categoryId, values.suggested_buy_pct, values.suggested_pawn_pct, values.suggested_trade_pct,
+          values.source_priority, values.valuation_method, values.retail_logic, parseEmployeeId(b.employee_id),
+        ]
+      );
+    }
+    res.json(await resolveCategoryPricing(categoryId));
+  } catch (err) {
+    console.error('Error saving category pricing:', err);
+    res.status(500).json({ error: 'Failed to save category pricing' });
+  }
+});
+
+// ============================================================
+// COPY CATEGORY CONFIGURATION — Category Manager "Copy Configuration".
+// Makes a child category use the same configuration as another category on
+// every tab, so similar categories (PS4 / PS5 / PS6 Consoles) start from a
+// copy and are then edited. Identity is kept: name, code, numeric code,
+// parent, division, status and display order are never copied.
+//
+// It copies what the source EFFECTIVELY uses — its own settings plus
+// everything it inherits from its ancestors — not just the source's own
+// rows (a category like PS4 Console may set nothing itself and inherit it
+// all). The target's own settings are replaced, and it gets an own setting
+// only where the source's effective value differs from what the target
+// already inherits from its own parent; matching values stay inherited.
+// Fields the target inherits from its own parent are kept (nothing hidden).
+// ============================================================
+
+// Field-rule settings compared/copied (identity = field_definition_id).
+const COPY_FIELD_SETTINGS = [
+  'scope', 'required_at', 'default_value', 'label_override', 'help_text',
+  'short_description', 'long_description', 'search', 'web_filter',
+];
+const sameFieldSettings = (a, b) => COPY_FIELD_SETTINGS.every(k => (a[k] ?? null) === (b[k] ?? null));
+const sameValue = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+// Copies a table's rows keyed by category_id (columns read from the schema).
+const CATEGORY_CONFIG_SKIP_COLUMNS = ['id', 'category_id', 'created_at', 'updated_at'];
+async function copyCategoryTableRows(client, table, sourceId, targetId) {
+  const colsRes = await client.query(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position`,
+    [table]
+  );
+  const columns = colsRes.rows.map(r => r.column_name).filter(c => !CATEGORY_CONFIG_SKIP_COLUMNS.includes(c));
+  await client.query(`DELETE FROM ${table} WHERE category_id = $1`, [targetId]);
+  if (!columns.length) return 0;
+  const list = columns.map(c => `"${c}"`).join(', ');
+  const result = await client.query(
+    `INSERT INTO ${table} (category_id, ${list})
+     SELECT $1, ${list} FROM ${table} WHERE category_id = $2`,
+    [targetId, sourceId]
+  );
+  return result.rowCount;
+}
+
+// POST /api/categories/:id/copy-configuration — body: { source_category_id }
+app.post('/api/categories/:id/copy-configuration', async (req, res) => {
+  const targetId = parseInt(req.params.id, 10);
+  const sourceId = parseInt(req.body?.source_category_id, 10);
+  if (!sourceId) return res.status(400).json({ error: 'Choose a category to copy from' });
+  if (sourceId === targetId) return res.status(400).json({ error: 'A category cannot copy from itself' });
+
+  const client = await pool.connect();
+  try {
+    if (await rejectIfCategoryInactive(res, targetId)) return;
+    const catsRes = await client.query(
+      'SELECT id, name, parent_category_id, description, alternate_names, internal_notes FROM categories WHERE id = ANY($1)',
+      [[targetId, sourceId]]
+    );
+    const target = catsRes.rows.find(c => c.id === targetId);
+    const source = catsRes.rows.find(c => c.id === sourceId);
+    if (!target) return res.status(404).json({ error: 'Category not found' });
+    if (!source) return res.status(404).json({ error: 'Category to copy from not found' });
+    if (!target.parent_category_id) {
+      return res.status(400).json({ error: 'Copy Configuration is only available for child categories' });
+    }
+
+    // What the source effectively uses vs. what the target inherits from its parent.
+    const parentId = target.parent_category_id;
+    const [srcFields, inhFields, srcPricing, inhPricing, srcProcessing, inhProcessing] = await Promise.all([
+      resolveEffectiveFields(sourceId),
+      resolveEffectiveFields(parentId),
+      resolveCategoryPricing(sourceId),
+      resolveCategoryPricing(parentId),
+      resolveCategoryProcessing(sourceId),
+      resolveCategoryProcessing(parentId),
+    ]);
+
+    await client.query('BEGIN');
+    const counts = { details: 0, fields: 0, descriptions: 0, pricing: 0, processing_requirements: 0, checklist: 0 };
+
+    // Details — descriptive settings only (not inherited, so the source's own).
+    await client.query(
+      `UPDATE categories SET description = $1, alternate_names = $2, internal_notes = $3, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4`,
+      [source.description, source.alternate_names, source.internal_notes, targetId]
+    );
+    counts.details = [source.description, (source.alternate_names || []).length ? 1 : null, source.internal_notes]
+      .filter(Boolean).length;
+
+    // Fields — add the source's effective fields the target doesn't inherit,
+    // override the ones it inherits with different settings.
+    await client.query('DELETE FROM category_field_rules WHERE category_id = $1', [targetId]);
+    const inheritedById = Object.fromEntries(inhFields.fields.map(f => [f.field_definition_id, f]));
+    for (const f of srcFields.fields) {
+      const inherited = inheritedById[f.field_definition_id];
+      if (inherited && sameFieldSettings(inherited, f)) continue;
+      await client.query(
+        `INSERT INTO category_field_rules
+           (category_id, field_definition_id, action, scope, required_at, default_value, label_override, help_text,
+            short_description, long_description, search, web_filter, display_order, applies_to_modes,
+            required_for_catalog, required_for_inventory, copied_from_category_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+         ON CONFLICT (category_id, field_definition_id, scope) DO NOTHING`,
+        [
+          targetId, f.field_definition_id, inherited ? 'OVERRIDE' : 'ADD', f.scope, f.required_at || 'OPTIONAL',
+          f.default_value ?? null, f.label_override ?? null, f.help_text ?? null,
+          !!f.short_description, !!f.long_description, !!f.search || !!f.web_filter, !!f.web_filter,
+          f.display_order ?? 0, f.applies_to_modes || [], !!f.required_for_catalog, !!f.required_for_inventory,
+          sourceId, // shown as "Copied from <source>" in the Fields tab
+        ]
+      );
+      counts.fields += 1;
+    }
+
+    // Descriptions — title template / search settings belong to the category
+    // itself (not inherited): take the source's own settings row.
+    counts.descriptions = await copyCategoryTableRows(client, 'category_description_settings', sourceId, targetId);
+
+    // Pricing — own value only where the source's effective value differs
+    // from what the target would inherit.
+    await client.query('DELETE FROM category_pricing_settings WHERE category_id = $1', [targetId]);
+    const pricing = {};
+    for (const field of CATEGORY_PRICING_FIELDS) {
+      const value = srcPricing.effective[field].value;
+      pricing[field] = sameValue(value, inhPricing.effective[field].value) ? null : value;
+      if (pricing[field] !== null) counts.pricing += 1;
+    }
+    if (counts.pricing) {
+      await client.query(
+        `INSERT INTO category_pricing_settings
+           (category_id, suggested_buy_pct, suggested_pawn_pct, suggested_trade_pct,
+            source_priority, valuation_method, retail_logic, updated_by, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)`,
+        [
+          targetId, pricing.suggested_buy_pct, pricing.suggested_pawn_pct, pricing.suggested_trade_pct,
+          pricing.source_priority, pricing.valuation_method, pricing.retail_logic, parseEmployeeId(req.body.employee_id),
+        ]
+      );
+    }
+
+    // Processing — requirement ticks and checklist, same rule.
+    await client.query('DELETE FROM category_processing_requirements WHERE category_id = $1', [targetId]);
+    const inheritedRequired = Object.fromEntries(inhProcessing.requirements.map(r => [r.id, r.required]));
+    for (const r of srcProcessing.requirements) {
+      if (r.required === (inheritedRequired[r.id] ?? false)) continue;
+      await client.query(
+        'INSERT INTO category_processing_requirements (category_id, requirement_id, required) VALUES ($1, $2, $3)',
+        [targetId, r.id, r.required]
+      );
+      counts.processing_requirements += 1;
+    }
+    await client.query('DELETE FROM category_processing_settings WHERE category_id = $1', [targetId]);
+    if (!sameValue(srcProcessing.checklist.effective, inhProcessing.checklist.effective)) {
+      await client.query(
+        `INSERT INTO category_processing_settings (category_id, checklist, updated_by, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`,
+        [targetId, JSON.stringify(srcProcessing.checklist.effective || []), parseEmployeeId(req.body.employee_id)]
+      );
+      counts.checklist = (srcProcessing.checklist.effective || []).length;
+    }
+
+    await client.query('COMMIT');
+
+    const changed = Object.values(counts).some(Boolean);
+    res.json({
+      copied_anything: changed,
+      message: changed
+        ? `Configuration copied from ${source.name} to ${target.name}`
+        : `${source.name} has nothing different to copy — ${target.name} already inherits the same configuration`,
+      source: { id: source.id, name: source.name },
+      copied: counts,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error copying category configuration:', err);
+    res.status(500).json({ error: 'Failed to copy configuration' });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// DELETE / DEACTIVATE CATEGORY
+// A category can be deleted only when nothing uses it: no subcategories and
+// no data (inventory, catalog items, …) referencing it. Its own
+// configuration (field rules, description / pricing / processing settings)
+// goes with it. Otherwise it can only be marked Inactive (PUT is_active).
+// ============================================================
+
+// Tables that hold a category's own configuration — removed with it, not "data".
+const CATEGORY_OWN_CONFIG_TABLES = [
+  'category_field_rules', 'category_description_settings', 'category_pricing_settings',
+  'category_processing_requirements', 'category_processing_settings',
+];
+// Category references with no foreign key, checked explicitly.
+const CATEGORY_UNLINKED_REFERENCES = [{ table: 'jewelry', column: 'category_id' }];
+const CATEGORY_USAGE_LABELS = {
+  hardgoods: ['hardgoods item', 'hardgoods items'],
+  jewelry: ['jewelry item', 'jewelry items'],
+  catalog_items: ['catalog item', 'catalog items'],
+};
+
+// What still uses a category. Foreign keys pointing at categories are read
+// from the schema, so tables added later are covered automatically.
+async function getCategoryUsage(client, categoryId) {
+  const fkRes = await client.query(
+    `SELECT cl.relname AS table_name, a.attname AS column_name
+     FROM pg_constraint c
+     JOIN pg_class cl ON cl.oid = c.conrelid
+     JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+     WHERE c.contype = 'f' AND c.confrelid = 'categories'::regclass`
+  );
+  const refs = [
+    ...fkRes.rows
+      .filter(r => !CATEGORY_OWN_CONFIG_TABLES.includes(r.table_name))
+      .filter(r => !(r.table_name === 'categories' && r.column_name === 'parent_category_id'))
+      .map(r => ({ table: r.table_name, column: r.column_name })),
+    ...CATEGORY_UNLINKED_REFERENCES,
+  ];
+
+  const childrenRes = await client.query('SELECT COUNT(*)::int AS n FROM categories WHERE parent_category_id = $1', [categoryId]);
+  const usage = [];
+  if (childrenRes.rows[0].n) {
+    const n = childrenRes.rows[0].n;
+    usage.push({ table: 'categories', label: n === 1 ? 'subcategory' : 'subcategories', count: n });
+  }
+  for (const ref of refs) {
+    const existsRes = await client.query('SELECT to_regclass($1) AS t', [`public.${ref.table}`]);
+    if (!existsRes.rows[0].t) continue;
+    const countRes = await client.query(
+      `SELECT COUNT(*)::int AS n FROM "${ref.table}" WHERE "${ref.column}" = $1`,
+      [categoryId]
+    );
+    const n = countRes.rows[0].n;
+    if (!n) continue;
+    const [one, many] = CATEGORY_USAGE_LABELS[ref.table] || [`${ref.table} row`, `${ref.table} rows`];
+    usage.push({ table: ref.table, label: n === 1 ? one : many, count: n });
+  }
+  return { usage, can_delete: usage.length === 0 };
+}
+
+// GET /api/categories/:id/usage — { usage: [{ table, label, count }], can_delete }
+app.get('/api/categories/:id/usage', async (req, res) => {
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    const catRes = await pool.query('SELECT id FROM categories WHERE id = $1', [categoryId]);
+    if (!catRes.rows.length) return res.status(404).json({ error: 'Category not found' });
+    res.json(await getCategoryUsage(pool, categoryId));
+  } catch (err) {
+    console.error('Error checking category usage:', err);
+    res.status(500).json({ error: 'Failed to check category usage' });
+  }
+});
+
+// DELETE /api/categories/:id — only when unused (re-checked in the transaction).
+app.delete('/api/categories/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const categoryId = parseInt(req.params.id, 10);
+    await client.query('BEGIN');
+    const catRes = await client.query('SELECT id, name FROM categories WHERE id = $1 FOR UPDATE', [categoryId]);
+    if (!catRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Category not found' });
+    }
+    const { usage, can_delete } = await getCategoryUsage(client, categoryId);
+    if (!can_delete) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `${catRes.rows[0].name} is in use (${usage.map(u => `${u.count} ${u.label}`).join(', ')}) — mark it inactive instead`,
+        usage,
+      });
+    }
+    // Own configuration: field rules have no ON DELETE CASCADE; the other
+    // settings tables cascade, and "copied from" references are set to NULL.
+    await client.query('DELETE FROM category_field_rules WHERE category_id = $1', [categoryId]);
+    await client.query('DELETE FROM categories WHERE id = $1', [categoryId]);
+    await client.query('COMMIT');
+    res.json({ message: `${catRes.rows[0].name} deleted` });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23503') {
+      return res.status(409).json({ error: 'This category is still referenced by other data — mark it inactive instead' });
+    }
+    console.error('Error deleting category:', err);
+    res.status(500).json({ error: 'Failed to delete category' });
   } finally {
     client.release();
   }
@@ -17991,7 +18717,7 @@ app.put('/api/hardgoods/:id', async (req, res) => {
     } = req.body;
 
     const currentRes = await client.query(
-      'SELECT category_id, catalog_item_id FROM hardgoods WHERE item_id = $1 FOR UPDATE',
+      'SELECT category_id, catalog_item_id, processing_status FROM hardgoods WHERE item_id = $1 FOR UPDATE',
       [req.params.id]
     );
     if (!currentRes.rows.length) {
@@ -18089,6 +18815,23 @@ app.put('/api/hardgoods/:id', async (req, res) => {
           );
         }
       }
+    }
+
+    // Moving into PROCESSING_COMPLETE: Required-At-Processing fields must be
+    // filled (checked after this save's attributes are written), and
+    // completion makes the item sellable.
+    if (processing_status === 'PROCESSING_COMPLETE' && current.processing_status !== 'PROCESSING_COMPLETE') {
+      const missing = await missingProcessingFields(client, req.params.id, result.rows[0].category_id);
+      if (missing.length) {
+        await client.query('ROLLBACK');
+        return processingIncompleteResponse(res, missing);
+      }
+      const sellableRes = await client.query(
+        `UPDATE hardgoods SET sellable_status = 'SELLABLE', updated_at = CURRENT_TIMESTAMP
+         WHERE item_id = $1 RETURNING *`,
+        [req.params.id]
+      );
+      result.rows[0] = sellableRes.rows[0];
     }
 
     await client.query('COMMIT');
@@ -18226,6 +18969,21 @@ app.put('/api/hardgoods/:id/status', async (req, res) => {
         RETURNING item_id, status, item_price, processing_status, sellable_status, blocking_reason, next_action`;
       queryParams = [item_price ?? null, req.params.id];
     } else {
+      // Moving into PROCESSING_COMPLETE: Required-At-Processing fields must be
+      // filled, and completion makes the item sellable.
+      let finalSellable = sellable_status;
+      if (processing_status === 'PROCESSING_COMPLETE') {
+        const currentRes = await pool.query(
+          'SELECT category_id, processing_status FROM hardgoods WHERE item_id = $1',
+          [req.params.id]
+        );
+        if (!currentRes.rows.length) return res.status(404).json({ error: 'Item not found' });
+        if (currentRes.rows[0].processing_status !== 'PROCESSING_COMPLETE') {
+          const missing = await missingProcessingFields(pool, req.params.id, currentRes.rows[0].category_id);
+          if (missing.length) return processingIncompleteResponse(res, missing);
+          finalSellable = 'SELLABLE';
+        }
+      }
       updateQuery = `
         UPDATE hardgoods SET
           status            = COALESCE($1, status),
@@ -18236,7 +18994,7 @@ app.put('/api/hardgoods/:id/status', async (req, res) => {
           updated_at        = CURRENT_TIMESTAMP
         WHERE item_id = $6
         RETURNING item_id, status, processing_status, sellable_status, blocking_reason, next_action`;
-      queryParams = [status, processing_status, sellable_status, blocking_reason, next_action, req.params.id];
+      queryParams = [status, processing_status, finalSellable, blocking_reason, next_action, req.params.id];
     }
 
     const result = await pool.query(updateQuery, queryParams);
