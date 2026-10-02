@@ -16,6 +16,7 @@ import {
   FormControlLabel,
   Grid,
   IconButton,
+  InputAdornment,
   InputLabel,
   ListSubheader,
   Menu,
@@ -56,6 +57,8 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
 import CheckIcon from '@mui/icons-material/Check';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
 import { useSnackbar } from 'notistack';
 import config from '../config';
 import CategoryPricingTab from './CategoryPricingTab';
@@ -144,9 +147,26 @@ function flattenCategoryTree(tree) {
   return out;
 }
 
+// Tree search: a category matches on its name, code or numeric code.
+// Returns the nodes that match or have a matching descendant (pruned to
+// just those branches), so each match is shown with its parent path.
+function categoryMatches(node, q) {
+  return [node.name, node.code, node.numeric_code]
+    .some(v => v != null && String(v).toLowerCase().includes(q));
+}
+function filterCategoryNodes(nodes, q) {
+  return nodes.reduce((out, n) => {
+    const children = filterCategoryNodes(n.children || [], q);
+    if (children.length || categoryMatches(n, q)) out.push({ ...n, children });
+    return out;
+  }, []);
+}
+
 // ── Recursive tree node ────────────────────────────────────────────────
-function CategoryNode({ node, depth, selected, onSelect, onAddChild }) {
-  const [open, setOpen] = useState(false);
+function CategoryNode({ node, depth, selected, onSelect, onAddChild, searching }) {
+  const [manualOpen, setOpen] = useState(false);
+  // While searching, every branch shown leads to a match, so keep it expanded.
+  const open = searching || manualOpen;
   const hasChildren = node.children && node.children.length > 0;
   const isSelected  = selected?.id === node.id;
 
@@ -200,6 +220,7 @@ function CategoryNode({ node, depth, selected, onSelect, onAddChild }) {
               selected={selected}
               onSelect={onSelect}
               onAddChild={onAddChild}
+              searching={searching}
             />
           ))}
         </Box>
@@ -273,6 +294,8 @@ function CategoryManager() {
   // Delete / deactivate: null | { loading } | { usage, can_delete }
   const [deleteState, setDeleteState] = useState(null);
   const [deleteBusy, setDeleteBusy]   = useState(false);
+  // Category tree search (filters the left panel).
+  const [treeSearch, setTreeSearch]   = useState('');
 
   useEffect(() => { loadAll(); }, []);
 
@@ -1168,6 +1191,17 @@ function CategoryManager() {
     );
   }
 
+  // Left-panel tree, filtered by the search box. A division whose own name
+  // or code matches is shown whole; otherwise only its matching branches.
+  const searchQuery = treeSearch.trim().toLowerCase();
+  const visibleTree = !searchQuery ? tree : tree.reduce((out, div) => {
+    const divMatches = [div.name, div.code].some(v => v && v.toLowerCase().includes(searchQuery));
+    const categories = divMatches ? div.categories : filterCategoryNodes(div.categories, searchQuery);
+    // expandAll: open every branch shown (they all lead to a match).
+    if (divMatches || categories.length) out.push({ ...div, categories, expandAll: !divMatches });
+    return out;
+  }, []);
+
   return (
     <Box sx={{ height: '100vh', display: 'flex', overflow: 'hidden' }}>
 
@@ -1178,10 +1212,30 @@ function CategoryManager() {
       }}>
         <Paper elevation={1} square sx={{ px: 2, py: 1, flexShrink: 0 }}>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>Category Manager</Typography>
+          <TextField
+            size="small" fullWidth placeholder="Search categories"
+            value={treeSearch}
+            onChange={e => setTreeSearch(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Escape') setTreeSearch(''); }}
+            sx={{ mt: 1 }}
+            InputProps={{
+              startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
+              endAdornment: treeSearch ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setTreeSearch('')}><ClearIcon fontSize="small" /></IconButton>
+                </InputAdornment>
+              ) : null,
+            }}
+          />
         </Paper>
 
         <Box sx={{ flex: 1, overflow: 'auto', bgcolor: 'background.paper' }}>
-          {tree.map(division => (
+          {searchQuery && visibleTree.length === 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+              No categories match “{treeSearch.trim()}”
+            </Typography>
+          )}
+          {visibleTree.map(division => (
               <Box key={division.id} sx={{ mb: 1 }}>
                 {/* Division header — clickable to manage division-level Fields
                     (inherited by every category in the division) */}
@@ -1230,6 +1284,7 @@ function CategoryManager() {
                           division_id: node.division_id,
                           parent_id:   node.id,
                         })}
+                        searching={!!division.expandAll}
                       />
                     ))
                   )}
