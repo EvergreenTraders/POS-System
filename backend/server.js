@@ -15846,12 +15846,12 @@ app.get('/api/categories/:id', async (req, res) => {
   }
 });
 
-// Friendly category code: 1–3 characters, A–Z / 0–9, stored uppercase.
+// Friendly category code: exactly 3 characters, A–Z / 0–9, stored uppercase.
 // (Uniqueness guarantees come from numeric_code, a random 5-digit code the
 // database assigns — see catalog_items.sql, section 8.)
-const CATEGORY_CODE_PATTERN = /^[A-Z0-9]{1,3}$/;
+const CATEGORY_CODE_PATTERN = /^[A-Z0-9]{3}$/;
 const normalizeCategoryCode = (code) => String(code ?? '').trim().toUpperCase();
-const CATEGORY_CODE_ERROR = 'Category code must be 1–3 letters or numbers';
+const CATEGORY_CODE_ERROR = 'Category code must be exactly 3 letters or numbers';
 
 // Friendly-code clash among siblings (incl. root level) vs. anything else.
 const isCategoryCodeConflict = (err) =>

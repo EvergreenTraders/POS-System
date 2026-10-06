@@ -79,8 +79,8 @@ const FIELD_DATA_TYPES = [
 ];
 const HAS_ALLOWED_VALUES = ['ENUM', 'MULTISELECT'];
 
-// Friendly category code: 1–3 letters/numbers (same rule as the API).
-const CATEGORY_CODE_PATTERN = /^[A-Z0-9]{1,3}$/;
+// Friendly category code: exactly 3 letters/numbers (same rule as the API).
+const CATEGORY_CODE_PATTERN = /^[A-Z0-9]{3}$/;
 
 // category_field_rules.scope — Transaction is a legacy third option not
 // surfaced in this tab's UI (the doc only calls for Catalog Item / Inventory
@@ -857,7 +857,7 @@ function CategoryManager() {
       return;
     }
     if (!CATEGORY_CODE_PATTERN.test(catForm.code.trim().toUpperCase())) {
-      setCatDialogError('Code must be 1–3 letters or numbers');
+      setCatDialogError('Code must be exactly 3 letters or numbers');
       return;
     }
     try {
@@ -1927,7 +1927,7 @@ function CategoryManager() {
                 onChange={e => setCatForm(f => ({ ...f, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') }))}
                 fullWidth size="small"
                 inputProps={{ maxLength: 3, style: { fontFamily: 'monospace', textTransform: 'uppercase' } }}
-                helperText="Up to 3 letters/numbers, unique within the same parent. A unique 5-digit numeric code is assigned automatically."
+                helperText="Exactly 3 letters/numbers, unique within the same parent. A unique 5-digit numeric code is assigned automatically."
               />
             </Grid>
             <Grid item xs={12}>

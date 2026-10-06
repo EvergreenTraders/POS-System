@@ -329,13 +329,18 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- Enforce max 3 chars for all new/edited rows; validate once every existing
-  -- row complies (always true unless a clash was skipped above).
+  -- Enforce exactly 3 chars for all new/edited rows (replacing the earlier
+  -- 1–3 char rule); validate once every existing row complies — a shorter
+  -- legacy code keeps it NOT VALID until that code is fixed.
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_categories_code_format'
+             AND pg_get_constraintdef(oid) LIKE '%{1,3}%') THEN
+    ALTER TABLE categories DROP CONSTRAINT chk_categories_code_format;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_categories_code_format') THEN
     ALTER TABLE categories ADD CONSTRAINT chk_categories_code_format
-      CHECK (code ~ '^[A-Z0-9]{1,3}$') NOT VALID;
+      CHECK (code ~ '^[A-Z0-9]{3}$') NOT VALID;
   END IF;
-  IF skipped = 0 AND NOT EXISTS (SELECT 1 FROM categories WHERE code !~ '^[A-Z0-9]{1,3}$') THEN
+  IF skipped = 0 AND NOT EXISTS (SELECT 1 FROM categories WHERE code !~ '^[A-Z0-9]{3}$') THEN
     ALTER TABLE categories VALIDATE CONSTRAINT chk_categories_code_format;
   END IF;
 END $$;
