@@ -90,12 +90,17 @@ const HISTORY_FIELD_LABELS = {
   reclassified_inventory: 'Inventory Reclassified',
   reference_image: 'Reference Image',
   additional_image: 'Additional Image',
+  merged_into: 'Merged Into',
+  merged_from: 'Merged From',
+  relinked_inventory: 'Inventory Re-linked',
 };
 const HISTORY_ACTION_LABELS = {
   CREATE: 'Created',
   UPDATE: 'Updated',
   STATUS_CHANGE: 'Status Changed',
   CATEGORY_CHANGE: 'Category Changed',
+  MERGE: 'Merged',
+  SPLIT: 'Split',
 };
 
 const NOTES_MAX = 1000;
@@ -711,7 +716,22 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
         </Alert>
       )}
       {isMerged && (
-        <Alert severity="info" sx={{ mb: 2 }}>This catalog item has been merged and is read-only.</Alert>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          This catalog item has been merged and is read-only.
+          {item.lineage?.into?.map(l => (
+            <React.Fragment key={l.id}>
+              {' '}Merged into{' '}
+              <Link component="button" variant="body2" onClick={() => navigate(`/catalog/items/${l.id}`)} sx={{ verticalAlign: 'baseline' }}>
+                {l.catalog_code} — {l.title}
+              </Link>.
+            </React.Fragment>
+          ))}
+        </Alert>
+      )}
+      {!isMerged && item?.lineage?.from?.length > 0 && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Created by merging {item.lineage.from.map(l => l.catalog_code).join(' + ')}.
+        </Alert>
       )}
 
       <Grid container spacing={2} columns={24}>

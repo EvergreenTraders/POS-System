@@ -13,6 +13,7 @@ import {
   IconButton,
   InputAdornment,
   InputLabel,
+  Link,
   ListSubheader,
   MenuItem,
   Pagination,
@@ -42,6 +43,7 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
 import ImageNotSupportedOutlinedIcon from '@mui/icons-material/ImageNotSupportedOutlined';
+import CallMergeIcon from '@mui/icons-material/CallMerge';
 import { useSnackbar } from 'notistack';
 import config from '../config';
 import { flattenCategoryTree } from '../utils/categoryTree';
@@ -344,6 +346,9 @@ export default function CatalogManager() {
             <Button variant="outlined" startIcon={<LightbulbOutlinedIcon />} disabled>Suggest New Item</Button>
           </span>
         </Tooltip>
+        <Button variant="outlined" startIcon={<CallMergeIcon />} onClick={() => navigate('/catalog/merge')}>
+          Merge Items
+        </Button>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate('/catalog/items/new')}>
           New Catalog Item
         </Button>
@@ -606,6 +611,26 @@ export default function CatalogManager() {
                 </Box>
               </Box>
 
+              {/* Merge lineage: where a Merged item went / what a merged item came from. */}
+              {preview.lineage?.into?.length > 0 && (
+                <Alert severity="info" sx={{ mb: 1.5 }}>
+                  Merged into{' '}
+                  {preview.lineage.into.map((l, i) => (
+                    <React.Fragment key={l.id}>
+                      {i > 0 && ', '}
+                      <Link component="button" variant="body2" onClick={() => setSelectedId(l.id)} sx={{ verticalAlign: 'baseline' }}>
+                        {l.catalog_code} — {l.title}
+                      </Link>
+                    </React.Fragment>
+                  ))}
+                </Alert>
+              )}
+              {preview.lineage?.from?.length > 0 && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  Merged from {preview.lineage.from.map(l => l.catalog_code).join(' + ')}
+                </Typography>
+              )}
+
               <PanelSection title="Identifiers">
                 <IdentifierList label="Model Numbers" values={previewModels} />
                 <IdentifierList label="UPCs" values={previewUpcs} />
@@ -639,6 +664,12 @@ export default function CatalogManager() {
               <Button fullWidth variant="contained" size="large" startIcon={<EditIcon />} onClick={() => openEditor(preview.id)}>
                 Open in Catalog Item Editor
               </Button>
+              {preview.status !== 'MERGED' && (
+                <Button fullWidth variant="outlined" startIcon={<CallMergeIcon />} sx={{ mt: 1 }}
+                  onClick={() => navigate(`/catalog/merge?a=${preview.id}`)}>
+                  Merge with Another Item…
+                </Button>
+              )}
             </>
           )}
         </Paper>

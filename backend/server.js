@@ -17354,10 +17354,10 @@ app.delete('/api/categories/:id', async (req, res) => {
 // catalog_item_id but keep their own snapshotted values, so nothing here
 // rewrites existing inventory descriptions. The one exception is Category,
 // which is structural — moving a Catalog Item reclassifies linked inventory.
-// Search, Merge/Split, Intake and intelligence are deliberately out of scope.
+// Merge lives in POST /api/catalog-items/merge; Split and intelligence are later phases.
 // ============================================================
 
-// MERGED is only ever set by the (future) Merge workflow.
+// MERGED is only ever set by the Merge workflow (POST /api/catalog-items/merge).
 const CATALOG_SETTABLE_STATUSES = ['DRAFT', 'ACTIVE', 'INACTIVE'];
 const CATALOG_IDENTIFIER_TYPES = ['UPC', 'EAN', 'MANUFACTURER_MODEL', 'OTHER'];
 const CATALOG_IDENTIFIER_SOURCES = ['MANUAL', 'MANUFACTURER_API', 'EXTERNAL_PROVIDER'];
@@ -17727,7 +17727,7 @@ async function loadCatalogItem(catalogItemId) {
   if (!itemRes.rows.length) return null;
   const item = itemRes.rows[0];
 
-  const [identRes, aliasRes, valueMap, catalogFields, linkedRes, imageRes] = await Promise.all([
+  const [identRes, aliasRes, valueMap, catalogFields, linkedRes, imageRes, lineageRes] = await Promise.all([
     pool.query(
       `SELECT id, identifier_type, raw_value, normalized_value, is_active, source, provider, created_at, updated_at
        FROM catalog_item_identifiers WHERE catalog_item_id = $1
@@ -17753,6 +17753,20 @@ async function loadCatalogItem(catalogItemId) {
        LEFT JOIN employees e ON e.employee_id = i.uploaded_by
        WHERE i.catalog_item_id = $1
        ORDER BY i.is_primary DESC, i.created_at DESC, i.id DESC`,
+      [catalogItemId]
+    ),
+    // Merge/Split lineage in both directions (doc §6).
+    pool.query(
+      `SELECT 'INTO' AS direction, r.relationship_type, r.performed_at,
+              o.id, o.catalog_code, COALESCE(o.title_override, o.generated_title, o.model_name) AS title
+       FROM catalog_item_relationships r JOIN catalog_items o ON o.id = r.target_catalog_item_id
+       WHERE r.source_catalog_item_id = $1
+       UNION ALL
+       SELECT 'FROM', r.relationship_type, r.performed_at,
+              o.id, o.catalog_code, COALESCE(o.title_override, o.generated_title, o.model_name)
+       FROM catalog_item_relationships r JOIN catalog_items o ON o.id = r.source_catalog_item_id
+       WHERE r.target_catalog_item_id = $1
+       ORDER BY performed_at, id`,
       [catalogItemId]
     ),
   ]);
@@ -17788,6 +17802,11 @@ async function loadCatalogItem(catalogItemId) {
     field_values: fieldValues,
     images: imageRes.rows,
     primary_image: imageRes.rows.find(r => r.is_primary) || null,
+    lineage: {
+      // e.g. a MERGED source → the item it was merged into; a merge result → its sources.
+      into: lineageRes.rows.filter(r => r.direction === 'INTO'),
+      from: lineageRes.rows.filter(r => r.direction === 'FROM'),
+    },
     summary: {
       identifiers: identRes.rows.filter(r => r.is_active).length,
       aliases: aliasRes.rows.filter(r => r.is_active).length,
@@ -17833,6 +17852,39 @@ app.post('/api/catalog-items/generate-title', async (req, res) => {
   }
 });
 
+// Inserts the catalog_items row (inside the caller's transaction) and returns
+// its id. params: [company_id, category_id, status, make_brand, model_name,
+// title_override, default_inventory_mode, suggested_cost, suggested_retail,
+// retails_new_for, internal_notes, employee_id].
+// catalog_code (CAT-XXXXX) and friendly_code (CAT-{div}-{BRANDMODEL}) are
+// assigned once by the trg_catalog_items_assign_codes trigger
+// (catalog_items.sql, section 9). A concurrent insert could pick the same code
+// between the trigger's check and commit, so a collision on either unique
+// constraint is retried from a savepoint.
+async function insertCatalogItemRow(client, params) {
+  for (let attempt = 1; ; attempt++) {
+    await client.query('SAVEPOINT catalog_insert');
+    try {
+      const inserted = await client.query(
+        `INSERT INTO catalog_items
+           (company_id, category_id, status, make_brand, model_name, title_override,
+            default_inventory_mode, suggested_cost, suggested_retail, retails_new_for, internal_notes,
+            created_by, updated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
+         RETURNING id`,
+        params
+      );
+      await client.query('RELEASE SAVEPOINT catalog_insert');
+      return inserted.rows[0].id;
+    } catch (err) {
+      const codeCollision = err.code === '23505'
+        && ['catalog_items_catalog_code_key', 'uq_catalog_items_friendly_code'].includes(err.constraint);
+      if (!codeCollision || attempt >= 5) throw err;
+      await client.query('ROLLBACK TO SAVEPOINT catalog_insert');
+    }
+  }
+}
+
 // POST /api/catalog-items — create. Body: { category_id, make_brand, model_name,
 // title_override?, status? (DRAFT default), default_inventory_mode?, pricing?:
 // { suggested_cost, suggested_retail, retails_new_for }, internal_notes?,
@@ -17862,42 +17914,14 @@ app.post('/api/catalog-items', async (req, res) => {
     await assertInventoryModeExists(client, mode);
     const companyId = await getDefaultCompanyId(client);
 
-    // catalog_code (CAT-XXXXX) and friendly_code (CAT-{div}-{BRANDMODEL}) are
-    // assigned once by the trg_catalog_items_assign_codes trigger
-    // (catalog_items.sql, section 9). A concurrent insert could pick the same code
-    // between the trigger's check and commit, so a collision on either unique
-    // constraint is retried from a savepoint.
-    const insertParams = [
+    const catalogItemId = await insertCatalogItemRow(client, [
       companyId, categoryId, status, makeBrand, modelName,
       trimOrNull(b.title_override), mode,
       parseCatalogMoney(pricing.suggested_cost, 'Suggested Cost') ?? null,
       parseCatalogMoney(pricing.suggested_retail, 'Suggested Retail') ?? null,
       parseCatalogMoney(pricing.retails_new_for, 'Retails New For') ?? null,
       trimOrNull(b.internal_notes), employeeId,
-    ];
-    let catalogItemId;
-    for (let attempt = 1; ; attempt++) {
-      await client.query('SAVEPOINT catalog_insert');
-      try {
-        const inserted = await client.query(
-          `INSERT INTO catalog_items
-             (company_id, category_id, status, make_brand, model_name, title_override,
-              default_inventory_mode, suggested_cost, suggested_retail, retails_new_for, internal_notes,
-              created_by, updated_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
-           RETURNING id`,
-          insertParams
-        );
-        catalogItemId = inserted.rows[0].id;
-        await client.query('RELEASE SAVEPOINT catalog_insert');
-        break;
-      } catch (err) {
-        const codeCollision = err.code === '23505'
-          && ['catalog_items_catalog_code_key', 'uq_catalog_items_friendly_code'].includes(err.constraint);
-        if (!codeCollision || attempt >= 5) throw err;
-        await client.query('ROLLBACK TO SAVEPOINT catalog_insert');
-      }
-    }
+    ]);
 
     if (b.field_values !== undefined) await saveCatalogFieldValues(client, catalogItemId, categoryId, b.field_values);
     if (b.identifiers !== undefined) await saveCatalogIdentifiers(client, catalogItemId, companyId, b.identifiers);
@@ -18439,6 +18463,221 @@ app.patch('/api/catalog-items/:id/status', async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     sendCatalogError(res, err, 'Failed to update catalog item status');
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// MERGE CATALOG ITEMS (doc §6) — combines two catalog items into ONE NEW
+// item. The user chooses the surviving values; the selected identifiers and
+// aliases move to the new item; both old titles become MERGED_TITLE aliases;
+// inventory/history linked to either source is re-linked to the new item
+// (and follows its Category — Category is structural); both sources are kept,
+// read-only, with status MERGED; lineage is recorded source → target.
+//
+// POST /api/catalog-items/merge — Body: {
+//   source_a_id, source_b_id,
+//   values_from: 'A' | 'B'   (whose Catalog field values / image / inventory
+//                             mode win; the other source fills the gaps),
+//   merged: { make_brand, model_name, category_id, status, title_override,
+//             internal_notes, pricing: { suggested_cost, suggested_retail, retails_new_for } },
+//   identifier_ids: [...]    (identifier rows of either source to keep),
+//   alias_ids: [...]         (alias rows of either source to keep),
+//   employee_id }
+// ============================================================
+app.post('/api/catalog-items/merge', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const b = req.body || {};
+    const employeeId = parseEmployeeId(b.employee_id);
+    const aId = parseCatalogItemId(String(b.source_a_id ?? ''));
+    const bId = parseCatalogItemId(String(b.source_b_id ?? ''));
+    if (aId === bId) throw new CatalogValidationError('Choose two different catalog items to merge');
+
+    const m = b.merged || {};
+    const makeBrand = trimOrNull(m.make_brand);
+    const modelName = trimOrNull(m.model_name);
+    const categoryId = parseInt(m.category_id, 10);
+    const status = String(m.status || 'ACTIVE').toUpperCase();
+    const pricing = m.pricing || {};
+    if (!modelName) throw new CatalogValidationError('Model Name is required');
+    if (!makeBrand) throw new CatalogValidationError('Make / Brand is required');
+    if (!categoryId) throw new CatalogValidationError('Category is required');
+    if (!CATALOG_SETTABLE_STATUSES.includes(status)) {
+      throw new CatalogValidationError(`status must be one of: ${CATALOG_SETTABLE_STATUSES.join(', ')}`);
+    }
+    const toIds = (v) => [...new Set((Array.isArray(v) ? v : []).map(x => parseInt(x, 10)).filter(Number.isInteger))];
+    const identifierIds = toIds(b.identifier_ids);
+    const aliasIds = toIds(b.alias_ids);
+
+    await client.query('BEGIN');
+    // Lock both sources so a concurrent edit/merge can't interleave.
+    const srcRes = await client.query('SELECT * FROM catalog_items WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE', [[aId, bId]]);
+    const srcA = srcRes.rows.find(r => r.id === aId);
+    const srcB = srcRes.rows.find(r => r.id === bId);
+    if (!srcA || !srcB) throw new CatalogValidationError('Catalog item to merge not found', 404);
+    for (const s of [srcA, srcB]) {
+      if (s.status === 'MERGED') throw new CatalogValidationError(`${s.catalog_code} has already been merged`, 409);
+    }
+    if (srcA.company_id !== srcB.company_id) throw new CatalogValidationError('Only catalog items of the same company can be merged');
+    const companyId = srcA.company_id;
+
+    const category = await assertCategoryExists(client, categoryId);
+    if (!category.is_active) throw new CatalogValidationError('Cannot merge into an inactive category');
+
+    const primary = b.values_from === 'B' ? srcB : srcA;
+    const secondary = primary === srcA ? srcB : srcA;
+
+    const catalogItemId = await insertCatalogItemRow(client, [
+      companyId, categoryId, status, makeBrand, modelName,
+      trimOrNull(m.title_override), primary.default_inventory_mode ?? secondary.default_inventory_mode,
+      parseCatalogMoney(pricing.suggested_cost, 'Suggested Cost') ?? null,
+      parseCatalogMoney(pricing.suggested_retail, 'Suggested Retail') ?? null,
+      parseCatalogMoney(pricing.retails_new_for, 'Retails New For') ?? null,
+      trimOrNull(m.internal_notes), employeeId,
+    ]);
+
+    // Catalog field values: only fields that apply to the merged Category;
+    // the chosen source's value wins, the other source fills blanks.
+    const [catalogFields, primaryValues, secondaryValues] = await Promise.all([
+      getCatalogScopeFields(categoryId),
+      loadCatalogFieldValueMap(client, primary.id),
+      loadCatalogFieldValueMap(client, secondary.id),
+    ]);
+    for (const f of catalogFields) {
+      const value = primaryValues[f.field_definition_id] ?? secondaryValues[f.field_definition_id] ?? null;
+      if (value === null) continue;
+      await client.query(
+        'INSERT INTO catalog_item_field_values (catalog_item_id, field_definition_id, value) VALUES ($1, $2, $3)',
+        [catalogItemId, f.field_definition_id, value]
+      );
+    }
+
+    // Selected identifiers (deduplicated by type + normalized value).
+    const identRes = await client.query(
+      `SELECT * FROM catalog_item_identifiers
+       WHERE id = ANY($1::int[]) AND catalog_item_id = ANY($2::int[]) ORDER BY id`,
+      [identifierIds, [aId, bId]]
+    );
+    if (identRes.rows.length !== identifierIds.length) {
+      throw new CatalogValidationError('An identifier to keep does not belong to either source item');
+    }
+    for (const i of identRes.rows) {
+      await client.query(
+        `INSERT INTO catalog_item_identifiers
+           (catalog_item_id, company_id, identifier_type, raw_value, normalized_value, is_active, source, provider)
+         VALUES ($1, $2, $3, $4, $5, true, $6, $7)
+         ON CONFLICT (catalog_item_id, identifier_type, normalized_value) DO NOTHING`,
+        [catalogItemId, companyId, i.identifier_type, i.raw_value, i.normalized_value, i.source, i.provider]
+      );
+    }
+
+    // Selected aliases: staff search terms stay search terms; system titles
+    // (previous / merged titles) carry over as merged titles.
+    const aliasRes = await client.query(
+      `SELECT * FROM catalog_item_aliases
+       WHERE id = ANY($1::int[]) AND catalog_item_id = ANY($2::int[]) ORDER BY id`,
+      [aliasIds, [aId, bId]]
+    );
+    if (aliasRes.rows.length !== aliasIds.length) {
+      throw new CatalogValidationError('An alias to keep does not belong to either source item');
+    }
+    const addAlias = (alias, type) => client.query(
+      `INSERT INTO catalog_item_aliases (catalog_item_id, alias, normalized_alias, alias_type)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (catalog_item_id, normalized_alias) DO NOTHING`,
+      [catalogItemId, alias, normalizeCatalogAlias(alias), type]
+    );
+    for (const a of aliasRes.rows) {
+      await addAlias(a.alias, a.alias_type === 'SEARCH_TERM' ? 'SEARCH_TERM' : 'MERGED_TITLE');
+    }
+
+    const generatedTitle = await buildCatalogGeneratedTitle(
+      categoryId, makeBrand, modelName, await loadCatalogFieldValueMap(client, catalogItemId)
+    );
+    await client.query('UPDATE catalog_items SET generated_title = $1 WHERE id = $2', [generatedTitle, catalogItemId]);
+
+    // Old titles become aliases (doc §6), unless identical to the new title.
+    const newTitle = normalizeCatalogAlias(trimOrNull(m.title_override) || generatedTitle);
+    for (const s of [srcA, srcB]) {
+      const oldTitle = s.title_override || s.generated_title || s.model_name;
+      if (oldTitle && normalizeCatalogAlias(oldTitle) !== newTitle) await addAlias(oldTitle, 'MERGED_TITLE');
+    }
+
+    // Reference images: every image of both sources is kept (same stored
+    // file); the chosen source's primary stays primary.
+    await client.query(
+      `INSERT INTO catalog_item_images (catalog_item_id, image_url, is_primary, source, source_url, provider, uploaded_by, created_at)
+       SELECT $1, image_url, false, source, source_url, provider, uploaded_by, created_at
+       FROM catalog_item_images WHERE catalog_item_id = ANY($2::int[])`,
+      [catalogItemId, [aId, bId]]
+    );
+    const primaryImgRes = await client.query(
+      `SELECT image_url FROM catalog_item_images
+       WHERE catalog_item_id = ANY($1::int[]) AND is_primary
+       ORDER BY (catalog_item_id = $2) DESC LIMIT 1`,
+      [[aId, bId], primary.id]
+    );
+    if (primaryImgRes.rows.length) {
+      await client.query(
+        `UPDATE catalog_item_images SET is_primary = true
+         WHERE id = (SELECT id FROM catalog_item_images WHERE catalog_item_id = $1 AND image_url = $2 ORDER BY id LIMIT 1)`,
+        [catalogItemId, primaryImgRes.rows[0].image_url]
+      );
+    }
+
+    // Re-link inventory/history from both sources; it follows the merged
+    // Category. Snapshotted descriptive values are intentionally untouched.
+    const relinked = {};
+    for (const s of [srcA, srcB]) {
+      const hg = await client.query(
+        'UPDATE hardgoods SET catalog_item_id = $1, category_id = $2, updated_at = CURRENT_TIMESTAMP WHERE catalog_item_id = $3',
+        [catalogItemId, categoryId, s.id]
+      );
+      const jw = await client.query(
+        'UPDATE jewelry SET catalog_item_id = $1, category_id = $2 WHERE catalog_item_id = $3',
+        [catalogItemId, categoryId, s.id]
+      );
+      relinked[s.id] = hg.rowCount + jw.rowCount;
+    }
+
+    const codeRes = await client.query('SELECT catalog_code FROM catalog_items WHERE id = $1', [catalogItemId]);
+    const newCode = codeRes.rows[0].catalog_code;
+
+    // Retire both sources (kept, read-only, traceable) and record lineage.
+    for (const s of [srcA, srcB]) {
+      await client.query(
+        `UPDATE catalog_items SET status = 'MERGED', updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [employeeId, s.id]
+      );
+      await client.query(
+        `INSERT INTO catalog_item_relationships
+           (source_catalog_item_id, target_catalog_item_id, relationship_type, performed_by)
+         VALUES ($1, $2, 'MERGE', $3)`,
+        [s.id, catalogItemId, employeeId]
+      );
+      await writeCatalogAudit(client, s.id, 'MERGE', {
+        status: { from: s.status, to: 'MERGED' },
+        merged_into: { from: null, to: newCode },
+        relinked_inventory: { from: null, to: relinked[s.id] },
+      }, employeeId);
+    }
+
+    // Checked after the sources are retired, so their own UPCs don't count.
+    if (status === 'ACTIVE') await assertNoActiveIdentifierConflicts(client, catalogItemId);
+
+    await writeCatalogAudit(client, catalogItemId, 'MERGE', {
+      ...diffCatalogSnapshots({}, await snapshotCatalogItem(client, catalogItemId)),
+      merged_from: { from: null, to: [srcA.catalog_code, srcB.catalog_code] },
+      relinked_inventory: { from: null, to: relinked[aId] + relinked[bId] },
+    }, employeeId);
+
+    await client.query('COMMIT');
+    res.status(201).json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to merge catalog items');
   } finally {
     client.release();
   }

@@ -518,3 +518,42 @@ CREATE INDEX IF NOT EXISTS idx_catalog_images_item ON catalog_item_images(catalo
 -- At most one primary image per Catalog Item.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_catalog_images_primary
     ON catalog_item_images(catalog_item_id) WHERE is_primary;
+
+
+-- ============================================================
+-- 11. MERGE / SPLIT LINEAGE (doc §6 "Recommended lineage table")
+-- One row per source → target link. A Merge of A + B into a new item C
+-- writes A→C and B→C; a (future) Split of A into C + D writes A→C and A→D.
+-- Kept even after operational records are re-linked, so lineage survives.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS catalog_item_relationships (
+    id                      SERIAL      PRIMARY KEY,
+    source_catalog_item_id  INTEGER     NOT NULL REFERENCES catalog_items(id) ON DELETE RESTRICT,
+    target_catalog_item_id  INTEGER     NOT NULL REFERENCES catalog_items(id) ON DELETE RESTRICT,
+    relationship_type       VARCHAR(10) NOT NULL CHECK (relationship_type IN ('MERGE', 'SPLIT')),
+    performed_by            INTEGER     REFERENCES employees(employee_id) ON DELETE SET NULL,
+    performed_at            TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_catalog_relationship_distinct CHECK (source_catalog_item_id <> target_catalog_item_id),
+    CONSTRAINT uq_catalog_relationship UNIQUE (source_catalog_item_id, target_catalog_item_id, relationship_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_relationships_source ON catalog_item_relationships(source_catalog_item_id);
+CREATE INDEX IF NOT EXISTS idx_catalog_relationships_target ON catalog_item_relationships(target_catalog_item_id);
+
+-- Audit actions: add MERGE / SPLIT (the inline CHECK from section 6 only
+-- allowed CREATE / UPDATE / STATUS_CHANGE / CATEGORY_CHANGE).
+DO $$
+DECLARE
+  c RECORD;
+BEGIN
+  FOR c IN SELECT conname FROM pg_constraint
+           WHERE conrelid = 'catalog_item_audit'::regclass AND contype = 'c'
+             AND pg_get_constraintdef(oid) LIKE '%action%'
+             AND pg_get_constraintdef(oid) NOT LIKE '%MERGE%' LOOP
+    EXECUTE format('ALTER TABLE catalog_item_audit DROP CONSTRAINT %I', c.conname);
+  END LOOP;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_catalog_audit_action') THEN
+    ALTER TABLE catalog_item_audit ADD CONSTRAINT chk_catalog_audit_action
+      CHECK (action IN ('CREATE', 'UPDATE', 'STATUS_CHANGE', 'CATEGORY_CHANGE', 'MERGE', 'SPLIT'));
+  END IF;
+END $$;
