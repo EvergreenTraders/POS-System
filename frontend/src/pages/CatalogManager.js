@@ -44,6 +44,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
 import ImageNotSupportedOutlinedIcon from '@mui/icons-material/ImageNotSupportedOutlined';
 import CallMergeIcon from '@mui/icons-material/CallMerge';
+import CallSplitIcon from '@mui/icons-material/CallSplit';
 import { useSnackbar } from 'notistack';
 import config from '../config';
 import { flattenCategoryTree } from '../utils/categoryTree';
@@ -611,10 +612,10 @@ export default function CatalogManager() {
                 </Box>
               </Box>
 
-              {/* Merge lineage: where a Merged item went / what a merged item came from. */}
+              {/* Merge / Split lineage: where this item went / what it came from. */}
               {preview.lineage?.into?.length > 0 && (
                 <Alert severity="info" sx={{ mb: 1.5 }}>
-                  Merged into{' '}
+                  {preview.lineage.into[0].relationship_type === 'SPLIT' ? 'Split into' : 'Merged into'}{' '}
                   {preview.lineage.into.map((l, i) => (
                     <React.Fragment key={l.id}>
                       {i > 0 && ', '}
@@ -627,7 +628,8 @@ export default function CatalogManager() {
               )}
               {preview.lineage?.from?.length > 0 && (
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  Merged from {preview.lineage.from.map(l => l.catalog_code).join(' + ')}
+                  {preview.lineage.from[0].relationship_type === 'SPLIT' ? 'Split from' : 'Merged from'}{' '}
+                  {preview.lineage.from.map(l => l.catalog_code).join(' + ')}
                 </Typography>
               )}
 
@@ -668,6 +670,12 @@ export default function CatalogManager() {
                 <Button fullWidth variant="outlined" startIcon={<CallMergeIcon />} sx={{ mt: 1 }}
                   onClick={() => navigate(`/catalog/merge?a=${preview.id}`)}>
                   Merge with Another Item…
+                </Button>
+              )}
+              {preview.status !== 'MERGED' && (
+                <Button fullWidth variant="outlined" startIcon={<CallSplitIcon />} sx={{ mt: 1 }}
+                  onClick={() => navigate(`/catalog/split?source=${preview.id}`)}>
+                  Split into Two Items…
                 </Button>
               )}
             </>

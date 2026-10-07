@@ -30,6 +30,7 @@ import HardgoodsEstimator from './pages/HardgoodsEstimator';
 import CategoryManager from './pages/CategoryManager';
 import CatalogItemEditor from './pages/CatalogItemEditor';
 import MergeCatalogItems from './pages/MergeCatalogItems';
+import SplitCatalogItem from './pages/SplitCatalogItem';
 import CatalogManager from './pages/CatalogManager';
 import NewCatalogItem from './pages/NewCatalogItem';
 import SystemConfig from './pages/SystemConfig';
@@ -661,6 +662,17 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <MergeCatalogItems />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              {/* Catalog Manager → "Split into Two Items…" — ?source=<id> is the item being split */}
+              <Route
+                path="/catalog/split"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <SplitCatalogItem />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

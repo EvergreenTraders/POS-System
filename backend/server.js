@@ -18683,6 +18683,225 @@ app.post('/api/catalog-items/merge', async (req, res) => {
   }
 });
 
+// GET /api/catalog-items/:id/linked-inventory — inventory records (hardgoods +
+// jewelry, all stores) linked to a catalog item, lightweight, for the Split
+// screen's assignment list. match_values: the record's normalized part number
+// and attribute values, so the client can suggest which new item a record
+// belongs to by matching them against each new item's identifiers.
+app.get('/api/catalog-items/:id/linked-inventory', async (req, res) => {
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const result = await pool.query(
+      `SELECT 'hardgoods' AS inventory_table, h.item_id,
+              COALESCE(h.short_desc, h.long_desc, h.original_intake_description) AS description,
+              h.status, h.serial_number, h.part_number, h.created_at,
+              COALESCE((SELECT array_agg(a.field_value) FROM hardgoods_attributes a
+                        WHERE a.item_id = h.item_id AND a.field_value IS NOT NULL), '{}') AS attribute_values
+       FROM hardgoods h WHERE h.catalog_item_id = $1
+       UNION ALL
+       SELECT 'jewelry', j.item_id, COALESCE(j.short_desc, j.long_desc, j.original_intake_description),
+              j.status, j.serial_number, j.part_number, j.created_at, '{}'
+       FROM jewelry j WHERE j.catalog_item_id = $1
+       ORDER BY created_at DESC, item_id
+       LIMIT 1000`,
+      [catalogItemId]
+    );
+    res.json(result.rows.map(({ part_number, attribute_values, ...r }) => ({
+      ...r,
+      part_number,
+      match_values: [...new Set([part_number, ...(attribute_values || [])]
+        .map(normalizeCatalogIdentifier).filter(v => v.length >= 3))],
+    })));
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to fetch linked inventory');
+  }
+});
+
+// ============================================================
+// SPLIT CATALOG ITEM (doc §6) — creates two (or more) NEW catalog items from
+// a source. Each new item gets its own details, identifiers and aliases;
+// it starts from the source's pricing, inventory mode, reference images and
+// Catalog field values (those that apply to its Category). The manager then
+// reassigns the source's linked inventory to the new items (records left out
+// stay on the source). The source keeps all of its data and history but is
+// marked INACTIVE, so the new items can take over its UPCs. Lineage is
+// recorded source → each new item.
+//
+// POST /api/catalog-items/:id/split — Body: {
+//   items: [{ model_name, make_brand, category_id, status, internal_notes,
+//             identifiers: [{ identifier_type, raw_value }], aliases: [...] }, ...],
+//   inventory: [{ item_id, inventory_table: 'hardgoods'|'jewelry', target: <index into items> }],
+//   employee_id }
+// ============================================================
+app.post('/api/catalog-items/:id/split', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const sourceId = parseCatalogItemId(req.params.id);
+    const b = req.body || {};
+    const employeeId = parseEmployeeId(b.employee_id);
+    const specs = Array.isArray(b.items) ? b.items : [];
+    if (specs.length < 2) throw new CatalogValidationError('A split needs at least two new items');
+    specs.forEach((s, i) => {
+      const label = `New Item ${String.fromCharCode(65 + i)}`;
+      if (!trimOrNull(s?.model_name)) throw new CatalogValidationError(`${label}: Model Name is required`);
+      if (!trimOrNull(s?.make_brand)) throw new CatalogValidationError(`${label}: Make / Brand is required`);
+      if (!parseInt(s?.category_id, 10)) throw new CatalogValidationError(`${label}: Category is required`);
+      const status = String(s.status || 'ACTIVE').toUpperCase();
+      if (!CATALOG_SETTABLE_STATUSES.includes(status)) {
+        throw new CatalogValidationError(`${label}: status must be one of: ${CATALOG_SETTABLE_STATUSES.join(', ')}`);
+      }
+    });
+    // A UPC / EAN may go to only one of the new items.
+    const barcodeOwner = {};
+    specs.forEach((s, i) => {
+      for (const ident of Array.isArray(s.identifiers) ? s.identifiers : []) {
+        const type = String(ident?.identifier_type || '').toUpperCase();
+        if (!CATALOG_UNIQUE_IDENTIFIER_TYPES.includes(type)) continue;
+        const key = `${type}:${normalizeCatalogIdentifier(ident.raw_value)}`;
+        if (barcodeOwner[key] !== undefined && barcodeOwner[key] !== i) {
+          throw new CatalogValidationError(
+            `${type} ${ident.raw_value} is on both New Item ${String.fromCharCode(65 + barcodeOwner[key])} and New Item ${String.fromCharCode(65 + i)} — keep it on one`
+          );
+        }
+        barcodeOwner[key] = i;
+      }
+    });
+    const moves = Array.isArray(b.inventory) ? b.inventory : [];
+    for (const mv of moves) {
+      if (!['hardgoods', 'jewelry'].includes(mv?.inventory_table) || !mv?.item_id
+          || !Number.isInteger(mv.target) || mv.target < 0 || mv.target >= specs.length) {
+        throw new CatalogValidationError('Invalid inventory assignment');
+      }
+    }
+
+    await client.query('BEGIN');
+    const srcRes = await client.query('SELECT * FROM catalog_items WHERE id = $1 FOR UPDATE', [sourceId]);
+    if (!srcRes.rows.length) throw new CatalogValidationError('Catalog item not found', 404);
+    const source = srcRes.rows[0];
+    if (source.status === 'MERGED') throw new CatalogValidationError('Merged catalog items are read-only', 409);
+
+    // Retire the source first so the new items can take over its UPCs.
+    if (source.status !== 'INACTIVE') {
+      await client.query(
+        `UPDATE catalog_items SET status = 'INACTIVE', updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [employeeId, sourceId]
+      );
+    }
+
+    const sourceValues = await loadCatalogFieldValueMap(client, sourceId);
+    const sourceTitle = source.title_override || source.generated_title || source.model_name;
+    const created = [];
+    for (const [index, s] of specs.entries()) {
+      const label = `New Item ${String.fromCharCode(65 + index)}`;
+      const categoryId = parseInt(s.category_id, 10);
+      const status = String(s.status || 'ACTIVE').toUpperCase();
+      const makeBrand = trimOrNull(s.make_brand);
+      const modelName = trimOrNull(s.model_name);
+      const category = await assertCategoryExists(client, categoryId);
+      if (!category.is_active) throw new CatalogValidationError(`${label}: cannot use an inactive category`);
+
+      const id = await insertCatalogItemRow(client, [
+        source.company_id, categoryId, status, makeBrand, modelName,
+        null, source.default_inventory_mode,
+        source.suggested_cost, source.suggested_retail, source.retails_new_for,
+        trimOrNull(s.internal_notes), employeeId,
+      ]);
+
+      // Catalog field values that apply to the new item's Category.
+      for (const f of await getCatalogScopeFields(categoryId)) {
+        const value = sourceValues[f.field_definition_id];
+        if (value === undefined || value === null) continue;
+        await client.query(
+          'INSERT INTO catalog_item_field_values (catalog_item_id, field_definition_id, value) VALUES ($1, $2, $3)',
+          [id, f.field_definition_id, value]
+        );
+      }
+      try {
+        await saveCatalogIdentifiers(client, id, source.company_id, Array.isArray(s.identifiers) ? s.identifiers : []);
+        await saveCatalogAliases(client, id, Array.isArray(s.aliases) ? s.aliases : []);
+      } catch (err) {
+        if (err instanceof CatalogValidationError) err.message = `${label}: ${err.message}`;
+        throw err;
+      }
+
+      const generatedTitle = await buildCatalogGeneratedTitle(categoryId, makeBrand, modelName, await loadCatalogFieldValueMap(client, id));
+      await client.query('UPDATE catalog_items SET generated_title = $1 WHERE id = $2', [generatedTitle, id]);
+      // The source's title stays findable from each new item.
+      if (sourceTitle && normalizeCatalogAlias(sourceTitle) !== normalizeCatalogAlias(generatedTitle)) {
+        await client.query(
+          `INSERT INTO catalog_item_aliases (catalog_item_id, alias, normalized_alias, alias_type)
+           VALUES ($1, $2, $3, 'PREVIOUS_TITLE') ON CONFLICT (catalog_item_id, normalized_alias) DO NOTHING`,
+          [id, sourceTitle, normalizeCatalogAlias(sourceTitle)]
+        );
+      }
+
+      // Reference images (same stored files); the source's primary stays primary.
+      await client.query(
+        `INSERT INTO catalog_item_images (catalog_item_id, image_url, is_primary, source, source_url, provider, uploaded_by, created_at)
+         SELECT $1, image_url, is_primary, source, source_url, provider, uploaded_by, created_at
+         FROM catalog_item_images WHERE catalog_item_id = $2`,
+        [id, sourceId]
+      );
+
+      if (status === 'ACTIVE') {
+        try {
+          await assertNoActiveIdentifierConflicts(client, id);
+        } catch (err) {
+          if (err instanceof CatalogValidationError) err.message = `${label}: ${err.message}`;
+          throw err;
+        }
+      }
+      created.push({ id, categoryId, relinked: 0 });
+    }
+
+    // Reassign the chosen inventory records (only ones linked to the source).
+    for (const mv of moves) {
+      const target = created[mv.target];
+      const result = mv.inventory_table === 'hardgoods'
+        ? await client.query(
+          'UPDATE hardgoods SET catalog_item_id = $1, category_id = $2, updated_at = CURRENT_TIMESTAMP WHERE item_id = $3 AND catalog_item_id = $4',
+          [target.id, target.categoryId, mv.item_id, sourceId])
+        : await client.query(
+          'UPDATE jewelry SET catalog_item_id = $1, category_id = $2 WHERE item_id = $3 AND catalog_item_id = $4',
+          [target.id, target.categoryId, mv.item_id, sourceId]);
+      if (!result.rowCount) throw new CatalogValidationError(`Inventory ${mv.item_id} is not linked to this catalog item`);
+      target.relinked += 1;
+    }
+
+    const codesRes = await client.query('SELECT id, catalog_code FROM catalog_items WHERE id = ANY($1::int[])', [created.map(c => c.id)]);
+    const codeById = Object.fromEntries(codesRes.rows.map(r => [r.id, r.catalog_code]));
+    for (const c of created) {
+      await client.query(
+        `INSERT INTO catalog_item_relationships (source_catalog_item_id, target_catalog_item_id, relationship_type, performed_by)
+         VALUES ($1, $2, 'SPLIT', $3)`,
+        [sourceId, c.id, employeeId]
+      );
+      await writeCatalogAudit(client, c.id, 'SPLIT', {
+        ...diffCatalogSnapshots({}, await snapshotCatalogItem(client, c.id)),
+        split_from: { from: null, to: source.catalog_code },
+        relinked_inventory: { from: null, to: c.relinked },
+      }, employeeId);
+    }
+    const moved = created.reduce((n, c) => n + c.relinked, 0);
+    await writeCatalogAudit(client, sourceId, 'SPLIT', {
+      ...(source.status !== 'INACTIVE' ? { status: { from: source.status, to: 'INACTIVE' } } : {}),
+      split_into: { from: null, to: created.map(c => codeById[c.id]) },
+      relinked_inventory: { from: null, to: moved },
+    }, employeeId);
+
+    await client.query('COMMIT');
+    res.status(201).json({
+      source_id: sourceId,
+      items: await Promise.all(created.map(c => loadCatalogItem(c.id))),
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to split catalog item');
+  } finally {
+    client.release();
+  }
+});
+
 // POST /api/catalog-items/:id/images — add a reference image (multipart:
 // image=<file>, source=UPLOAD|CAMERA, make_primary=true|false, employee_id).
 // make_primary (default true): the new image becomes primary; the previous

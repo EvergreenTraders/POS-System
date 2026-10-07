@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
   Alert,
-  Autocomplete,
   Box,
   Breadcrumbs,
   Button,
@@ -17,7 +16,6 @@ import {
   FormControl,
   InputLabel,
   Link,
-  ListSubheader,
   MenuItem,
   Paper,
   Radio,
@@ -35,6 +33,7 @@ import { useSnackbar } from 'notistack';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
 import { flattenCategoryTree } from '../utils/categoryTree';
+import { CatalogItemPicker, CategorySelect } from '../components/CatalogPickers';
 
 const API = config.apiUrl;
 // Stored image paths are server-relative (/uploads/…); the API base ends in /api.
@@ -52,7 +51,6 @@ const STATUSES = [
 const STATUS_LABEL = { ACTIVE: 'Active', DRAFT: 'Draft', INACTIVE: 'Inactive', MERGED: 'Merged' };
 const MODEL_TYPES = ['MANUFACTURER_MODEL', 'OTHER'];
 const UPC_TYPES = ['UPC', 'EAN'];
-const SEARCH_DEBOUNCE_MS = 250;
 
 const formatMoney = (v) => (v === null || v === undefined
   ? 'Not set'
@@ -84,62 +82,6 @@ function sideIdentifiers(item, types) {
   return (item?.identifiers || []).filter(i => i.is_active && types.includes(i.identifier_type));
 }
 
-// ── Source item picker (search) ─────────────────────────────────────────
-function SourcePicker({ side, excludeIds, onPick }) {
-  const [input, setInput] = useState('');
-  const [options, setOptions] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const seq = useRef(0);
-
-  useEffect(() => {
-    const q = input.trim();
-    if (!q) { setOptions([]); return undefined; }
-    const mySeq = ++seq.current;
-    const timer = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const res = await axios.get(`${API}/catalog-items/search`, { params: { q, status: 'ALL', page_size: 15 } });
-        if (mySeq !== seq.current) return;
-        // Merged items are retired and can't be merged again.
-        setOptions((res.data.results || []).filter(r => r.status !== 'MERGED' && !excludeIds.includes(r.id)));
-      } catch {
-        if (mySeq === seq.current) setOptions([]);
-      } finally {
-        if (mySeq === seq.current) setLoading(false);
-      }
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [input, excludeIds]);
-
-  return (
-    <Autocomplete
-      size="small"
-      options={options}
-      loading={loading}
-      filterOptions={x => x}
-      getOptionLabel={o => sourceTitle(o)}
-      onInputChange={(_, v) => setInput(v)}
-      onChange={(_, v) => v && onPick(v.id)}
-      noOptionsText={input.trim() ? 'No matching catalog items' : 'Type a title, model number, UPC or CAT- code'}
-      renderOption={(props, o) => (
-        <li {...props} key={o.id}>
-          <Box>
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>{sourceTitle(o)}</Typography>
-            <Typography variant="caption" color="text.secondary">
-              {o.make_brand || '—'} · {o.category_name} · <Box component="span" sx={{ fontFamily: 'monospace' }}>{o.catalog_code}</Box>
-              {' · '}{STATUS_LABEL[o.status] || o.status}
-            </Typography>
-          </Box>
-        </li>
-      )}
-      renderInput={params => (
-        <TextField {...params} autoFocus placeholder={`Search for Source Item ${side}…`}
-          InputProps={{ ...params.InputProps, endAdornment: <>{loading && <CircularProgress size={16} />}{params.InputProps.endAdornment}</> }} />
-      )}
-    />
-  );
-}
-
 // ── Source item card ────────────────────────────────────────────────────
 function SourceCard({ side, item, loading, categoryPath, excludeIds, onPick, onChange }) {
   const color = SIDE_COLOR[side];
@@ -158,7 +100,7 @@ function SourceCard({ side, item, loading, categoryPath, excludeIds, onPick, onC
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={24} /></Box>
       ) : !item ? (
-        <SourcePicker side={side} excludeIds={excludeIds} onPick={onPick} />
+        <CatalogItemPicker placeholder={`Search for Source Item ${side}…`} excludeIds={excludeIds} onPick={onPick} />
       ) : (
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
           <Box sx={{
@@ -383,23 +325,6 @@ export default function MergeCatalogItems() {
   const aliasEntries = [['A', itemA], ['B', itemB]].flatMap(([side, item]) =>
     (item?.aliases || []).filter(a => a.is_active).map(a => ({ id: a.id, side, label: a.alias })));
 
-  const categoryMenuItems = useMemo(() => {
-    const out = [];
-    let lastDivision = null;
-    categories.forEach(c => {
-      if (c.division_id !== lastDivision) {
-        out.push(<ListSubheader key={`div-${c.division_id}`}>{c.division_name}</ListSubheader>);
-        lastDivision = c.division_id;
-      }
-      out.push(
-        <MenuItem key={c.id} value={c.id} disabled={!c.is_active} sx={{ pl: 2 + c.depth * 2 }}>
-          {c.name}{!c.is_active ? ' (inactive)' : ''}
-        </MenuItem>
-      );
-    });
-    return out;
-  }, [categories]);
-
   const validate = () => {
     const next = {};
     if (!draft.model_name.trim()) next.model_name = 'Model Name is required';
@@ -517,13 +442,8 @@ export default function MergeCatalogItems() {
                     error={!!errors.model_name} helperText={errors.model_name} inputProps={{ maxLength: 200 }} />
                   <TextField size="small" label="Make / Brand" required value={draft.make_brand} onChange={setField('make_brand')}
                     error={!!errors.make_brand} helperText={errors.make_brand} inputProps={{ maxLength: 100 }} />
-                  <FormControl size="small" required error={!!errors.category_id}>
-                    <InputLabel>Category</InputLabel>
-                    <Select value={draft.category_id || ''} label="Category" onChange={setField('category_id')}
-                      renderValue={v => categoryById[v]?.path || ''} MenuProps={{ PaperProps: { sx: { maxHeight: 400 } } }}>
-                      {categoryMenuItems}
-                    </Select>
-                  </FormControl>
+                  <CategorySelect categories={categories} value={draft.category_id} error={errors.category_id}
+                    onChange={v => { setDraft(prev => ({ ...prev, category_id: v })); setErrors(prev => ({ ...prev, category_id: undefined })); }} />
                   <FormControl size="small" required>
                     <InputLabel>Status</InputLabel>
                     <Select value={draft.status} label="Status" onChange={setField('status')}>

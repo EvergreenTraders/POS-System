@@ -92,6 +92,8 @@ const HISTORY_FIELD_LABELS = {
   additional_image: 'Additional Image',
   merged_into: 'Merged Into',
   merged_from: 'Merged From',
+  split_into: 'Split Into',
+  split_from: 'Split From',
   relinked_inventory: 'Inventory Re-linked',
 };
 const HISTORY_ACTION_LABELS = {
@@ -728,9 +730,23 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
           ))}
         </Alert>
       )}
+      {!isMerged && item?.lineage?.into?.some(l => l.relationship_type === 'SPLIT') && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          This catalog item was split into{' '}
+          {item.lineage.into.filter(l => l.relationship_type === 'SPLIT').map((l, i) => (
+            <React.Fragment key={l.id}>
+              {i > 0 && ' and '}
+              <Link component="button" variant="body2" onClick={() => navigate(`/catalog/items/${l.id}`)} sx={{ verticalAlign: 'baseline' }}>
+                {l.catalog_code} — {l.title}
+              </Link>
+            </React.Fragment>
+          ))}.
+        </Alert>
+      )}
       {!isMerged && item?.lineage?.from?.length > 0 && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Created by merging {item.lineage.from.map(l => l.catalog_code).join(' + ')}.
+          {item.lineage.from[0].relationship_type === 'SPLIT' ? 'Split from' : 'Created by merging'}{' '}
+          {item.lineage.from.map(l => l.catalog_code).join(' + ')}.
         </Alert>
       )}
 
