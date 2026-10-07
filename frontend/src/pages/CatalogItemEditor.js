@@ -22,11 +22,6 @@ import {
   MenuItem,
   Paper,
   Tab,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
   Tabs,
   TextField,
   Tooltip,
@@ -52,6 +47,11 @@ import { useAuth } from '../context/AuthContext';
 import config from '../config';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import CameraCaptureDialog, { ImageFileInput } from '../components/CameraCaptureDialog';
+import { catalogScopeFields, fromStoredFieldValue, isBlankFieldValue } from '../components/CatalogFieldInput';
+import {
+  IdentifiersTab, FieldsTab, PricingTab, DescriptionsTab, ImagesTab, HistoryStatusTab,
+  identifierKey, setFieldValue,
+} from './CatalogItemEditorTabs';
 
 const API = config.apiUrl;
 
@@ -69,8 +69,14 @@ const STATUS_CHIP = {
   MERGED:   { label: 'Merged',   color: 'info' },
 };
 
-// Only General is in Phase 1; the rest are shown (per the design) but disabled.
 const EDITOR_TABS = ['General', 'Identifiers', 'Fields & Attributes', 'Pricing', 'Descriptions', 'Images', 'History & Status'];
+const TAB = { GENERAL: 0, IDENTIFIERS: 1, FIELDS: 2, PRICING: 3, DESCRIPTIONS: 4, IMAGES: 5, HISTORY: 6 };
+// Which tab shows each validated draft key (to jump to the first error on Save).
+const ERROR_TAB = {
+  category_id: TAB.GENERAL, make_brand: TAB.GENERAL, model_name: TAB.GENERAL, internal_notes: TAB.GENERAL,
+  suggested_cost: TAB.PRICING, suggested_retail: TAB.PRICING, retails_new_for: TAB.PRICING,
+  fields: TAB.FIELDS,
+};
 
 const HISTORY_FIELD_LABELS = {
   category_id: 'Category',
@@ -123,6 +129,8 @@ const EMPTY_DRAFT = {
   retails_new_for: '',
   internal_notes: '',
   aliases: [],
+  identifiers: [],   // [{ identifier_type, raw_value, is_active, source, provider }]
+  field_values: {},  // field_definition_id → value (blank values are omitted)
 };
 
 // Catalog pricing is nullable: null ⇄ '' (blank = "use historical intelligence"), never 0.
@@ -151,6 +159,12 @@ function draftFromItem(item) {
     internal_notes: item.internal_notes || '',
     // Only staff-entered search terms are editable; previous/merged titles are system-managed.
     aliases: item.aliases.filter(a => a.alias_type === 'SEARCH_TERM' && a.is_active).map(a => a.alias),
+    identifiers: item.identifiers.map(i => ({
+      identifier_type: i.identifier_type, raw_value: i.raw_value, is_active: i.is_active, source: i.source, provider: i.provider,
+    })),
+    field_values: Object.fromEntries(item.field_values
+      .filter(f => !isBlankFieldValue(f.value))
+      .map(f => [f.field_definition_id, fromStoredFieldValue(f.data_type, f.value)])),
   };
 }
 
@@ -290,7 +304,8 @@ function historyValue(key, v, categoryNameById) {
 function describeHistoryChange(action, key, change, categoryNameById) {
   const { from, to } = change;
   if (key === 'reference_image' || key === 'additional_image') {
-    return `${from ? 'replaced' : 'added'} (${(IMAGE_SOURCE_LABELS[change.source] || 'image').toLowerCase()})`;
+    const verb = !to ? 'removed' : from ? 'replaced' : 'added';
+    return `${verb} (${(IMAGE_SOURCE_LABELS[change.source] || 'image').toLowerCase()})`;
   }
   if (action === 'CREATE' || key === 'reclassified_inventory') return historyValue(key, to, categoryNameById);
 
@@ -347,11 +362,16 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
   const [inventoryModes, setInventoryModes] = useState([]);
   const [aliasInput, setAliasInput] = useState('');
 
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [history, setHistory] = useState([]);
+  const [tab, setTab] = useState(TAB.GENERAL);
+  const [history, setHistory] = useState(null);       // null = not loaded yet
   const [historyLoading, setHistoryLoading] = useState(false);
   const [saveMenuAnchor, setSaveMenuAnchor] = useState(null);
   const [confirmCategoryMove, setConfirmCategoryMove] = useState(false);
+
+  // Per-category data for the selected (draft) category: its effective fields
+  // (Fields / Descriptions tabs), Buy/Pawn/Trade % (Pricing tab) and
+  // description settings (Descriptions tab).
+  const [categoryData, setCategoryData] = useState({ categoryId: null, fields: [], pricing: null, descriptionSettings: null, loading: false });
 
   useEffect(() => {
     let cancelled = false;
@@ -392,28 +412,81 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
   const dirty = JSON.stringify(withoutGeneratedTitle(draft)) !== JSON.stringify(withoutGeneratedTitle(savedDraft));
   const categoryChanged = !isNew && item && Number(draft.category_id) !== item.category_id;
 
+  // Load the selected category's fields, pricing % and description settings.
+  useEffect(() => {
+    const categoryId = Number(draft.category_id) || null;
+    if (!categoryId) { setCategoryData({ categoryId: null, fields: [], pricing: null, descriptionSettings: null, loading: false }); return undefined; }
+    let cancelled = false;
+    setCategoryData(prev => ({ ...prev, loading: true }));
+    Promise.all([
+      axios.get(`${API}/categories/${categoryId}/effective-fields`),
+      axios.get(`${API}/categories/${categoryId}/pricing`).catch(() => ({ data: null })),
+      axios.get(`${API}/categories/${categoryId}/description-config`).catch(() => ({ data: null })),
+    ]).then(([fieldsRes, pricingRes, descRes]) => {
+      if (cancelled) return;
+      setCategoryData({
+        categoryId,
+        fields: fieldsRes.data?.fields || [],
+        pricing: pricingRes.data,
+        descriptionSettings: descRes.data?.settings || {},
+        loading: false,
+      });
+    }).catch(() => {
+      if (cancelled) return;
+      setCategoryData({ categoryId: null, fields: [], pricing: null, descriptionSettings: null, loading: false });
+      enqueueSnackbar('Failed to load category fields', { variant: 'error' });
+    });
+    return () => { cancelled = true; };
+  }, [draft.category_id, enqueueSnackbar]);
+
+  const fieldsReady = categoryData.categoryId === Number(draft.category_id);
+  const catalogFields = fieldsReady ? catalogScopeFields({ fields: categoryData.fields }) : [];
+  const inventoryFields = fieldsReady
+    ? categoryData.fields.filter(f => f.scope !== 'CATALOG' && f.required_at !== 'NOT_USED')
+    : [];
+
+  const loadHistory = async () => {
+    if (isNew) return;
+    setHistoryLoading(true);
+    try {
+      const res = await axios.get(`${API}/catalog-items/${itemId}/history`);
+      setHistory(res.data);
+    } catch (err) {
+      enqueueSnackbar('Failed to load history', { variant: 'error' });
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+  // Loaded when the Pricing or History & Status tab is first opened.
+  useEffect(() => {
+    if ((tab === TAB.PRICING || tab === TAB.HISTORY) && history === null && !historyLoading) loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+  // Refresh the history after anything that writes to it.
+  const refreshHistory = () => { if (history !== null) loadHistory(); };
+
   const setField = (key) => (e) => {
     const value = e.target.value;
     setDraft(prev => ({ ...prev, [key]: value }));
     if (errors[key]) setErrors(prev => ({ ...prev, [key]: undefined }));
   };
 
-  // Catalog field values feed the title template; the Fields tab isn't built
-  // yet, so they come from the saved item (or the duplicated source).
-  const currentFieldValues = () => (isNew
-    ? (duplicate?.fieldValues || [])
-    : (item?.field_values || []).filter(f => f.value !== null).map(f => ({ field_definition_id: f.field_definition_id, value: f.value })));
+  // Catalog field values (Fields tab) feed the title template.
+  const currentFieldValues = () => Object.entries(draft.field_values)
+    .map(([id, value]) => ({ field_definition_id: Number(id), value }));
 
   // Generated title follows its inputs automatically: previewed live
-  // (debounced) whenever Make, Model or Category change, and recomputed by the
-  // server on every save. Unchanged inputs just show the saved title.
-  const titleInputs = `${draft.category_id}|${draft.make_brand.trim()}|${draft.model_name.trim()}`;
+  // (debounced) whenever Make, Model, Category or a field value changes, and
+  // recomputed by the server on every save. Unchanged inputs show the saved title.
+  const fieldValuesKey = JSON.stringify(draft.field_values);
+  const titleInputs = `${draft.category_id}|${draft.make_brand.trim()}|${draft.model_name.trim()}|${fieldValuesKey}`;
   useEffect(() => {
     if (loading || !draft.category_id) return undefined;
     const matchesSaved = !isNew && item
       && Number(draft.category_id) === item.category_id
       && draft.make_brand.trim() === (item.make_brand || '')
-      && draft.model_name.trim() === (item.model_name || '');
+      && draft.model_name.trim() === (item.model_name || '')
+      && fieldValuesKey === JSON.stringify(savedDraft.field_values);
     if (matchesSaved) {
       const savedTitle = item.generated_title || '';
       setDraft(prev => (prev.generated_title === savedTitle ? prev : { ...prev, generated_title: savedTitle }));
@@ -439,7 +512,7 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
 
   // Saved straight away (not part of Save Changes). Only the item record is
   // refreshed, so any unsaved edits in the form are kept.
-  const handleImageUpload = async (file, source) => {
+  const handleImageUpload = async (file, source, makePrimary = true) => {
     if (file.size > MAX_IMAGE_BYTES) {
       enqueueSnackbar('Image must be 10 MB or smaller', { variant: 'warning' });
       return;
@@ -449,16 +522,39 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
       const form = new FormData();
       form.append('image', file);
       form.append('source', source);
+      form.append('make_primary', makePrimary ? 'true' : 'false');
       if (user?.id) form.append('employee_id', user.id);
       const res = await axios.post(`${API}/catalog-items/${itemId}/images`, form);
       setItem(res.data);
-      enqueueSnackbar('Reference image updated', { variant: 'success' });
+      refreshHistory();
+      enqueueSnackbar(makePrimary ? 'Reference image updated' : 'Image added', { variant: 'success' });
     } catch (err) {
       enqueueSnackbar(err.response?.data?.error || 'Failed to upload image', { variant: 'error' });
     } finally {
       setImageUploading(false);
     }
   };
+
+  // Images tab: saved straight away, like uploads.
+  const runImageAction = async (request, message) => {
+    setImageUploading(true);
+    try {
+      const res = await request();
+      setItem(res.data);
+      refreshHistory();
+      enqueueSnackbar(message, { variant: 'success' });
+    } catch (err) {
+      enqueueSnackbar(err.response?.data?.error || 'Failed to update images', { variant: 'error' });
+    } finally {
+      setImageUploading(false);
+    }
+  };
+  const handleSetPrimaryImage = (img) => runImageAction(
+    () => axios.patch(`${API}/catalog-items/${itemId}/images/${img.id}/primary`, { employee_id: user?.id }),
+    'Primary image updated');
+  const handleRemoveImage = (img) => runImageAction(
+    () => axios.delete(`${API}/catalog-items/${itemId}/images/${img.id}`, { params: { employee_id: user?.id } }),
+    'Image removed');
 
   const addAlias = (raw) => {
     const alias = raw.trim().replace(/\s+/g, ' ');
@@ -482,7 +578,16 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
       }
     });
     if (draft.internal_notes.length > NOTES_MAX) next.internal_notes = `Max ${NOTES_MAX} characters`;
+    // Fields marked "Required for catalog" must be filled before the item is Active.
+    if (draft.status === 'ACTIVE') {
+      const missing = Object.fromEntries(catalogFields
+        .filter(f => f.required_for_catalog && isBlankFieldValue(draft.field_values[f.field_definition_id]))
+        .map(f => [f.field_definition_id, 'Required for an Active catalog item']));
+      if (Object.keys(missing).length) next.fields = missing;
+    }
     setErrors(next);
+    const firstTab = Object.keys(next).map(k => ERROR_TAB[k]).filter(t => t !== undefined).sort((a, b) => a - b)[0];
+    if (firstTab !== undefined && !Object.keys(next).some(k => ERROR_TAB[k] === tab)) setTab(firstTab);
     return Object.keys(next).length === 0;
   };
 
@@ -500,6 +605,17 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
     },
     internal_notes: draft.internal_notes.trim() || null,
     aliases: draft.aliases,
+    identifiers: draft.identifiers.map(i => ({
+      identifier_type: i.identifier_type, raw_value: i.raw_value, is_active: i.is_active,
+      source: i.source || 'MANUAL', provider: i.provider || null,
+    })),
+    // Every Catalog field of the selected category (blank = clear it). Only
+    // sent once that category's fields have loaded.
+    ...(fieldsReady ? {
+      field_values: catalogFields
+        .map(f => ({ field_definition_id: f.field_definition_id, value: draft.field_values[f.field_definition_id] ?? null }))
+        .filter(fv => !isNew || !isBlankFieldValue(fv.value)),
+    } : {}),
     employee_id: user?.id,
   });
 
@@ -508,10 +624,7 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
     setSaving(true);
     try {
       if (isNew) {
-        const res = await axios.post(`${API}/catalog-items`, {
-          ...buildPayload(),
-          ...(duplicate?.fieldValues?.length ? { field_values: duplicate.fieldValues } : {}),
-        });
+        const res = await axios.post(`${API}/catalog-items`, buildPayload());
         enqueueSnackbar(`Catalog item ${res.data.friendly_code} (${res.data.catalog_code}) created`, { variant: 'success' });
         navigate(`/catalog/items/${res.data.id}`, { replace: true });
         return;
@@ -521,6 +634,8 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
       setItem(res.data);
       setDraft(d);
       setSavedDraft(d);
+      setErrors({});
+      refreshHistory();
       enqueueSnackbar('Catalog item saved', { variant: 'success' });
     } catch (err) {
       enqueueSnackbar(err.response?.data?.error || 'Failed to save catalog item', { variant: 'error' });
@@ -554,6 +669,7 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
       setItem(res.data);
       setDraft(d);
       setSavedDraft(d);
+      refreshHistory();
       enqueueSnackbar(`Catalog item ${STATUS_CHIP[status].label.toLowerCase()}`, { variant: 'success' });
     } catch (err) {
       enqueueSnackbar(err.response?.data?.error || 'Failed to change status', { variant: 'error' });
@@ -575,27 +691,26 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
       state: {
         duplicate: {
           sourceCode: item.catalog_code,
-          draft: { ...source, status: 'DRAFT', generated_title: '', title_override: '', aliases: [] },
-          fieldValues: item.field_values
-            .filter(f => f.value !== null)
-            .map(f => ({ field_definition_id: f.field_definition_id, value: f.value })),
+          // Field values are copied; identifiers and aliases identify THIS item.
+          draft: { ...source, status: 'DRAFT', generated_title: '', title_override: '', aliases: [], identifiers: [] },
+          // New Catalog Item (the /catalog/items/new page) reads the copied values from here.
+          fieldValues: Object.entries(source.field_values)
+            .map(([id, value]) => ({ field_definition_id: Number(id), value })),
         },
       },
     });
   };
 
-  const openHistory = async () => {
-    setHistoryOpen(true);
-    setHistoryLoading(true);
-    try {
-      const res = await axios.get(`${API}/catalog-items/${itemId}/history`);
-      setHistory(res.data);
-    } catch (err) {
-      enqueueSnackbar('Failed to load history', { variant: 'error' });
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
+  // One line per changed key, for the History & Status tab.
+  const renderHistoryChanges = (h) => Object.entries(h.changed_fields).map(([key, change], i) => (
+    <Fragment key={key}>
+      {i > 0 && <Divider sx={{ my: 0.5 }} />}
+      <Typography variant="body2">
+        <strong>{HISTORY_FIELD_LABELS[key] || key}:</strong>{' '}
+        {describeHistoryChange(h.action, key, change, categoryNameById)}
+      </Typography>
+    </Fragment>
+  ));
 
   if (loading) {
     return <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>;
@@ -607,6 +722,8 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
       </Box>
     );
   }
+
+  const savedIdentifierKeys = new Set(savedDraft.identifiers.map(identifierKey));
 
   const heading = isNew
     ? (draft.model_name.trim() || 'New Catalog Item')
@@ -685,7 +802,7 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
 
         {!isNew && (
           <>
-            <Button variant="outlined" startIcon={<HistoryIcon />} onClick={openHistory}>History</Button>
+            <Button variant="outlined" startIcon={<HistoryIcon />} onClick={() => setTab(TAB.HISTORY)}>History</Button>
             <Tooltip title={dirty ? 'Save your changes before duplicating' : ''}>
               <span>
                 <Button variant="outlined" startIcon={<ContentCopyIcon />} onClick={handleDuplicate} disabled={dirty}>
@@ -754,242 +871,299 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
         {/* ── Main column ─────────────────────────────────────────────── */}
         <Grid item xs={24} lg={17}>
           <Paper variant="outlined" sx={{ mb: 2 }}>
-            <Tabs value={0} variant="scrollable" sx={{ borderBottom: 1, borderColor: 'divider', px: 1 }}>
-              {/* Only General exists in Phase 1; the other tabs are later phases. */}
-              {EDITOR_TABS.map((label, i) => <Tab key={label} label={label} disabled={i !== 0} />)}
+            <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" sx={{ borderBottom: 1, borderColor: 'divider', px: 1 }}>
+              {EDITOR_TABS.map((label, i) => {
+                const needsSaved = isNew && (i === TAB.IMAGES || i === TAB.HISTORY);
+                const hasError = (i === TAB.GENERAL && ['category_id', 'make_brand', 'model_name', 'internal_notes'].some(k => errors[k]))
+                  || (i === TAB.PRICING && ['suggested_cost', 'suggested_retail', 'retails_new_for'].some(k => errors[k]))
+                  || (i === TAB.FIELDS && errors.fields);
+                return (
+                  <Tab key={label} disabled={needsSaved}
+                    label={<Box component="span" sx={{ color: hasError ? 'error.main' : undefined }}>{label}{hasError ? ' •' : ''}</Box>} />
+                );
+              })}
             </Tabs>
 
-            {/* Basic Information | Catalog Item Status | Key Summary */}
-            <Grid container sx={{ p: 2.5 }} spacing={3}>
-              <Grid item xs={12} md={4}>
-                <SectionTitle>Basic Information</SectionTitle>
-                <TextField
-                  select fullWidth size="small" required label="Category" sx={{ mb: 2 }}
-                  value={draft.category_id}
-                  onChange={setField('category_id')}
-                  disabled={readOnly}
-                  error={!!errors.category_id}
-                  helperText={errors.category_id || (categoryChanged && item.summary.linked_inventory > 0
-                    ? `Moving category reclassifies ${item.summary.linked_inventory} linked inventory record(s)`
-                    : '')}
-                  SelectProps={{
-                    renderValue: (v) => categoryById[v]?.path || '',
-                    MenuProps: { PaperProps: { sx: { maxHeight: 400 } } },
+            {tab === TAB.GENERAL && (
+              <>
+                {/* Basic Information | Catalog Item Status | Key Summary */}
+                <Grid container sx={{ p: 2.5 }} spacing={3}>
+                  <Grid item xs={12} md={4}>
+                    <SectionTitle>Basic Information</SectionTitle>
+                    <TextField
+                      select fullWidth size="small" required label="Category" sx={{ mb: 2 }}
+                      value={draft.category_id}
+                      onChange={setField('category_id')}
+                      disabled={readOnly}
+                      error={!!errors.category_id}
+                      helperText={errors.category_id || (categoryChanged && item.summary.linked_inventory > 0
+                        ? `Moving category reclassifies ${item.summary.linked_inventory} linked inventory record(s)`
+                        : '')}
+                      SelectProps={{
+                        renderValue: (v) => categoryById[v]?.path || '',
+                        MenuProps: { PaperProps: { sx: { maxHeight: 400 } } },
+                      }}
+                    >
+                      {categoryMenuItems}
+                    </TextField>
+
+                    <TextField
+                      fullWidth size="small" required label="Make / Brand" sx={{ mb: 2 }}
+                      value={draft.make_brand}
+                      onChange={setField('make_brand')}
+                      disabled={readOnly}
+                      error={!!errors.make_brand}
+                      helperText={errors.make_brand}
+                      inputProps={{ maxLength: 100 }}
+                    />
+
+                    <TextField
+                      fullWidth size="small" required label="Model Name" sx={{ mb: 2 }}
+                      value={draft.model_name}
+                      onChange={setField('model_name')}
+                      disabled={readOnly}
+                      error={!!errors.model_name}
+                      helperText={errors.model_name || 'Common, widely recognized model name.'}
+                      inputProps={{ maxLength: 200 }}
+                    />
+
+                    <TextField
+                      fullWidth size="small" label="Title (generated)" sx={{ mb: 2, '& .MuiInputBase-root': { bgcolor: 'grey.100' } }}
+                      value={draft.generated_title}
+                      placeholder="Generated from Make / Brand and Model Name"
+                      InputProps={{ readOnly: true }}
+                      InputLabelProps={{ shrink: true }}
+                      helperText="Updates automatically when Make / Brand, Model Name or Category change."
+                    />
+
+                    <TextField
+                      fullWidth size="small" label="Title Override (optional)"
+                      value={draft.title_override}
+                      onChange={setField('title_override')}
+                      disabled={readOnly}
+                      placeholder="Enter custom title..."
+                      helperText="Leave blank to use generated title."
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={{ maxLength: 300 }}
+                    />
+                  </Grid>
+
+                  <Grid item xs={12} md={4} sx={{ borderLeft: { md: 1 }, borderColor: { md: 'divider' } }}>
+                    <SectionTitle>Catalog Item Status</SectionTitle>
+                    <TextField
+                      select fullWidth size="small" required label="Status" sx={{ mb: 2 }}
+                      value={draft.status}
+                      onChange={setField('status')}
+                      disabled={readOnly}
+                    >
+                      {STATUS_OPTIONS.map(o => <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>)}
+                      {isMerged && <MenuItem value="MERGED" disabled>Merged</MenuItem>}
+                    </TextField>
+
+                    <TextField
+                      fullWidth size="small" label="Catalog ID" sx={{ mb: 2, '& .MuiInputBase-root': { bgcolor: 'grey.100' } }}
+                      value={isNew ? '' : item.catalog_code}
+                      placeholder={isNew ? 'Assigned on create' : ''}
+                      InputProps={{ readOnly: true, sx: { fontFamily: 'monospace' } }}
+                      InputLabelProps={{ shrink: true }}
+                    />
+
+                    <TextField
+                      fullWidth size="small" label="Staff Code" sx={{ mb: 2, '& .MuiInputBase-root': { bgcolor: 'grey.100' } }}
+                      value={isNew ? '' : item.friendly_code}
+                      placeholder={isNew ? 'Assigned on create (CAT-HG-BRANDMODEL)' : ''}
+                      helperText={isNew ? '' : 'Easy-to-type code. Set once at creation; editing Make/Model does not change it.'}
+                      InputProps={{ readOnly: true, sx: { fontFamily: 'monospace' } }}
+                      InputLabelProps={{ shrink: true }}
+                    />
+
+                    {!isNew && (
+                      <>
+                        <Typography variant="caption" color="text.secondary">Created</Typography>
+                        <Typography variant="body2" sx={{ mb: 1.5 }}>
+                          {formatDate(item.created_at)}&nbsp;&nbsp;{formatTime(item.created_at)}
+                          {item.created_by_name && <>&nbsp;&nbsp;by {item.created_by_name}</>}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">Last Updated</Typography>
+                        <Typography variant="body2" sx={{ mb: 2 }}>
+                          {formatDate(item.updated_at)}&nbsp;&nbsp;{formatTime(item.updated_at)}
+                          {item.updated_by_name && <>&nbsp;&nbsp;by {item.updated_by_name}</>}
+                        </Typography>
+                      </>
+                    )}
+
+                    <TextField
+                      select fullWidth size="small" label="Default Inventory Mode"
+                      value={draft.default_inventory_mode}
+                      onChange={setField('default_inventory_mode')}
+                      disabled={readOnly}
+                      helperText="Used as the default when creating inventory."
+                    >
+                      <MenuItem value=""><em>None</em></MenuItem>
+                      {inventoryModes.map(m => (
+                        <MenuItem key={m.code} value={m.code}>
+                          <Tooltip title={m.description || ''} placement="right"><span>{m.label}</span></Tooltip>
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  </Grid>
+
+                  <Grid item xs={12} md={4} sx={{ borderLeft: { md: 1 }, borderColor: { md: 'divider' } }}>
+                    <SectionTitle>Key Summary</SectionTitle>
+                    {isNew ? (
+                      <Typography variant="body2" color="text.secondary">Available after the item is created.</Typography>
+                    ) : (
+                      <>
+                        <SummaryRow label="Identifiers" value={`${item.summary.identifiers} total`} />
+                        <SummaryRow label="Aliases" value={item.summary.aliases} />
+                        <SummaryRow label="Suggested Cost" value={formatMoney(item.pricing.suggested_cost)} />
+                        <SummaryRow label="Suggested Retail" value={formatMoney(item.pricing.suggested_retail)} />
+                        <SummaryRow label="Linked Inventory Records" value={item.summary.linked_inventory} />
+                      </>
+                    )}
+                  </Grid>
+                </Grid>
+                <Box sx={{ px: 2.5, pb: 2.5 }}>
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} md={6}>
+                      <SectionTitle sx={{ mb: 1 }}>Notes</SectionTitle>
+                      <TextField
+                        fullWidth multiline minRows={4}
+                        label="Internal Notes (not visible to staff)"
+                        placeholder="Enter internal notes about this catalog item..."
+                        value={draft.internal_notes}
+                        onChange={setField('internal_notes')}
+                        disabled={readOnly}
+                        error={!!errors.internal_notes}
+                        helperText={errors.internal_notes}
+                        InputLabelProps={{ shrink: true }}
+                        inputProps={{ maxLength: NOTES_MAX }}
+                      />
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'right', mt: 0.5 }}>
+                        {draft.internal_notes.length} / {NOTES_MAX}
+                      </Typography>
+                    </Grid>
+                  </Grid>
+                </Box>
+              </>
+            )}
+
+            <Box sx={{ p: 2.5, display: tab === TAB.GENERAL ? 'none' : 'block' }}>
+              {tab === TAB.IDENTIFIERS && (
+                <IdentifiersTab
+                  draft={draft}
+                  savedKeys={savedIdentifierKeys}
+                  readOnly={readOnly}
+                  onChange={identifiers => setDraft(prev => ({ ...prev, identifiers }))}
+                  aliasesSection={(
+                    <Grid container>
+                      <Grid item xs={12}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Aliases / Search Terms</Typography>
+                          <Tooltip title="Alternate names staff may search for. Kept separate from the current title.">
+                            <InfoOutlinedIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                          </Tooltip>
+                        </Box>
+                        <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 1, minHeight: 100, bgcolor: 'background.paper' }}>
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mb: 1 }}>
+                            {draft.aliases.map(alias => (
+                              <Chip key={alias} label={alias} size="small"
+                                onDelete={readOnly ? undefined : () => removeAlias(alias)} />
+                            ))}
+                            {/* System-managed aliases (previous / merged titles) — read-only */}
+                            {(item?.aliases || []).filter(a => a.alias_type !== 'SEARCH_TERM' && a.is_active).map(a => (
+                              <Tooltip key={`sys-${a.id}`} title={a.alias_type === 'MERGED_TITLE' ? 'Merged title' : 'Previous title'}>
+                                <Chip label={a.alias} size="small" variant="outlined" />
+                              </Tooltip>
+                            ))}
+                          </Box>
+                          <TextField
+                            fullWidth size="small" variant="standard"
+                            placeholder="Add alias or search term..."
+                            value={aliasInput}
+                            disabled={readOnly}
+                            onChange={e => setAliasInput(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ',') {
+                                e.preventDefault();
+                                addAlias(aliasInput);
+                              }
+                            }}
+                            onBlur={() => addAlias(aliasInput)}
+                            InputProps={{ disableUnderline: true }}
+                            inputProps={{ maxLength: 300 }}
+                          />
+                        </Box>
+                        <Typography variant="caption" color="text.secondary">
+                          Use aliases to help staff find this item. Press Enter to add.
+                        </Typography>
+                      </Grid>
+                    </Grid>
+                  )}
+                />
+              )}
+              {tab === TAB.FIELDS && (
+                <FieldsTab
+                  categoryPath={categoryById[draft.category_id]?.path}
+                  catalogFields={catalogFields}
+                  inventoryFields={inventoryFields}
+                  loading={!!draft.category_id && !fieldsReady}
+                  values={draft.field_values}
+                  errors={errors.fields || {}}
+                  readOnly={readOnly}
+                  onChange={(id, value) => {
+                    setDraft(prev => ({ ...prev, field_values: setFieldValue(prev.field_values, id, value) }));
+                    if (errors.fields?.[id]) setErrors(prev => ({ ...prev, fields: { ...prev.fields, [id]: undefined } }));
                   }}
-                >
-                  {categoryMenuItems}
-                </TextField>
-
-                <TextField
-                  fullWidth size="small" required label="Make / Brand" sx={{ mb: 2 }}
-                  value={draft.make_brand}
-                  onChange={setField('make_brand')}
-                  disabled={readOnly}
-                  error={!!errors.make_brand}
-                  helperText={errors.make_brand}
-                  inputProps={{ maxLength: 100 }}
                 />
-
-                <TextField
-                  fullWidth size="small" required label="Model Name" sx={{ mb: 2 }}
-                  value={draft.model_name}
-                  onChange={setField('model_name')}
-                  disabled={readOnly}
-                  error={!!errors.model_name}
-                  helperText={errors.model_name || 'Common, widely recognized model name.'}
-                  inputProps={{ maxLength: 200 }}
+              )}
+              {tab === TAB.PRICING && (
+                <PricingTab
+                  moneyField={moneyField}
+                  draft={draft}
+                  categoryPricing={fieldsReady ? categoryData.pricing : null}
+                  categoryPath={categoryById[draft.category_id]?.path}
+                  history={history}
+                  historyLoading={historyLoading}
                 />
-
-                <TextField
-                  fullWidth size="small" label="Title (generated)" sx={{ mb: 2, '& .MuiInputBase-root': { bgcolor: 'grey.100' } }}
-                  value={draft.generated_title}
-                  placeholder="Generated from Make / Brand and Model Name"
-                  InputProps={{ readOnly: true }}
-                  InputLabelProps={{ shrink: true }}
-                  helperText="Updates automatically when Make / Brand, Model Name or Category change."
+              )}
+              {tab === TAB.DESCRIPTIONS && (
+                <DescriptionsTab
+                  draft={draft}
+                  categoryPath={categoryById[draft.category_id]?.path}
+                  categoryName={categoryById[draft.category_id]?.name}
+                  catalogFields={catalogFields}
+                  descriptionSettings={fieldsReady ? categoryData.descriptionSettings : null}
+                  onEditCategory={() => navigate('/system-config/categories')}
                 />
-
-                <TextField
-                  fullWidth size="small" label="Title Override (optional)"
-                  value={draft.title_override}
-                  onChange={setField('title_override')}
-                  disabled={readOnly}
-                  placeholder="Enter custom title..."
-                  helperText="Leave blank to use generated title."
-                  InputLabelProps={{ shrink: true }}
-                  inputProps={{ maxLength: 300 }}
+              )}
+              {tab === TAB.IMAGES && !isNew && (
+                <ImagesTab
+                  images={item.images || []}
+                  readOnly={readOnly}
+                  busy={imageUploading}
+                  onUpload={handleImageUpload}
+                  onSetPrimary={handleSetPrimaryImage}
+                  onRemove={handleRemoveImage}
                 />
-              </Grid>
-
-              <Grid item xs={12} md={4} sx={{ borderLeft: { md: 1 }, borderColor: { md: 'divider' } }}>
-                <SectionTitle>Catalog Item Status</SectionTitle>
-                <TextField
-                  select fullWidth size="small" required label="Status" sx={{ mb: 2 }}
-                  value={draft.status}
-                  onChange={setField('status')}
-                  disabled={readOnly}
-                >
-                  {STATUS_OPTIONS.map(o => <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>)}
-                  {isMerged && <MenuItem value="MERGED" disabled>Merged</MenuItem>}
-                </TextField>
-
-                <TextField
-                  fullWidth size="small" label="Catalog ID" sx={{ mb: 2, '& .MuiInputBase-root': { bgcolor: 'grey.100' } }}
-                  value={isNew ? '' : item.catalog_code}
-                  placeholder={isNew ? 'Assigned on create' : ''}
-                  InputProps={{ readOnly: true, sx: { fontFamily: 'monospace' } }}
-                  InputLabelProps={{ shrink: true }}
+              )}
+              {tab === TAB.HISTORY && !isNew && (
+                <HistoryStatusTab
+                  item={item}
+                  statusChip={statusChip}
+                  dirty={dirty}
+                  readOnly={readOnly}
+                  onStatus={handleStatusAction}
+                  onOpenItem={id => navigate(`/catalog/items/${id}`)}
+                  onMerge={() => navigate(`/catalog/merge?a=${item.id}`)}
+                  onSplit={() => navigate(`/catalog/split?source=${item.id}`)}
+                  history={history}
+                  historyLoading={historyLoading}
+                  renderChanges={renderHistoryChanges}
+                  actionLabels={HISTORY_ACTION_LABELS}
                 />
-
-                <TextField
-                  fullWidth size="small" label="Staff Code" sx={{ mb: 2, '& .MuiInputBase-root': { bgcolor: 'grey.100' } }}
-                  value={isNew ? '' : item.friendly_code}
-                  placeholder={isNew ? 'Assigned on create (CAT-HG-BRANDMODEL)' : ''}
-                  helperText={isNew ? '' : 'Easy-to-type code. Set once at creation; editing Make/Model does not change it.'}
-                  InputProps={{ readOnly: true, sx: { fontFamily: 'monospace' } }}
-                  InputLabelProps={{ shrink: true }}
-                />
-
-                {!isNew && (
-                  <>
-                    <Typography variant="caption" color="text.secondary">Created</Typography>
-                    <Typography variant="body2" sx={{ mb: 1.5 }}>
-                      {formatDate(item.created_at)}&nbsp;&nbsp;{formatTime(item.created_at)}
-                      {item.created_by_name && <>&nbsp;&nbsp;by {item.created_by_name}</>}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">Last Updated</Typography>
-                    <Typography variant="body2" sx={{ mb: 2 }}>
-                      {formatDate(item.updated_at)}&nbsp;&nbsp;{formatTime(item.updated_at)}
-                      {item.updated_by_name && <>&nbsp;&nbsp;by {item.updated_by_name}</>}
-                    </Typography>
-                  </>
-                )}
-
-                <TextField
-                  select fullWidth size="small" label="Default Inventory Mode"
-                  value={draft.default_inventory_mode}
-                  onChange={setField('default_inventory_mode')}
-                  disabled={readOnly}
-                  helperText="Used as the default when creating inventory."
-                >
-                  <MenuItem value=""><em>None</em></MenuItem>
-                  {inventoryModes.map(m => (
-                    <MenuItem key={m.code} value={m.code}>
-                      <Tooltip title={m.description || ''} placement="right"><span>{m.label}</span></Tooltip>
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Grid>
-
-              <Grid item xs={12} md={4} sx={{ borderLeft: { md: 1 }, borderColor: { md: 'divider' } }}>
-                <SectionTitle>Key Summary</SectionTitle>
-                {isNew ? (
-                  <Typography variant="body2" color="text.secondary">Available after the item is created.</Typography>
-                ) : (
-                  <>
-                    <SummaryRow label="Identifiers" value={`${item.summary.identifiers} total`} />
-                    <SummaryRow label="Aliases" value={item.summary.aliases} />
-                    <SummaryRow label="Suggested Cost" value={formatMoney(item.pricing.suggested_cost)} />
-                    <SummaryRow label="Suggested Retail" value={formatMoney(item.pricing.suggested_retail)} />
-                    <SummaryRow label="Linked Inventory Records" value={item.summary.linked_inventory} />
-                  </>
-                )}
-              </Grid>
-            </Grid>
-          </Paper>
-
-          {/* ── Suggested Pricing ───────────────────────────────────────── */}
-          <Paper variant="outlined" sx={{ p: 2.5, mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, mb: 2 }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                Suggested Pricing <Typography component="span" variant="body2" color="text.secondary">(Company Wide)</Typography>
-              </Typography>
-              <Alert severity="info" icon={<InfoOutlinedIcon fontSize="small" />} sx={{ py: 0, '& .MuiAlert-message': { py: 0.75 } }}>
-                Values entered here are suggestions only. Store staff can override during intake or sale.
-              </Alert>
+              )}
             </Box>
-            <Grid container spacing={2}>
-              <Grid item xs={12} md={4}>
-                {moneyField('suggested_cost', 'Suggested Cost (Your Cost)',
-                  'Leave blank to use historical intelligence.',
-                  'Company-wide managed intake target.')}
-              </Grid>
-              <Grid item xs={12} md={4}>
-                {moneyField('suggested_retail', 'Suggested Retail (Used)',
-                  'Leave blank to use historical intelligence.',
-                  'Company-wide managed retail target.')}
-              </Grid>
-              <Grid item xs={12} md={4}>
-                {moneyField('retails_new_for', 'Retails New For (Optional)',
-                  'What it retails new for (if known).',
-                  'Optional reference value.')}
-              </Grid>
-            </Grid>
-          </Paper>
-
-          {/* ── Notes / Aliases ────────────────────────────────────────── */}
-          <Paper variant="outlined" sx={{ p: 2.5 }}>
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <SectionTitle sx={{ mb: 1 }}>Notes</SectionTitle>
-                <TextField
-                  fullWidth multiline minRows={4}
-                  label="Internal Notes (not visible to staff)"
-                  placeholder="Enter internal notes about this catalog item..."
-                  value={draft.internal_notes}
-                  onChange={setField('internal_notes')}
-                  disabled={readOnly}
-                  error={!!errors.internal_notes}
-                  helperText={errors.internal_notes}
-                  InputLabelProps={{ shrink: true }}
-                  inputProps={{ maxLength: NOTES_MAX }}
-                />
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'right', mt: 0.5 }}>
-                  {draft.internal_notes.length} / {NOTES_MAX}
-                </Typography>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Aliases / Search Terms</Typography>
-                  <Tooltip title="Alternate names staff may search for. Kept separate from the current title.">
-                    <InfoOutlinedIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                  </Tooltip>
-                </Box>
-                <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 1, minHeight: 100, bgcolor: 'background.paper' }}>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mb: 1 }}>
-                    {draft.aliases.map(alias => (
-                      <Chip key={alias} label={alias} size="small"
-                        onDelete={readOnly ? undefined : () => removeAlias(alias)} />
-                    ))}
-                    {/* System-managed aliases (previous / merged titles) — read-only */}
-                    {(item?.aliases || []).filter(a => a.alias_type !== 'SEARCH_TERM' && a.is_active).map(a => (
-                      <Tooltip key={`sys-${a.id}`} title={a.alias_type === 'MERGED_TITLE' ? 'Merged title' : 'Previous title'}>
-                        <Chip label={a.alias} size="small" variant="outlined" />
-                      </Tooltip>
-                    ))}
-                  </Box>
-                  <TextField
-                    fullWidth size="small" variant="standard"
-                    placeholder="Add alias or search term..."
-                    value={aliasInput}
-                    disabled={readOnly}
-                    onChange={e => setAliasInput(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ',') {
-                        e.preventDefault();
-                        addAlias(aliasInput);
-                      }
-                    }}
-                    onBlur={() => addAlias(aliasInput)}
-                    InputProps={{ disableUnderline: true }}
-                    inputProps={{ maxLength: 300 }}
-                  />
-                </Box>
-                <Typography variant="caption" color="text.secondary">
-                  Use aliases to help staff find this item. Press Enter to add.
-                </Typography>
-              </Grid>
-            </Grid>
           </Paper>
         </Grid>
 
@@ -1013,14 +1187,16 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
             <SectionTitle>Quick Actions</SectionTitle>
             <Grid container spacing={1.5}>
               {[
-                { key: 'suggest', icon: <LightbulbOutlinedIcon />, title: 'Suggest Catalog Change', sub: 'Report an update needed' },
-                { key: 'merge',   icon: <MergeTypeIcon />,         title: 'Merge Catalog Items',    sub: 'Combine with another item' },
-                { key: 'split',   icon: <CallSplitIcon />,         title: 'Split Catalog Item',     sub: 'Create variants from this' },
+                { key: 'suggest', icon: <LightbulbOutlinedIcon />, title: 'Suggest Catalog Change', sub: 'Report an update needed', later: true },
+                { key: 'merge',   icon: <MergeTypeIcon />,         title: 'Merge Catalog Items',    sub: 'Combine with another item',
+                  onClick: () => navigate(`/catalog/merge?a=${item.id}`) },
+                { key: 'split',   icon: <CallSplitIcon />,         title: 'Split Catalog Item',     sub: 'Create variants from this',
+                  onClick: () => navigate(`/catalog/split?source=${item.id}`) },
               ].map(a => (
                 <Grid item xs={6} key={a.key}>
-                  <Tooltip title="Coming in a later phase">
+                  <Tooltip title={a.later ? 'Coming in a later phase' : isNew ? 'Available after the item is created' : isMerged ? 'Merged catalog items are read-only' : ''}>
                     <span>
-                      <Button fullWidth disabled variant="outlined"
+                      <Button fullWidth disabled={a.later || isNew || isMerged || dirty} variant="outlined" onClick={a.onClick}
                         sx={{ flexDirection: 'column', alignItems: 'flex-start', textTransform: 'none', p: 1.25, height: '100%' }}>
                         {a.icon}
                         <Typography variant="body2" sx={{ fontWeight: 600, mt: 0.5 }}>{a.title}</Typography>
@@ -1074,63 +1250,6 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
         </DialogActions>
       </Dialog>
 
-      {/* ── History ────────────────────────────────────────────────────── */}
-      <Dialog open={historyOpen} onClose={() => setHistoryOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>History — {item?.friendly_code} ({item?.catalog_code})</DialogTitle>
-        <DialogContent dividers>
-          {historyLoading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={24} /></Box>
-          ) : history.length === 0 ? (
-            <Typography color="text.secondary">No history recorded.</Typography>
-          ) : (
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>When</TableCell>
-                  <TableCell>Who</TableCell>
-                  <TableCell>Action</TableCell>
-                  <TableCell>Changes</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {history.map(h => (
-                  <TableRow key={h.id} sx={{ verticalAlign: 'top' }}>
-                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                      {formatDate(h.performed_at)} {formatTime(h.performed_at)}
-                    </TableCell>
-                    <TableCell sx={{ whiteSpace: 'nowrap' }}>{h.performed_by_name || '—'}</TableCell>
-                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                      {HISTORY_ACTION_LABELS[h.action] || h.action}
-                      {/* Inherited through a merge / split: recorded on the source item. */}
-                      {h.from_catalog_code && (
-                        <Tooltip title="Recorded on a source item this item was merged or split from">
-                          <Chip size="small" variant="outlined" label={`on ${h.from_catalog_code}`}
-                            onClick={() => { setHistoryOpen(false); navigate(`/catalog/items/${h.from_catalog_item_id}`); }}
-                            sx={{ ml: 1, fontFamily: 'monospace', height: 20 }} />
-                        </Tooltip>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {Object.entries(h.changed_fields).map(([key, change], i) => (
-                        <Fragment key={key}>
-                          {i > 0 && <Divider sx={{ my: 0.5 }} />}
-                          <Typography variant="body2">
-                            <strong>{HISTORY_FIELD_LABELS[key] || key}:</strong>{' '}
-                            {describeHistoryChange(h.action, key, change, categoryNameById)}
-                          </Typography>
-                        </Fragment>
-                      ))}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setHistoryOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }

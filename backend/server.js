@@ -18989,6 +18989,77 @@ app.post('/api/catalog-items/:id/images', uploadCatalogImage, async (req, res) =
   }
 });
 
+// Locks a non-merged catalog item and returns the image row (Images tab).
+async function lockCatalogImage(client, catalogItemId, imageId) {
+  const itemRes = await client.query('SELECT status FROM catalog_items WHERE id = $1 FOR UPDATE', [catalogItemId]);
+  if (!itemRes.rows.length) throw new CatalogValidationError('Catalog item not found', 404);
+  if (itemRes.rows[0].status === 'MERGED') throw new CatalogValidationError('Merged catalog items are read-only', 409);
+  const imgRes = await client.query(
+    'SELECT * FROM catalog_item_images WHERE id = $1 AND catalog_item_id = $2',
+    [imageId, catalogItemId]
+  );
+  if (!imgRes.rows.length) throw new CatalogValidationError('Image not found', 404);
+  return imgRes.rows[0];
+}
+
+// PATCH /api/catalog-items/:id/images/:imageId/primary — make an existing
+// image the primary reference image (the previous primary is kept). Body: { employee_id }
+app.patch('/api/catalog-items/:id/images/:imageId/primary', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const imageId = parseInt(req.params.imageId, 10);
+    const employeeId = parseEmployeeId(req.body?.employee_id);
+    await client.query('BEGIN');
+    const image = await lockCatalogImage(client, catalogItemId, imageId);
+    if (!image.is_primary) {
+      const prev = await client.query(
+        'UPDATE catalog_item_images SET is_primary = false WHERE catalog_item_id = $1 AND is_primary RETURNING image_url',
+        [catalogItemId]
+      );
+      await client.query('UPDATE catalog_item_images SET is_primary = true WHERE id = $1', [imageId]);
+      await client.query('UPDATE catalog_items SET updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [employeeId, catalogItemId]);
+      await writeCatalogAudit(client, catalogItemId, 'UPDATE', {
+        reference_image: { from: prev.rows[0]?.image_url || null, to: image.image_url, source: image.source },
+      }, employeeId);
+    }
+    await client.query('COMMIT');
+    res.json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to set primary image');
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/catalog-items/:id/images/:imageId?employee_id= — remove an image
+// from this catalog item. Only the link is removed: the stored file is kept,
+// since merged / split items share the same files. Removing the primary
+// leaves the item without a primary until another is chosen.
+app.delete('/api/catalog-items/:id/images/:imageId', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const imageId = parseInt(req.params.imageId, 10);
+    const employeeId = parseEmployeeId(req.query.employee_id ?? req.body?.employee_id);
+    await client.query('BEGIN');
+    const image = await lockCatalogImage(client, catalogItemId, imageId);
+    await client.query('DELETE FROM catalog_item_images WHERE id = $1', [imageId]);
+    await client.query('UPDATE catalog_items SET updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [employeeId, catalogItemId]);
+    await writeCatalogAudit(client, catalogItemId, 'UPDATE', {
+      [image.is_primary ? 'reference_image' : 'additional_image']: { from: image.image_url, to: null, source: image.source },
+    }, employeeId);
+    await client.query('COMMIT');
+    res.json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to remove image');
+  } finally {
+    client.release();
+  }
+});
+
 // ============================================================
 // HARDGOODS CRUD
 // ============================================================
