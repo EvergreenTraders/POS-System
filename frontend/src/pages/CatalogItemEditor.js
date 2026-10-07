@@ -1099,7 +1099,17 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
                       {formatDate(h.performed_at)} {formatTime(h.performed_at)}
                     </TableCell>
                     <TableCell sx={{ whiteSpace: 'nowrap' }}>{h.performed_by_name || '—'}</TableCell>
-                    <TableCell sx={{ whiteSpace: 'nowrap' }}>{HISTORY_ACTION_LABELS[h.action] || h.action}</TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      {HISTORY_ACTION_LABELS[h.action] || h.action}
+                      {/* Inherited through a merge / split: recorded on the source item. */}
+                      {h.from_catalog_code && (
+                        <Tooltip title="Recorded on a source item this item was merged or split from">
+                          <Chip size="small" variant="outlined" label={`on ${h.from_catalog_code}`}
+                            onClick={() => { setHistoryOpen(false); navigate(`/catalog/items/${h.from_catalog_item_id}`); }}
+                            sx={{ ml: 1, fontFamily: 'monospace', height: 20 }} />
+                        </Tooltip>
+                      )}
+                    </TableCell>
                     <TableCell>
                       {Object.entries(h.changed_fields).map(([key, change], i) => (
                         <Fragment key={key}>

@@ -18270,18 +18270,37 @@ app.get('/api/catalog-items/:id', async (req, res) => {
   }
 });
 
-// GET /api/catalog-items/:id/history — audit trail, newest first
+// GET /api/catalog-items/:id/history — audit trail, newest first.
+// History follows lineage (doc §6 "Inventory/history from both sources links
+// to the merged item"): a merged item also returns the history of the items
+// it was merged from, and a split item the history of the item it was split
+// from — recursively, up to the moment of the merge/split. Those rows stay
+// stored on their own (retired) item so each source remains traceable;
+// inherited rows carry from_catalog_item_id / from_catalog_code.
 app.get('/api/catalog-items/:id/history', async (req, res) => {
   try {
     const catalogItemId = parseCatalogItemId(req.params.id);
     const result = await pool.query(
-      `SELECT a.id, a.action, a.changed_fields, a.performed_by, a.performed_at,
-              NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS performed_by_name
+      `WITH RECURSIVE lineage AS (
+         SELECT $1::int AS item_id, NULL::timestamp AS until
+         UNION
+         SELECT r.source_catalog_item_id,
+                LEAST(r.performed_at, COALESCE(l.until, r.performed_at))
+         FROM catalog_item_relationships r
+         JOIN lineage l ON r.target_catalog_item_id = l.item_id
+       )
+       SELECT a.id, a.action, a.changed_fields, a.performed_by, a.performed_at,
+              NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS performed_by_name,
+              CASE WHEN a.catalog_item_id <> $1 THEN a.catalog_item_id END AS from_catalog_item_id,
+              CASE WHEN a.catalog_item_id <> $1 THEN ci.catalog_code END AS from_catalog_code
        FROM catalog_item_audit a
+       JOIN (SELECT item_id, MAX(until) AS until FROM lineage GROUP BY item_id) l ON l.item_id = a.catalog_item_id
+       JOIN catalog_items ci ON ci.id = a.catalog_item_id
        LEFT JOIN employees e ON e.employee_id = a.performed_by
-       WHERE a.catalog_item_id = $1
+       -- An ancestor's history counts only up to (and including) the merge/split.
+       WHERE l.until IS NULL OR a.performed_at <= l.until
        ORDER BY a.performed_at DESC, a.id DESC
-       LIMIT 200`,
+       LIMIT 500`,
       [catalogItemId]
     );
     res.json(result.rows);
