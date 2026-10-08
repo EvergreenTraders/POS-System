@@ -33,8 +33,10 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: '10mb' }));
-// Serve uploaded files statically
-app.use('/uploads', express.static('uploads'));
+// Serve uploaded files: local disk (development), then S3 when S3_BUCKET is set
+// (production) — see storage.js.
+const { saveUpload, deleteUpload, serveUploads } = require('./storage');
+serveUploads(app);
 
 // Database configuration
 const pool = new Pool({
@@ -86,27 +88,10 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 } // 5 MB limit
 });
 
-// Ensure upload directories exist
-const uploadDir = 'uploads/customers/';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const jewelryUploadDir = 'uploads/jewelry/';
-if (!fs.existsSync(jewelryUploadDir)) {
-  fs.mkdirSync(jewelryUploadDir, { recursive: true });
-}
-
-const hardgoodsUploadDir = 'uploads/hardgoods/';
-if (!fs.existsSync(hardgoodsUploadDir)) {
-  fs.mkdirSync(hardgoodsUploadDir, { recursive: true });
-}
+// Uploaded jewelry / hardgoods / catalog images are stored via storage.js
+// (S3 in production, backend/uploads/ in development).
 
 // Catalog reference images (Evergreen-controlled storage, doc §12).
-const catalogUploadDir = 'uploads/catalog/';
-if (!fs.existsSync(catalogUploadDir)) {
-  fs.mkdirSync(catalogUploadDir, { recursive: true });
-}
 const CATALOG_IMAGE_EXTENSIONS = {
   'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
 };
@@ -125,11 +110,6 @@ const uploadCatalogImage = (req, res, next) => catalogImageMulter(req, res, (err
   }
   next();
 });
-
-const scrapUploadDir = 'uploads/scrap/';
-if (!fs.existsSync(scrapUploadDir)) {
-  fs.mkdirSync(scrapUploadDir, { recursive: true });
-}
 
 // Configure multer for scrap weight photo uploads
 const uploadScrapPhoto = multer({
@@ -6310,9 +6290,8 @@ app.post('/api/quotes', uploadJewelryImages, async (req, res) => {
           const file = uploadedFiles[fileIdx];
           const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
           const filename = `${item_id}-${j + 1}${ext}`;
-          const filepath = path.join(jewelryUploadDir, filename);
-          await fs.promises.writeFile(filepath, file.buffer);
-          processedImages.push({ url: `/uploads/jewelry/${filename}`, isPrimary: itemImagesMeta[j].isPrimary || j === 0 });
+          const url = await saveUpload(`jewelry/${filename}`, file.buffer, file.mimetype);
+          processedImages.push({ url, isPrimary: itemImagesMeta[j].isPrimary || j === 0 });
         }
       }
       globalFileIndex += itemImagesMeta.length;
@@ -6573,9 +6552,8 @@ app.post('/api/quotes/trade', uploadJewelryImages, async (req, res) => {
           const file = uploadedFiles[fileIdx];
           const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
           const filename = `${item_id}-${j + 1}${ext}`;
-          const filepath = path.join(jewelryUploadDir, filename);
-          await fs.promises.writeFile(filepath, file.buffer);
-          processedImages.push({ url: `/uploads/jewelry/${filename}`, isPrimary: itemImagesMeta[j].isPrimary || j === 0 });
+          const url = await saveUpload(`jewelry/${filename}`, file.buffer, file.mimetype);
+          processedImages.push({ url, isPrimary: itemImagesMeta[j].isPrimary || j === 0 });
         }
       }
       globalFileIndex += itemImagesMeta.length;
@@ -7481,14 +7459,13 @@ app.put('/api/jewelry/:id/images', uploadJewelryImages, async (req, res) => {
       // Create filename: ITEMID-N.jpg where N is the next available number
       const imageNumber = existingImages.length + i + 1;
       const filename = `${id}-${imageNumber}${ext}`;
-      const filepath = path.join(jewelryUploadDir, filename);
 
-      // Save file to disk
-      await fs.promises.writeFile(filepath, file.buffer);
+      // Save the file (S3 in production, local disk in development)
+      const url = await saveUpload(`jewelry/${filename}`, file.buffer, file.mimetype);
 
       // Add to processed images
       processedImages.push({
-        url: `/uploads/jewelry/${filename}`,
+        url,
         isPrimary: existingImages.length === 0 && i === 0 // First image is primary if no existing images
       });
     }
@@ -7709,17 +7686,16 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           // Create meaningful filename: ITEMID-1.jpg, ITEMID-2.jpg, etc.
           const imageNumber = i + 1;
           const filename = `${item_id}-${imageNumber}${ext}`;
-          const filepath = path.join(jewelryUploadDir, filename);
 
-          // Save file to disk with meaningful name
-          await fs.promises.writeFile(filepath, file.buffer);
+          // Save the file with a meaningful name (S3 in production, local disk in development)
+          const savedUrl = await saveUpload(`jewelry/${filename}`, file.buffer, file.mimetype);
 
           // Get isPrimary from metadata
           const isPrimary = imageMeta ? imageMeta.isPrimary : (i === 0);
 
           // Store relative path for database
           processedImages.push({
-            url: `/uploads/jewelry/${filename}`,
+            url: savedUrl,
             isPrimary: isPrimary
           });
         }
@@ -19189,9 +19165,8 @@ app.post('/api/catalog-items/:id/images', uploadCatalogImage, async (req, res) =
     );
 
     const filename = `catalog-${catalogItemId}-${Date.now()}${CATALOG_IMAGE_EXTENSIONS[req.file.mimetype]}`;
-    writtenPath = path.join(catalogUploadDir, filename);
-    await fs.promises.writeFile(writtenPath, req.file.buffer);
-    const imageUrl = `/uploads/catalog/${filename}`;
+    const imageUrl = await saveUpload(`catalog/${filename}`, req.file.buffer, req.file.mimetype);
+    writtenPath = imageUrl;
     const previousPrimaryUrl = previousRes.rows[0]?.image_url || null;
     const makePrimary = requestedPrimary || !previousPrimaryUrl;
 
@@ -19221,7 +19196,7 @@ app.post('/api/catalog-items/:id/images', uploadCatalogImage, async (req, res) =
   } catch (err) {
     await client.query('ROLLBACK');
     // Don't leave an orphaned file behind when the database write failed.
-    if (writtenPath) fs.promises.unlink(writtenPath).catch(() => {});
+    if (writtenPath) deleteUpload(writtenPath).catch(() => {});
     sendCatalogError(res, err, 'Failed to save reference image');
   } finally {
     client.release();
@@ -19661,10 +19636,9 @@ app.put('/api/hardgoods/:id/images', uploadHardgoodsImages, async (req, res) => 
       const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
       const imageNumber = existingImages.length + i + 1;
       const filename = `${id}-${imageNumber}${ext}`;
-      const filepath = path.join(hardgoodsUploadDir, filename);
-      await fs.promises.writeFile(filepath, file.buffer);
+      const url = await saveUpload(`hardgoods/${filename}`, file.buffer, file.mimetype);
       processedImages.push({
-        url: `/uploads/hardgoods/${filename}`,
+        url,
         isPrimary: existingImages.length === 0 && i === 0
       });
     }
@@ -19715,8 +19689,7 @@ app.delete('/api/hardgoods/:id/images/:imageIndex', async (req, res) => {
 
     const imgUrl = existingImages[idx].url;
     if (imgUrl && imgUrl.startsWith('/uploads/hardgoods/')) {
-      const filepath = path.join(hardgoodsUploadDir, path.basename(imgUrl));
-      try { await fs.promises.unlink(filepath); } catch (e) {}
+      try { await deleteUpload(imgUrl); } catch (e) { console.error('Error deleting hardgoods image:', e.message); }
     }
 
     const updatedImages = existingImages.filter((_, i) => i !== idx);
