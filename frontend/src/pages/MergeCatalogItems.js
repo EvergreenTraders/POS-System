@@ -34,6 +34,9 @@ import config from '../config';
 import { useAuth } from '../context/AuthContext';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import { CatalogItemPicker, CategorySelect } from '../components/CatalogPickers';
+import CatalogFieldInput, {
+  catalogScopeFields, displayFieldValue, fromStoredFieldValue, isBlankFieldValue,
+} from '../components/CatalogFieldInput';
 
 const API = config.apiUrl;
 // Stored image paths are server-relative (/uploads/…); the API base ends in /api.
@@ -143,20 +146,20 @@ function SourceCard({ side, item, loading, categoryPath, excludeIds, onPick, onC
 }
 
 // ── One selectable value (radio card) ───────────────────────────────────
-function ChoiceCard({ side, label, value, selected, multiline, onSelect }) {
+function ChoiceCard({ side, label, value, selected, multiline, onSelect, dense }) {
   const color = SIDE_COLOR[side];
   return (
     <Box
       onClick={onSelect}
       sx={{
-        display: 'flex', alignItems: 'center', gap: 1, px: 1.5, py: 1, mb: 1, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', gap: 1, px: 1.5, py: dense ? 0.25 : 1, mb: dense ? 0 : 1, cursor: 'pointer',
         border: 1, borderRadius: 1, borderColor: selected ? color : 'divider',
         bgcolor: selected ? SIDE_BG[side] : 'background.paper',
         '&:hover': { borderColor: color },
       }}
     >
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Typography variant="caption" sx={{ fontWeight: 600 }}>{label}</Typography>
+        {label && <Typography variant="caption" sx={{ fontWeight: 600 }}>{label}</Typography>}
         <Typography variant="body2" sx={{
           ...(multiline
             ? { display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }
@@ -240,6 +243,12 @@ export default function MergeCatalogItems() {
   const [draft, setDraft] = useState(null);        // the Merged Item form
   const [keptIdentifiers, setKeptIdentifiers] = useState(new Set());
   const [keptAliases, setKeptAliases] = useState(new Set());
+  // Catalog fields of the merged item's category, and per field the surviving
+  // value + where it came from ('A' | 'B' | 'EDITED' | null when neither has one).
+  const [mergedFields, setMergedFields] = useState([]);
+  const [fieldsCategoryId, setFieldsCategoryId] = useState(null); // category mergedFields belong to
+  const [fieldsLoading, setFieldsLoading] = useState(false);
+  const [fieldState, setFieldState] = useState({});   // field_definition_id → { value, choice }
   const [errors, setErrors] = useState({});
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -292,8 +301,53 @@ export default function MergeCatalogItems() {
     const allIds = (list) => new Set(list.map(x => x.id));
     setKeptIdentifiers(allIds([...sideIdentifiers(itemA, [...MODEL_TYPES, ...UPC_TYPES]), ...sideIdentifiers(itemB, [...MODEL_TYPES, ...UPC_TYPES])]));
     setKeptAliases(allIds([...itemA.aliases, ...itemB.aliases].filter(a => a.is_active)));
+    setFieldState({});
     setErrors({});
   }, [ready, itemA, itemB]);
+
+  // Stored Catalog field values of each source, by field definition id.
+  const sourceFieldValues = useMemo(() => Object.fromEntries(['A', 'B'].map(side => [side,
+    Object.fromEntries((items[side]?.field_values || [])
+      .filter(f => !isBlankFieldValue(f.value)).map(f => [f.field_definition_id, f.value]))])), [items]);
+
+  // Load the merged category's Catalog fields. Fields already decided keep
+  // their value; new ones start from A (B if A has none). Re-runs when the
+  // merged Category changes.
+  const mergedCategoryId = draft?.category_id;
+  useEffect(() => {
+    if (!ready || !mergedCategoryId) { setMergedFields([]); return undefined; }
+    let cancelled = false;
+    setFieldsLoading(true);
+    axios.get(`${API}/categories/${mergedCategoryId}/effective-fields`)
+      .then(res => {
+        if (cancelled) return;
+        const defs = catalogScopeFields(res.data);
+        setMergedFields(defs);
+        setFieldsCategoryId(mergedCategoryId);
+        setFieldState(prev => Object.fromEntries(defs.map(d => {
+          const id = d.field_definition_id;
+          if (prev[id]) return [id, prev[id]];
+          const side = ['A', 'B'].find(sd => sourceFieldValues[sd][id] !== undefined) || null;
+          return [id, { choice: side, value: fromStoredFieldValue(d.data_type, side ? sourceFieldValues[side][id] : null) }];
+        })));
+      })
+      .catch(() => { if (!cancelled) { setMergedFields([]); enqueueSnackbar('Failed to load category fields', { variant: 'error' }); } })
+      .finally(() => { if (!cancelled) setFieldsLoading(false); });
+    return () => { cancelled = true; };
+  }, [ready, mergedCategoryId, sourceFieldValues, enqueueSnackbar]);
+
+  const chooseField = (def, side) => setFieldState(prev => ({
+    ...prev,
+    [def.field_definition_id]: { choice: side, value: fromStoredFieldValue(def.data_type, sourceFieldValues[side][def.field_definition_id] ?? null) },
+  }));
+  const editField = (def, value) => setFieldState(prev => ({ ...prev, [def.field_definition_id]: { choice: 'EDITED', value } }));
+
+  // Source values for fields the merged category doesn't have — not carried over.
+  const mergedFieldIds = new Set(mergedFields.map(d => d.field_definition_id));
+  // Only once the merged category's fields have loaded (no flash while loading).
+  const droppedFields = ready && fieldsCategoryId === mergedCategoryId && !fieldsLoading ? ['A', 'B'].flatMap(side => (items[side].field_values || [])
+    .filter(fv => !isBlankFieldValue(fv.value) && !mergedFieldIds.has(fv.field_definition_id))
+    .map(fv => `${fv.label} (${side}: ${displayFieldValue(fv.data_type, fv.value, fv.unit_of_measure)})`)) : [];
 
   const setSource = (side, id) => {
     const next = new URLSearchParams(searchParams);
@@ -360,6 +414,10 @@ export default function MergeCatalogItems() {
             retails_new_for: draft.retails_new_for,
           },
         },
+        field_values: mergedFields.map(d => ({
+          field_definition_id: d.field_definition_id,
+          value: fieldState[d.field_definition_id]?.value ?? null,
+        })),
         identifier_ids: [...keptIdentifiers],
         alias_ids: [...keptAliases],
         employee_id: user?.id,
@@ -485,6 +543,53 @@ export default function MergeCatalogItems() {
                 ))}
               </Box>
             </Box>
+          </Paper>
+
+          {/* ── Catalog fields: choose each surviving value ──────────── */}
+          <Paper variant="outlined" sx={{ mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, px: 2, py: 1.25, borderBottom: 1, borderColor: 'divider', flexWrap: 'wrap' }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Catalog Fields</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Choose the value to keep for each field, or edit it. Fields are those of {categoryById[draft.category_id]?.path || 'the merged category'}.
+              </Typography>
+              {fieldsLoading && <CircularProgress size={14} sx={{ ml: 1 }} />}
+            </Box>
+            {mergedFields.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+                {fieldsLoading ? 'Loading fields…' : 'This category has no Catalog fields.'}
+              </Typography>
+            ) : (
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '200px 1fr 1.4fr 1fr' }, columnGap: 2, rowGap: 1, alignItems: 'center', p: 2 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', lg: 'block' } }}>Field</Typography>
+                <Typography variant="caption" sx={{ fontWeight: 700, color: SIDE_COLOR.A, display: { xs: 'none', lg: 'block' } }}>Value from A</Typography>
+                <Typography variant="caption" sx={{ fontWeight: 700, color: SIDE_COLOR.A, display: { xs: 'none', lg: 'block' } }}>Merged Value</Typography>
+                <Typography variant="caption" sx={{ fontWeight: 700, color: SIDE_COLOR.B, display: { xs: 'none', lg: 'block' } }}>Value from B</Typography>
+                {mergedFields.map(d => {
+                  const id = d.field_definition_id;
+                  const label = d.label_override || d.field_label || d.field_key;
+                  const state = fieldState[id] || { choice: null, value: fromStoredFieldValue(d.data_type, null) };
+                  const shown = (side) => displayFieldValue(d.data_type, sourceFieldValues[side][id], d.unit_of_measure) || 'Not set';
+                  return (
+                    <React.Fragment key={id}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {label}
+                        {state.choice === 'EDITED' && (
+                          <Typography component="span" variant="caption" color="text.secondary"> · edited</Typography>
+                        )}
+                      </Typography>
+                      <ChoiceCard dense side="A" value={shown('A')} selected={state.choice === 'A'} onSelect={() => chooseField(d, 'A')} />
+                      <CatalogFieldInput field={d} label="" value={state.value} onChange={v => editField(d, v)} />
+                      <ChoiceCard dense side="B" value={shown('B')} selected={state.choice === 'B'} onSelect={() => chooseField(d, 'B')} />
+                    </React.Fragment>
+                  );
+                })}
+              </Box>
+            )}
+            {droppedFields.length > 0 && (
+              <Alert severity="warning" sx={{ m: 2, mt: 0 }}>
+                Not carried over — these fields don’t apply to the merged category: {droppedFields.join(', ')}
+              </Alert>
+            )}
           </Paper>
 
           {/* ── Identifiers / aliases to keep ────────────────────────── */}

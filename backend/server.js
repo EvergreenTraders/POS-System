@@ -18501,6 +18501,8 @@ app.patch('/api/catalog-items/:id/status', async (req, res) => {
 //                             mode win; the other source fills the gaps),
 //   merged: { make_brand, model_name, category_id, status, title_override,
 //             internal_notes, pricing: { suggested_cost, suggested_retail, retails_new_for } },
+//   field_values: [{ field_definition_id, value }]  (the chosen Catalog field
+//                            values; omitted = values_from source, other fills blanks),
 //   identifier_ids: [...]    (identifier rows of either source to keep),
 //   alias_ids: [...]         (alias rows of either source to keep),
 //   employee_id }
@@ -18557,20 +18559,27 @@ app.post('/api/catalog-items/merge', async (req, res) => {
       trimOrNull(m.internal_notes), employeeId,
     ]);
 
-    // Catalog field values: only fields that apply to the merged Category;
-    // the chosen source's value wins, the other source fills blanks.
-    const [catalogFields, primaryValues, secondaryValues] = await Promise.all([
-      getCatalogScopeFields(categoryId),
-      loadCatalogFieldValueMap(client, primary.id),
-      loadCatalogFieldValueMap(client, secondary.id),
-    ]);
-    for (const f of catalogFields) {
-      const value = primaryValues[f.field_definition_id] ?? secondaryValues[f.field_definition_id] ?? null;
-      if (value === null) continue;
-      await client.query(
-        'INSERT INTO catalog_item_field_values (catalog_item_id, field_definition_id, value) VALUES ($1, $2, $3)',
-        [catalogItemId, f.field_definition_id, value]
-      );
+    // Catalog field values. field_values = the surviving values the user chose
+    // field by field on the Merge screen (validated against the merged
+    // Category's Catalog fields; blanks are simply not stored). Without it
+    // (API callers), the values_from source wins and the other fills blanks.
+    if (Array.isArray(b.field_values)) {
+      await saveCatalogFieldValues(client, catalogItemId, categoryId,
+        b.field_values.filter(fv => serializeCatalogFieldValue(fv?.value) !== null));
+    } else {
+      const [catalogFields, primaryValues, secondaryValues] = await Promise.all([
+        getCatalogScopeFields(categoryId),
+        loadCatalogFieldValueMap(client, primary.id),
+        loadCatalogFieldValueMap(client, secondary.id),
+      ]);
+      for (const f of catalogFields) {
+        const value = primaryValues[f.field_definition_id] ?? secondaryValues[f.field_definition_id] ?? null;
+        if (value === null) continue;
+        await client.query(
+          'INSERT INTO catalog_item_field_values (catalog_item_id, field_definition_id, value) VALUES ($1, $2, $3)',
+          [catalogItemId, f.field_definition_id, value]
+        );
+      }
     }
 
     // Selected identifiers (deduplicated by type + normalized value).
