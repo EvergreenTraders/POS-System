@@ -18747,18 +18747,20 @@ app.get('/api/catalog-items/:id/linked-inventory', async (req, res) => {
 
 // ============================================================
 // SPLIT CATALOG ITEM (doc §6) — creates two (or more) NEW catalog items from
-// a source. Each new item gets its own details, identifiers and aliases;
-// it starts from the source's pricing, inventory mode, reference images and
-// Catalog field values (those that apply to its Category). The manager then
-// reassigns the source's linked inventory to the new items (records left out
-// stay on the source). The source keeps all of its data and history but is
-// marked INACTIVE, so the new items can take over its UPCs. Lineage is
-// recorded source → each new item.
+// a source. Each new item gets its own details, identifiers, aliases and
+// Catalog field values; it starts from the source's pricing, inventory mode
+// and reference images. EVERY inventory record linked to the source must be
+// reassigned to one of the new items — the split is refused otherwise. The
+// source keeps all of its data and history but is marked INACTIVE, so the new
+// items can take over its UPCs. Lineage is recorded source → each new item.
 //
 // POST /api/catalog-items/:id/split — Body: {
 //   items: [{ model_name, make_brand, category_id, status, internal_notes,
-//             identifiers: [{ identifier_type, raw_value }], aliases: [...] }, ...],
-//   inventory: [{ item_id, inventory_table: 'hardgoods'|'jewelry', target: <index into items> }],
+//             identifiers: [{ identifier_type, raw_value }], aliases: [...],
+//             field_values: [{ field_definition_id, value }] (this item's own
+//             Catalog field values; omitted = copy the source's values) }, ...],
+//   inventory: [{ item_id, inventory_table: 'hardgoods'|'jewelry', target: <index into items> }]
+//              (one entry for every linked inventory record),
 //   employee_id }
 // ============================================================
 app.post('/api/catalog-items/:id/split', async (req, res) => {
@@ -18835,16 +18837,22 @@ app.post('/api/catalog-items/:id/split', async (req, res) => {
         trimOrNull(s.internal_notes), employeeId,
       ]);
 
-      // Catalog field values that apply to the new item's Category.
-      for (const f of await getCatalogScopeFields(categoryId)) {
-        const value = sourceValues[f.field_definition_id];
-        if (value === undefined || value === null) continue;
-        await client.query(
-          'INSERT INTO catalog_item_field_values (catalog_item_id, field_definition_id, value) VALUES ($1, $2, $3)',
-          [id, f.field_definition_id, value]
-        );
-      }
       try {
+        // Catalog field values: this item's own (validated against its
+        // Category), or — when not sent — the source's values that apply.
+        if (Array.isArray(s.field_values)) {
+          await saveCatalogFieldValues(client, id, categoryId,
+            s.field_values.filter(fv => serializeCatalogFieldValue(fv?.value) !== null));
+        } else {
+          for (const f of await getCatalogScopeFields(categoryId)) {
+            const value = sourceValues[f.field_definition_id];
+            if (value === undefined || value === null) continue;
+            await client.query(
+              'INSERT INTO catalog_item_field_values (catalog_item_id, field_definition_id, value) VALUES ($1, $2, $3)',
+              [id, f.field_definition_id, value]
+            );
+          }
+        }
         await saveCatalogIdentifiers(client, id, source.company_id, Array.isArray(s.identifiers) ? s.identifiers : []);
         await saveCatalogAliases(client, id, Array.isArray(s.aliases) ? s.aliases : []);
       } catch (err) {
@@ -18894,6 +18902,18 @@ app.post('/api/catalog-items/:id/split', async (req, res) => {
           [target.id, target.categoryId, mv.item_id, sourceId]);
       if (!result.rowCount) throw new CatalogValidationError(`Inventory ${mv.item_id} is not linked to this catalog item`);
       target.relinked += 1;
+    }
+    // Nothing may stay on the source: every record must go to a new item.
+    const leftRes = await client.query(
+      `SELECT (SELECT COUNT(*) FROM hardgoods WHERE catalog_item_id = $1)
+            + (SELECT COUNT(*) FROM jewelry   WHERE catalog_item_id = $1) AS n`,
+      [sourceId]
+    );
+    const left = parseInt(leftRes.rows[0].n, 10);
+    if (left > 0) {
+      throw new CatalogValidationError(
+        `${left} linked inventory record${left === 1 ? ' is' : 's are'} not assigned — assign every record to New Item A or B`
+      );
     }
 
     const codesRes = await client.query('SELECT id, catalog_code FROM catalog_items WHERE id = ANY($1::int[])', [created.map(c => c.id)]);

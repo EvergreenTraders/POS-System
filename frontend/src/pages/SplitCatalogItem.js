@@ -42,6 +42,7 @@ import config from '../config';
 import { useAuth } from '../context/AuthContext';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import { CatalogItemPicker, CategorySelect } from '../components/CatalogPickers';
+import CatalogFieldInput, { catalogScopeFields, fromStoredFieldValue, isBlankFieldValue } from '../components/CatalogFieldInput';
 
 const API = config.apiUrl;
 // Stored image paths are server-relative (/uploads/…); the API base ends in /api.
@@ -78,6 +79,10 @@ function blankSide(source) {
     internal_notes: source.internal_notes || '',
     identifiers: [],
     aliases: [],
+    // Starts from the source's Catalog field values; each side edits its own copy.
+    field_values: Object.fromEntries(source.field_values
+      .filter(fv => !isBlankFieldValue(fv.value))
+      .map(fv => [fv.field_definition_id, fromStoredFieldValue(fv.data_type, fv.value)])),
   };
 }
 
@@ -151,7 +156,7 @@ function IdentifierEditor({ label, addLabel, placeholder, values, options, onAdd
 }
 
 // ── New Item A / B panel ────────────────────────────────────────────────
-function NewItemPanel({ side, draft, errors, categories, source, otherDraft, onChange, notify }) {
+function NewItemPanel({ side, draft, errors, categories, source, otherDraft, onChange, notify, fields, fieldsLoading }) {
   const color = SIDE_COLOR[side];
   const other = side === 'A' ? 'B' : 'A';
   const set = (patch) => onChange({ ...draft, ...patch });
@@ -249,17 +254,47 @@ function NewItemPanel({ side, draft, errors, categories, source, otherDraft, onC
           </Box>
         </Box>
       </Box>
+
+      {/* Catalog field values — this item's own (e.g. color, edition, storage). */}
+      <Box sx={{ px: 2, pb: 2 }}>
+        <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+          Catalog Fields ({fields.length})
+          {fieldsLoading && <CircularProgress size={12} sx={{ ml: 1 }} />}
+        </Typography>
+        {fields.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            {fieldsLoading ? 'Loading fields…' : 'This category has no Catalog fields.'}
+          </Typography>
+        ) : (
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5 }}>
+            {fields.map(fd => {
+              const id = fd.field_definition_id;
+              return (
+                <CatalogFieldInput key={id} field={fd} required={fd.required_for_catalog}
+                  value={draft.field_values[id] ?? (fd.data_type === 'MULTISELECT' ? [] : '')}
+                  error={errors.fields?.[id]}
+                  onChange={v => {
+                    const next = { ...draft.field_values };
+                    if (isBlankFieldValue(v)) delete next[id]; else next[id] = v;
+                    set({ field_values: next });
+                  }} />
+              );
+            })}
+          </Box>
+        )}
+      </Box>
     </Paper>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
 // Split Catalog Item (doc §6) — create two NEW catalog items from a source.
-// Each side gets its own details, identifiers and aliases; the source's
-// linked inventory is then assigned to New Item A or B (suggested by
-// matching each record's part number / attributes against the identifiers),
-// or left on the source. On Process the source keeps its data and history
-// but is marked Inactive. Route: /catalog/split?source=<id>
+// Each side gets its own details, identifiers, aliases and Catalog field
+// values. Every inventory record linked to the source must be assigned to
+// New Item A or B (a suggestion comes from matching each record's part
+// number / attributes against the identifiers, but the manager chooses).
+// On Process the source keeps its data and history but is marked Inactive.
+// Route: /catalog/split?source=<id>
 // ─────────────────────────────────────────────────────────────────────────
 export default function SplitCatalogItem() {
   const navigate = useNavigate();
@@ -273,7 +308,10 @@ export default function SplitCatalogItem() {
   const [inventory, setInventory] = useState([]);
   const [categoryTree, setCategoryTree] = useState([]);
   const [drafts, setDrafts] = useState(null);       // { A: {...}, B: {...} }
-  const [assignOverrides, setAssignOverrides] = useState({}); // item_id → 'A' | 'B' | 'SOURCE'
+  const [assignments, setAssignments] = useState({}); // item_id → 'A' | 'B' (unset = not chosen yet)
+  const [inventoryError, setInventoryError] = useState('');
+  // Catalog field definitions for each side's category: { A: { categoryId, defs, loading }, B: … }
+  const [sideFields, setSideFields] = useState({ A: { categoryId: null, defs: [], loading: false }, B: { categoryId: null, defs: [], loading: false } });
   const [errors, setErrors] = useState({ A: {}, B: {} });
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -290,7 +328,7 @@ export default function SplitCatalogItem() {
   // Load the source + its linked inventory; reset both new items from it.
   useEffect(() => {
     const seq = ++loadSeq.current;
-    setSource(null); setDrafts(null); setInventory([]); setAssignOverrides({}); setErrors({ A: {}, B: {} });
+    setSource(null); setDrafts(null); setInventory([]); setAssignments({}); setInventoryError(''); setErrors({ A: {}, B: {} });
     if (!sourceId) return;
     setLoading(true);
     Promise.all([
@@ -313,6 +351,28 @@ export default function SplitCatalogItem() {
     });
   }, [sourceId, enqueueSnackbar, setSearchParams]);
 
+  // Load each side's Catalog fields when its category changes.
+  const categoryA = drafts?.A.category_id;
+  const categoryB = drafts?.B.category_id;
+  useEffect(() => {
+    const loaders = [['A', categoryA], ['B', categoryB]].map(([side, categoryId]) => {
+      if (!categoryId) return null;
+      let cancelled = false;
+      setSideFields(prev => ({ ...prev, [side]: { ...prev[side], loading: true } }));
+      axios.get(`${API}/categories/${categoryId}/effective-fields`)
+        .then(res => { if (!cancelled) setSideFields(prev => ({ ...prev, [side]: { categoryId, defs: catalogScopeFields(res.data), loading: false } })); })
+        .catch(() => {
+          if (cancelled) return;
+          setSideFields(prev => ({ ...prev, [side]: { categoryId: null, defs: [], loading: false } }));
+          enqueueSnackbar(`Failed to load fields for New Item ${side}`, { variant: 'error' });
+        });
+      return () => { cancelled = true; };
+    });
+    return () => loaders.forEach(cancel => cancel && cancel());
+  }, [categoryA, categoryB, enqueueSnackbar]);
+  // A side's fields, only once they belong to its current category.
+  const fieldsFor = (side) => (sideFields[side].categoryId === drafts?.[side].category_id ? sideFields[side].defs : []);
+
   const notify = (msg) => enqueueSnackbar(msg, { variant: 'warning' });
   const updateDraft = (side) => (next) => {
     setDrafts(prev => ({ ...prev, [side]: next }));
@@ -329,9 +389,17 @@ export default function SplitCatalogItem() {
       return [r.item_id, hits.length === 1 ? hits[0] : null];
     }));
   }, [inventory, drafts]);
-  const assignmentOf = (r) => assignOverrides[r.item_id] || suggestions[r.item_id]?.side || 'SOURCE';
-  const counts = inventory.reduce((acc, r) => ({ ...acc, [assignmentOf(r)]: (acc[assignmentOf(r)] || 0) + 1 }), { A: 0, B: 0, SOURCE: 0 });
-  const setAll = (value) => setAssignOverrides(Object.fromEntries(inventory.map(r => [r.item_id, value])));
+  // Suggestions only recommend: a record counts as assigned once the manager chooses A or B.
+  const assignmentOf = (r) => assignments[r.item_id] || null;
+  const counts = inventory.reduce((acc, r) => {
+    const a = assignmentOf(r) || 'UNASSIGNED';
+    return { ...acc, [a]: acc[a] + 1 };
+  }, { A: 0, B: 0, UNASSIGNED: 0 });
+  const assign = (patch) => { setAssignments(prev => ({ ...prev, ...patch })); setInventoryError(''); };
+  const setAll = (value) => assign(Object.fromEntries(inventory.map(r => [r.item_id, value])));
+  const applySuggestions = () => assign(Object.fromEntries(inventory
+    .filter(r => suggestions[r.item_id]).map(r => [r.item_id, suggestions[r.item_id].side])));
+  const suggestedCount = inventory.filter(r => suggestions[r.item_id]).length;
 
   const validate = () => {
     const next = { A: {}, B: {} };
@@ -341,6 +409,13 @@ export default function SplitCatalogItem() {
       if (!d.make_brand.trim()) next[s].make_brand = 'Make / Brand is required';
       if (!d.category_id) next[s].category_id = 'Category is required';
       if (d.internal_notes.length > NOTES_MAX) next[s].internal_notes = `Max ${NOTES_MAX} characters`;
+      // Fields marked "Required for catalog" must be filled for an Active item.
+      if (d.status === 'ACTIVE') {
+        const missing = Object.fromEntries(fieldsFor(s)
+          .filter(fd => fd.required_for_catalog && isBlankFieldValue(d.field_values[fd.field_definition_id]))
+          .map(fd => [fd.field_definition_id, 'Required for an Active catalog item']));
+        if (Object.keys(missing).length) next[s].fields = missing;
+      }
     });
     // A UPC / EAN may belong to only one of the new items.
     const upcKeysB = new Set(drafts.B.identifiers.filter(i => UPC_TYPES.includes(i.identifier_type)).map(identifierKey));
@@ -351,8 +426,14 @@ export default function SplitCatalogItem() {
     }
     setErrors(next);
     const ok = SIDES.every(s => Object.keys(next[s]).length === 0);
-    if (!ok) notify('Fix the highlighted fields first');
-    return ok;
+    if (!ok) { notify('Fix the highlighted fields first'); return false; }
+    if (counts.UNASSIGNED > 0) {
+      const msg = `Assign every inventory record to New Item A or B — ${counts.UNASSIGNED} not assigned yet`;
+      setInventoryError(msg);
+      notify(msg);
+      return false;
+    }
+    return true;
   };
 
   const handleProcess = async () => {
@@ -367,9 +448,13 @@ export default function SplitCatalogItem() {
           internal_notes: drafts[s].internal_notes || null,
           identifiers: drafts[s].identifiers,
           aliases: drafts[s].aliases,
+          // This item's own values for the Catalog fields of its category.
+          field_values: fieldsFor(s).map(fd => ({
+            field_definition_id: fd.field_definition_id,
+            value: drafts[s].field_values[fd.field_definition_id] ?? null,
+          })),
         })),
         inventory: inventory
-          .filter(r => assignmentOf(r) !== 'SOURCE')
           .map(r => ({ item_id: r.item_id, inventory_table: r.inventory_table, target: SIDES.indexOf(assignmentOf(r)) })),
         employee_id: user?.id,
       });
@@ -428,7 +513,7 @@ export default function SplitCatalogItem() {
           <Typography variant="subtitle2" sx={{ fontWeight: 700, flex: 1 }}>
             SOURCE ITEM{' '}
             <Typography component="span" variant="body2" color="text.secondary">
-              (details and history kept — it will be marked Inactive)
+              (details and history kept — all its inventory moves to New Item A or B, and it will be marked Inactive)
             </Typography>
           </Typography>
           {source && <Button size="small" startIcon={<SwapHorizIcon />} onClick={() => setSearchParams({}, { replace: true })}>Change</Button>}
@@ -488,7 +573,8 @@ export default function SplitCatalogItem() {
           <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
             {SIDES.map(s => (
               <NewItemPanel key={s} side={s} draft={drafts[s]} errors={errors[s]} categories={categories}
-                source={source} otherDraft={drafts[s === 'A' ? 'B' : 'A']} onChange={updateDraft(s)} notify={notify} />
+                source={source} otherDraft={drafts[s === 'A' ? 'B' : 'A']} onChange={updateDraft(s)} notify={notify}
+                fields={fieldsFor(s)} fieldsLoading={sideFields[s].loading} />
             ))}
           </Box>
 
@@ -504,20 +590,24 @@ export default function SplitCatalogItem() {
               <Box sx={{ flex: 1, minWidth: 260 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Linked Inventory ({inventory.length})</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Assign each record to a new item. Suggestions come from matching part numbers / attributes to each item’s identifiers; you can override them.
+                  Every record must move to New Item A or B. Suggestions come from matching part numbers / attributes to each item’s identifiers — they’re only recommendations until you choose.
                 </Typography>
               </Box>
               {inventory.length > 0 && (
                 <>
                   <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
-                    A: <strong>{counts.A}</strong> · B: <strong>{counts.B}</strong> · Stay on source: <strong>{counts.SOURCE}</strong>
+                    A: <strong>{counts.A}</strong> · B: <strong>{counts.B}</strong> ·{' '}
+                    <Box component="span" sx={{ color: counts.UNASSIGNED ? 'warning.dark' : 'inherit' }}>Not assigned: <strong>{counts.UNASSIGNED}</strong></Box>
                   </Typography>
                   <Button size="small" onClick={() => setAll('A')}>All → A</Button>
                   <Button size="small" onClick={() => setAll('B')}>All → B</Button>
-                  <Button size="small" onClick={() => setAssignOverrides({})}>Use Suggestions</Button>
+                  <Tooltip title={suggestedCount ? `Assign the ${suggestedCount} record(s) that have a suggestion` : 'No suggestions yet — add identifiers to the new items'}>
+                    <span><Button size="small" onClick={applySuggestions} disabled={!suggestedCount}>Apply Suggestions</Button></span>
+                  </Tooltip>
                 </>
               )}
             </Box>
+            {inventoryError && <Alert severity="warning" sx={{ m: 2, mb: 0 }}>{inventoryError}</Alert>}
             {inventory.length === 0 ? (
               <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>No inventory is linked to this catalog item.</Typography>
             ) : (
@@ -537,7 +627,8 @@ export default function SplitCatalogItem() {
                     {inventory.map(r => {
                       const sug = suggestions[r.item_id];
                       return (
-                        <TableRow key={`${r.inventory_table}-${r.item_id}`} hover>
+                        <TableRow key={`${r.inventory_table}-${r.item_id}`} hover
+                          sx={{ bgcolor: !assignmentOf(r) && inventoryError ? '#fff4e5' : undefined }}>
                           <TableCell sx={{ fontFamily: 'monospace' }}>{r.item_id}</TableCell>
                           <TableCell sx={{ maxWidth: 320 }}>
                             <Typography variant="body2" noWrap title={r.description || ''}>{r.description || '—'}</Typography>
@@ -555,10 +646,10 @@ export default function SplitCatalogItem() {
                           </TableCell>
                           <TableCell align="right">
                             <ToggleButtonGroup size="small" exclusive value={assignmentOf(r)}
-                              onChange={(_, v) => v && setAssignOverrides(prev => ({ ...prev, [r.item_id]: v }))}>
+                              onChange={(_, v) => v && assign({ [r.item_id]: v })}
+                              sx={!assignmentOf(r) && inventoryError ? { outline: 2, outlineColor: 'warning.main', borderRadius: 1 } : undefined}>
                               <ToggleButton value="A" sx={{ px: 1.5, '&.Mui-selected': { bgcolor: SIDE_BG.A, color: SIDE_COLOR.A } }}>Item A</ToggleButton>
                               <ToggleButton value="B" sx={{ px: 1.5, '&.Mui-selected': { bgcolor: SIDE_BG.B, color: SIDE_COLOR.B } }}>Item B</ToggleButton>
-                              <ToggleButton value="SOURCE" sx={{ px: 1.5 }}>Keep on Source</ToggleButton>
                             </ToggleButtonGroup>
                           </TableCell>
                         </TableRow>
@@ -588,8 +679,7 @@ export default function SplitCatalogItem() {
                 ))}
               </Box>
               <Typography variant="body2" sx={{ mb: 1 }}>
-                {source.catalog_code} keeps its details and history and will be marked <strong>Inactive</strong>
-                {counts.SOURCE > 0 ? `, with ${counts.SOURCE} inventory record${counts.SOURCE === 1 ? '' : 's'} still linked to it` : ''}.
+                {source.catalog_code} keeps its details and history, no longer has any inventory linked to it, and will be marked <strong>Inactive</strong>.
               </Typography>
               <Typography variant="body2" color="text.secondary">This can’t be undone.</Typography>
             </>
