@@ -126,6 +126,8 @@ export default function NewCatalogItem() {
   const { user } = useAuth();
   const { enqueueSnackbar } = useSnackbar();
   const duplicate = location.state?.duplicate || null;
+  // Values copied from the source item that only the editor shows.
+  const copied = duplicate?.draft || null;
 
   const [categoryTree, setCategoryTree] = useState([]);
   const [categoryId, setCategoryId] = useState(duplicate?.draft?.category_id || '');
@@ -270,6 +272,16 @@ export default function NewCatalogItem() {
         field_values: Object.entries(fieldValues)
           .filter(([, v]) => v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length))
           .map(([id, value]) => ({ field_definition_id: Number(id), value })),
+        // A copy also carries the editor-only values this page doesn't show.
+        ...(copied ? {
+          title_override: copied.title_override || null,
+          default_inventory_mode: copied.default_inventory_mode || null,
+          pricing: {
+            suggested_cost: copied.suggested_cost === '' ? null : copied.suggested_cost,
+            suggested_retail: copied.suggested_retail === '' ? null : copied.suggested_retail,
+            retails_new_for: copied.retails_new_for === '' ? null : copied.retails_new_for,
+          },
+        } : {}),
         employee_id: user?.id,
       });
       const created = res.data;
@@ -328,7 +340,9 @@ export default function NewCatalogItem() {
       <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 3, pb: 1.5, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
         {duplicate && (
           <Alert severity="info" sx={{ py: 0 }}>
-            Duplicated from {duplicate.sourceCode}. Identifiers, aliases and images were not copied.
+            Duplicated from {duplicate.sourceCode}.
+            {copied?.title_override ? <> Title Override “{copied.title_override}”, pricing and default inventory mode are copied too — change the title in the editor.</> : ' Pricing and default inventory mode are copied too.'}
+            {' '}Identifiers, aliases and images were not copied.
           </Alert>
         )}
 

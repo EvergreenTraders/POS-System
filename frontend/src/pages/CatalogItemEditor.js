@@ -687,12 +687,19 @@ function CatalogItemEditorInner({ itemId, duplicate }) {
   // copied UPC would collide with it once activated.
   const handleDuplicate = () => {
     const source = draftFromItem(item);
+    // The copy's title is the source's title marked " Copy", so it's obvious
+    // it still needs its own title.
+    const sourceTitle = (item.title_override || item.generated_title || item.model_name || '').trim();
     navigate('/catalog/items/new', {
       state: {
         duplicate: {
           sourceCode: item.catalog_code,
-          // Field values are copied; identifiers and aliases identify THIS item.
-          draft: { ...source, status: 'DRAFT', generated_title: '', title_override: '', aliases: [], identifiers: [] },
+          // Field values, pricing and default inventory mode are copied;
+          // identifiers and aliases identify THIS item, so they aren't.
+          draft: {
+            ...source, status: 'DRAFT', generated_title: '', aliases: [], identifiers: [],
+            title_override: sourceTitle ? `${sourceTitle} Copy`.slice(0, 300) : '',
+          },
           // New Catalog Item (the /catalog/items/new page) reads the copied values from here.
           fieldValues: Object.entries(source.field_values)
             .map(([id, value]) => ({ field_definition_id: Number(id), value })),
