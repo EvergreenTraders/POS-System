@@ -275,6 +275,10 @@ function CategoryManager() {
 
   // Field Library dialog (manage global field definitions)
   const [fieldLibraryOpen, setFieldLibraryOpen] = useState(false);
+  const [fieldLibrarySearch, setFieldLibrarySearch] = useState('');
+  // Delete / deactivate a Field Library field: null | { field, loading } | { field, usage, can_delete }
+  const [fieldDeleteState, setFieldDeleteState] = useState(null);
+  const [fieldDeleteBusy, setFieldDeleteBusy] = useState(false);
 
   // Fields tab row-actions menu (chevron)
   const [rowMenu, setRowMenu] = useState(null); // { anchorEl, row }
@@ -655,7 +659,7 @@ function CategoryManager() {
 
   // ── Add Field dialog ─────────────────────────────────────────────────
   const openAddFieldDialog = () => {
-    setAddFieldMode(allFieldDefs.length === 0 ? 'new' : 'existing');
+    setAddFieldMode(allFieldDefs.some(f => f.is_active !== false) ? 'existing' : 'new');
     setAddFieldId('');
     setNewFieldForm(BLANK_NEW_FIELD_FORM);
     setAddFieldOpen(true);
@@ -711,14 +715,48 @@ function CategoryManager() {
     }
   };
 
-  const handleDeleteFieldDef = async (fieldId, fieldKey) => {
+  // Field Library delete: a field nothing uses is deleted; a field in use is
+  // offered "Mark as Inactive" instead (the server refuses to delete it).
+  const openDeleteFieldDef = async (field) => {
+    setFieldDeleteState({ field, loading: true });
     try {
-      await axios.delete(`${API}/field-definitions/${fieldId}`);
-      setAllFieldDefs(prev => prev.filter(f => f.id !== fieldId));
-      setFieldsRows(prev => prev.filter(r => r.field_definition_id !== fieldId));
-      enqueueSnackbar(`Field '${fieldKey}' deleted from system`, { variant: 'success' });
+      const res = await axios.get(`${API}/field-definitions/${field.id}/usage`);
+      setFieldDeleteState({ field, usage: res.data.usage, can_delete: res.data.can_delete });
     } catch {
-      enqueueSnackbar('Failed to delete field definition', { variant: 'error' });
+      setFieldDeleteState(null);
+      enqueueSnackbar('Failed to check where this field is used', { variant: 'error' });
+    }
+  };
+
+  const handleDeleteFieldDef = async () => {
+    const { field } = fieldDeleteState;
+    setFieldDeleteBusy(true);
+    try {
+      await axios.delete(`${API}/field-definitions/${field.id}`);
+      setAllFieldDefs(prev => prev.filter(f => f.id !== field.id));
+      setFieldsRows(prev => prev.filter(r => r.field_definition_id !== field.id));
+      enqueueSnackbar(`Field '${field.label}' deleted`, { variant: 'success' });
+      setFieldDeleteState(null);
+    } catch (err) {
+      // In use after all (e.g. used since the check) — show the usage instead.
+      if (err.response?.status === 409) setFieldDeleteState({ field, usage: err.response.data.usage || [], can_delete: false });
+      enqueueSnackbar(err.response?.data?.error || 'Failed to delete field', { variant: 'error' });
+    } finally {
+      setFieldDeleteBusy(false);
+    }
+  };
+
+  const setFieldDefActive = async (field, isActive) => {
+    setFieldDeleteBusy(true);
+    try {
+      const res = await axios.patch(`${API}/field-definitions/${field.id}/status`, { is_active: isActive });
+      setAllFieldDefs(prev => prev.map(f => (f.id === field.id ? { ...f, ...res.data } : f)));
+      enqueueSnackbar(`'${field.label}' ${isActive ? 'reactivated' : 'marked inactive'}`, { variant: 'success' });
+      setFieldDeleteState(null);
+    } catch (err) {
+      enqueueSnackbar(err.response?.data?.error || 'Failed to update field', { variant: 'error' });
+    } finally {
+      setFieldDeleteBusy(false);
     }
   };
 
@@ -1967,10 +2005,10 @@ function CategoryManager() {
               size="small"
               fullWidth
             >
-              <ToggleButton value="existing" disabled={allFieldDefs.length === 0}>
+              <ToggleButton value="existing" disabled={!allFieldDefs.some(f => f.is_active !== false)}>
                 {(() => {
                   const usedIds = new Set(fieldsRows.map(r => r.field_definition_id));
-                  const available = allFieldDefs.filter(f => !usedIds.has(f.id));
+                  const available = allFieldDefs.filter(f => !usedIds.has(f.id) && f.is_active !== false);
                   return available.length === 0
                     ? 'Use existing field — none available'
                     : `Use existing field (${available.length})`;
@@ -1982,12 +2020,12 @@ function CategoryManager() {
 
           {addFieldMode === 'existing' && (() => {
             const usedIds = new Set(fieldsRows.map(r => r.field_definition_id));
-            const available = allFieldDefs.filter(f => !usedIds.has(f.id));
+            const available = allFieldDefs.filter(f => !usedIds.has(f.id) && f.is_active !== false);
             return (
               <Box sx={{ mb: 2 }}>
                 {available.length === 0 ? (
                   <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                    Every Field Library field is already used by this category (directly or inherited).
+                    Every active Field Library field is already used by this category (directly or inherited).
                     Switch to "Create new field" to add more.
                   </Typography>
                 ) : (
@@ -2083,37 +2121,122 @@ function CategoryManager() {
       <Dialog open={fieldLibraryOpen} onClose={() => setFieldLibraryOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Field Library</DialogTitle>
         <DialogContent dividers>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Reusable company-level field definitions. Deleting a field here removes it — and any category's use of
-            it — everywhere, not just this category.
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Reusable company-level field definitions. A field that isn’t used anywhere can be deleted; a field in use
+            can only be marked inactive (it keeps working where it’s used, but can’t be added to more categories).
           </Typography>
-          {allFieldDefs.length === 0 ? (
-            <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-              No fields defined yet. Use "Add Field" on a category's Fields tab to create the first one.
-            </Typography>
-          ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              {allFieldDefs.map(f => (
-                <Paper key={f.id} variant="outlined" sx={{ p: 1.25, display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>{f.label}</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
-                      {f.field_key}{f.unit_of_measure ? ` · ${f.unit_of_measure}` : ''}
-                    </Typography>
-                  </Box>
-                  <Chip label={FIELD_DATA_TYPES.find(t => t.value === f.data_type)?.label || f.data_type} size="small" variant="outlined" />
-                  <Tooltip title="Delete from system">
-                    <IconButton size="small" color="error" onClick={() => handleDeleteFieldDef(f.id, f.field_key)}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Paper>
-              ))}
-            </Box>
-          )}
+          <TextField
+            size="small" fullWidth autoFocus placeholder="Search fields by name, key or type"
+            value={fieldLibrarySearch}
+            onChange={e => setFieldLibrarySearch(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Escape' && fieldLibrarySearch) { e.stopPropagation(); setFieldLibrarySearch(''); } }}
+            sx={{ mb: 1.5 }}
+            InputProps={{
+              startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
+              endAdornment: fieldLibrarySearch ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setFieldLibrarySearch('')}><ClearIcon fontSize="small" /></IconButton>
+                </InputAdornment>
+              ) : null,
+            }}
+          />
+          {(() => {
+            const q = fieldLibrarySearch.trim().toLowerCase();
+            const typeLabel = (f) => FIELD_DATA_TYPES.find(t => t.value === f.data_type)?.label || f.data_type;
+            const shown = allFieldDefs
+              .filter(f => !q || [f.label, f.field_key, typeLabel(f), f.data_type].some(v => v && String(v).toLowerCase().includes(q)))
+              // Active first, then by label.
+              .sort((a, b) => (a.is_active === false) - (b.is_active === false) || a.label.localeCompare(b.label));
+            if (allFieldDefs.length === 0) {
+              return (
+                <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                  No fields defined yet. Use "Add Field" on a category's Fields tab to create the first one.
+                </Typography>
+              );
+            }
+            if (shown.length === 0) {
+              return <Typography variant="body2" color="text.secondary">No fields match “{fieldLibrarySearch.trim()}”.</Typography>;
+            }
+            return (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  {shown.length} of {allFieldDefs.length} field{allFieldDefs.length === 1 ? '' : 's'}
+                </Typography>
+                {shown.map(f => {
+                  const inactive = f.is_active === false;
+                  return (
+                    <Paper key={f.id} variant="outlined" sx={{ p: 1.25, display: 'flex', alignItems: 'center', gap: 1.5, opacity: inactive ? 0.7 : 1, bgcolor: inactive ? 'grey.50' : undefined }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontStyle: inactive ? 'italic' : 'normal' }}>{f.label}</Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {f.field_key}{f.unit_of_measure ? ` · ${f.unit_of_measure}` : ''}
+                        </Typography>
+                      </Box>
+                      {inactive && <Chip label="Inactive" size="small" />}
+                      <Chip label={typeLabel(f)} size="small" variant="outlined" />
+                      {inactive ? (
+                        <Button size="small" onClick={() => setFieldDefActive(f, true)} disabled={fieldDeleteBusy}>Reactivate</Button>
+                      ) : (
+                        <Tooltip title="Delete (or mark inactive if it’s in use)">
+                          <IconButton size="small" color="error" onClick={() => openDeleteFieldDef(f)}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </Paper>
+                  );
+                })}
+              </Box>
+            );
+          })()}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setFieldLibraryOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Field Library: delete or mark inactive ──────────────────────── */}
+      <Dialog open={!!fieldDeleteState} onClose={() => !fieldDeleteBusy && setFieldDeleteState(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>{fieldDeleteState?.can_delete === false ? 'Field is in use' : `Delete ${fieldDeleteState?.field.label || 'field'}?`}</DialogTitle>
+        <DialogContent>
+          {fieldDeleteState?.loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}><CircularProgress size={24} /></Box>
+          ) : fieldDeleteState?.can_delete ? (
+            <Typography variant="body2">
+              <strong>{fieldDeleteState.field.label}</strong> isn’t used by any category, division, catalog item or
+              inventory record, so it will be permanently deleted. This can’t be undone.
+            </Typography>
+          ) : fieldDeleteState ? (
+            <>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                <strong>{fieldDeleteState.field.label}</strong> can’t be deleted because it’s used by:
+              </Typography>
+              <Box component="ul" sx={{ mt: 0, mb: 1.5, pl: 3 }}>
+                {fieldDeleteState.usage.map(u => (
+                  <li key={u.key}><Typography variant="body2">{u.count} {u.label}</Typography></li>
+                ))}
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                Mark it inactive instead — everything that uses it keeps working, but it can’t be added to more
+                categories. You can reactivate it from the Field Library.
+              </Typography>
+            </>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFieldDeleteState(null)} disabled={fieldDeleteBusy}>Cancel</Button>
+          {fieldDeleteState?.can_delete && (
+            <Button color="error" variant="contained" onClick={handleDeleteFieldDef} disabled={fieldDeleteBusy}
+              startIcon={fieldDeleteBusy ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}>
+              Delete
+            </Button>
+          )}
+          {fieldDeleteState?.can_delete === false && (
+            <Button variant="contained" onClick={() => setFieldDefActive(fieldDeleteState.field, false)} disabled={fieldDeleteBusy}
+              startIcon={fieldDeleteBusy ? <CircularProgress size={16} color="inherit" /> : null}>
+              Mark as Inactive
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
     </Box>

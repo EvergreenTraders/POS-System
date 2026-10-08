@@ -28,7 +28,7 @@ app.use(cors({
     "http://pos-system-frontend.s3-website.ca-central-1.amazonaws.com",
   ],
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
@@ -16037,7 +16037,7 @@ app.get('/api/field-definitions', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, field_key, label, data_type, allowed_values,
-              unit_of_measure, normalizer, validation_rule, allow_free_type
+              unit_of_measure, normalizer, validation_rule, allow_free_type, is_active
        FROM category_field_definitions
        ORDER BY field_key ASC`
     );
@@ -16131,20 +16131,100 @@ app.put('/api/field-definitions/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/field-definitions/:id  — remove a field definition (and all its rules via CASCADE)
+// Everything that uses a field definition — a used field can't be deleted
+// (that would silently drop category rules and stored values), only made
+// inactive. hardgoods_attributes and title templates reference the field by
+// key / "field:<id>" token rather than a foreign key, so they're checked too.
+async function getFieldDefinitionUsage(fieldId) {
+  const defRes = await pool.query('SELECT id, field_key, label, is_active FROM category_field_definitions WHERE id = $1', [fieldId]);
+  if (!defRes.rows.length) return null;
+  const def = defRes.rows[0];
+  const count = async (sql, params) => parseInt((await pool.query(sql, params)).rows[0].n, 10);
+  // [key, singular label, plural label, count query]
+  const checks = [
+    ['categories', 'category using it', 'categories using it',
+      count('SELECT COUNT(DISTINCT category_id) AS n FROM category_field_rules WHERE field_definition_id = $1', [fieldId])],
+    ['divisions', 'division using it', 'divisions using it',
+      count('SELECT COUNT(DISTINCT division_id) AS n FROM division_field_rules WHERE field_definition_id = $1', [fieldId])],
+    ['catalog_values', 'catalog item value', 'catalog item values',
+      count('SELECT COUNT(*) AS n FROM catalog_item_field_values WHERE field_definition_id = $1', [fieldId])],
+    ['inventory_values', 'inventory record value', 'inventory record values',
+      count('SELECT COUNT(*) AS n FROM hardgoods_attributes WHERE field_key = $1', [def.field_key])],
+    ['title_templates', 'category Item Title template', 'category Item Title templates',
+      count(`SELECT COUNT(*) AS n FROM category_description_settings s
+             WHERE EXISTS (SELECT 1 FROM jsonb_array_elements_text(to_jsonb(s.title_template)) t
+                           WHERE t ~ ('(^|\\|)field:' || $1::text || '(\\||$)'))`, [fieldId])],
+  ];
+  const counts = await Promise.all(checks.map(c => c[3]));
+  const usage = checks
+    .map(([key, one, many], i) => ({ key, count: counts[i], label: counts[i] === 1 ? one : many }))
+    .filter(u => u.count > 0);
+  return { field: def, usage, can_delete: usage.length === 0 };
+}
+
+// GET /api/field-definitions/:id/usage
+app.get('/api/field-definitions/:id/usage', async (req, res) => {
+  try {
+    const result = await getFieldDefinitionUsage(parseInt(req.params.id, 10));
+    if (!result) return res.status(404).json({ error: 'Field definition not found' });
+    res.json(result);
+  } catch (err) {
+    console.error('Error checking field definition usage:', err);
+    res.status(500).json({ error: 'Failed to check field usage' });
+  }
+});
+
+// DELETE /api/field-definitions/:id — only a field that nothing uses can be
+// deleted; a used one is refused (409, with its usage) and should be made
+// inactive instead (PATCH …/status).
 app.delete('/api/field-definitions/:id', async (req, res) => {
   try {
-    const result = await pool.query(
-      'DELETE FROM category_field_definitions WHERE id = $1 RETURNING id, field_key',
-      [req.params.id]
-    );
-    if (!result.rows.length) return res.status(404).json({ error: 'Field definition not found' });
-    res.json({ message: `Field '${result.rows[0].field_key}' deleted` });
+    const fieldId = parseInt(req.params.id, 10);
+    const result = await getFieldDefinitionUsage(fieldId);
+    if (!result) return res.status(404).json({ error: 'Field definition not found' });
+    if (!result.can_delete) {
+      return res.status(409).json({
+        error: `'${result.field.label}' is in use — mark it inactive instead`,
+        usage: result.usage,
+      });
+    }
+    await pool.query('DELETE FROM category_field_definitions WHERE id = $1', [fieldId]);
+    res.json({ message: `Field '${result.field.field_key}' deleted` });
   } catch (err) {
     console.error('Error deleting field definition:', err);
     res.status(500).json({ error: 'Failed to delete field definition' });
   }
 });
+
+// PATCH /api/field-definitions/:id/status — Body: { is_active }. An inactive
+// field keeps working wherever it's already used (rules, stored values) but
+// can't be newly added to a category or division.
+app.patch('/api/field-definitions/:id/status', async (req, res) => {
+  try {
+    if (typeof req.body?.is_active !== 'boolean') return res.status(400).json({ error: 'is_active (true/false) is required' });
+    const result = await pool.query(
+      `UPDATE category_field_definitions SET is_active = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 RETURNING id, field_key, label, data_type, allowed_values, unit_of_measure,
+                               normalizer, validation_rule, allow_free_type, is_active`,
+      [req.body.is_active, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Field definition not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating field definition status:', err);
+    res.status(500).json({ error: 'Failed to update field status' });
+  }
+});
+
+// Rejects (400) adding an inactive field to a category / division. Returns true when it responded.
+async function rejectInactiveFieldDefinitions(res, fieldIds) {
+  const ids = [...new Set(fieldIds.map(Number).filter(Boolean))];
+  if (!ids.length) return false;
+  const r = await pool.query('SELECT label FROM category_field_definitions WHERE id = ANY($1) AND is_active = false', [ids]);
+  if (!r.rows.length) return false;
+  res.status(400).json({ error: `${r.rows.map(x => x.label).join(', ')} ${r.rows.length === 1 ? 'is' : 'are'} inactive in the Field Library — reactivate before adding` });
+  return true;
+}
 
 // ============================================================
 // CATEGORY FIELD RULES
@@ -16175,6 +16255,7 @@ app.get('/api/category-field-rules/:cat_id', async (req, res) => {
 app.post('/api/category-field-rules', async (req, res) => {
   try {
     if (req.body?.category_id && await rejectIfCategoryInactive(res, req.body.category_id)) return;
+    if (req.body?.action === 'ADD' && await rejectInactiveFieldDefinitions(res, [req.body.field_definition_id])) return;
     const {
       category_id, field_definition_id, action, scope,
       required_for_catalog, required_for_inventory, applies_to_modes,
@@ -16407,10 +16488,14 @@ app.put('/api/categories/:id/field-rules', async (req, res) => {
     if (await rejectIfCategoryInactive(res, categoryId)) return;
     const incoming = Array.isArray(req.body.rules) ? req.body.rules : [];
 
-    await client.query('BEGIN');
-
-    const currentRes = await client.query('SELECT id FROM category_field_rules WHERE category_id = $1', [categoryId]);
+    const currentRes = await client.query('SELECT id, field_definition_id FROM category_field_rules WHERE category_id = $1', [categoryId]);
     const currentIds = new Set(currentRes.rows.map(r => r.id));
+    // Inactive Field Library fields can't be newly ADDed (existing rules keep saving).
+    const currentFieldIds = new Set(currentRes.rows.map(r => r.field_definition_id));
+    const newlyAdded = incoming.filter(r => r.action === 'ADD' && !currentFieldIds.has(r.field_definition_id)).map(r => r.field_definition_id);
+    if (await rejectInactiveFieldDefinitions(res, newlyAdded)) return;
+
+    await client.query('BEGIN');
     const incomingIds = new Set(incoming.filter(r => r.id).map(r => r.id));
 
     // Delete first — a row being replaced (e.g. an OVERRIDE swapped for a
@@ -16489,6 +16574,11 @@ app.put('/api/divisions/:id/field-rules', async (req, res) => {
   try {
     const divisionId = parseInt(req.params.id, 10);
     const incoming = Array.isArray(req.body.rules) ? req.body.rules : [];
+
+    // Inactive Field Library fields can't be newly added (existing rules keep saving).
+    const existingFieldsRes = await client.query('SELECT field_definition_id FROM division_field_rules WHERE division_id = $1', [divisionId]);
+    const existingFieldIds = new Set(existingFieldsRes.rows.map(r => r.field_definition_id));
+    if (await rejectInactiveFieldDefinitions(res, incoming.map(r => r.field_definition_id).filter(id => !existingFieldIds.has(id)))) return;
 
     await client.query('BEGIN');
 
