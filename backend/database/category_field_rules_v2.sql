@@ -33,6 +33,10 @@ END $$;
 -- Multi-select, Date, Measurement).
 ALTER TABLE category_field_definitions ADD COLUMN IF NOT EXISTS allow_free_type BOOLEAN NOT NULL DEFAULT false;
 
+-- Field Library: a field in use can't be deleted, only made inactive. Inactive
+-- fields keep working where already used but can't be newly added.
+ALTER TABLE category_field_definitions ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+
 DO $$ BEGIN
   ALTER TABLE category_field_definitions DROP CONSTRAINT IF EXISTS category_field_definitions_data_type_check;
   ALTER TABLE category_field_definitions

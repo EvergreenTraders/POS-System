@@ -28,7 +28,7 @@ app.use(cors({
     "http://pos-system-frontend.s3-website.ca-central-1.amazonaws.com",
   ],
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
@@ -16037,7 +16037,7 @@ app.get('/api/field-definitions', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, field_key, label, data_type, allowed_values,
-              unit_of_measure, normalizer, validation_rule, allow_free_type
+              unit_of_measure, normalizer, validation_rule, allow_free_type, is_active
        FROM category_field_definitions
        ORDER BY field_key ASC`
     );
@@ -16131,20 +16131,100 @@ app.put('/api/field-definitions/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/field-definitions/:id  — remove a field definition (and all its rules via CASCADE)
+// Everything that uses a field definition — a used field can't be deleted
+// (that would silently drop category rules and stored values), only made
+// inactive. hardgoods_attributes and title templates reference the field by
+// key / "field:<id>" token rather than a foreign key, so they're checked too.
+async function getFieldDefinitionUsage(fieldId) {
+  const defRes = await pool.query('SELECT id, field_key, label, is_active FROM category_field_definitions WHERE id = $1', [fieldId]);
+  if (!defRes.rows.length) return null;
+  const def = defRes.rows[0];
+  const count = async (sql, params) => parseInt((await pool.query(sql, params)).rows[0].n, 10);
+  // [key, singular label, plural label, count query]
+  const checks = [
+    ['categories', 'category using it', 'categories using it',
+      count('SELECT COUNT(DISTINCT category_id) AS n FROM category_field_rules WHERE field_definition_id = $1', [fieldId])],
+    ['divisions', 'division using it', 'divisions using it',
+      count('SELECT COUNT(DISTINCT division_id) AS n FROM division_field_rules WHERE field_definition_id = $1', [fieldId])],
+    ['catalog_values', 'catalog item value', 'catalog item values',
+      count('SELECT COUNT(*) AS n FROM catalog_item_field_values WHERE field_definition_id = $1', [fieldId])],
+    ['inventory_values', 'inventory record value', 'inventory record values',
+      count('SELECT COUNT(*) AS n FROM hardgoods_attributes WHERE field_key = $1', [def.field_key])],
+    ['title_templates', 'category Item Title template', 'category Item Title templates',
+      count(`SELECT COUNT(*) AS n FROM category_description_settings s
+             WHERE EXISTS (SELECT 1 FROM jsonb_array_elements_text(to_jsonb(s.title_template)) t
+                           WHERE t ~ ('(^|\\|)field:' || $1::text || '(\\||$)'))`, [fieldId])],
+  ];
+  const counts = await Promise.all(checks.map(c => c[3]));
+  const usage = checks
+    .map(([key, one, many], i) => ({ key, count: counts[i], label: counts[i] === 1 ? one : many }))
+    .filter(u => u.count > 0);
+  return { field: def, usage, can_delete: usage.length === 0 };
+}
+
+// GET /api/field-definitions/:id/usage
+app.get('/api/field-definitions/:id/usage', async (req, res) => {
+  try {
+    const result = await getFieldDefinitionUsage(parseInt(req.params.id, 10));
+    if (!result) return res.status(404).json({ error: 'Field definition not found' });
+    res.json(result);
+  } catch (err) {
+    console.error('Error checking field definition usage:', err);
+    res.status(500).json({ error: 'Failed to check field usage' });
+  }
+});
+
+// DELETE /api/field-definitions/:id — only a field that nothing uses can be
+// deleted; a used one is refused (409, with its usage) and should be made
+// inactive instead (PATCH …/status).
 app.delete('/api/field-definitions/:id', async (req, res) => {
   try {
-    const result = await pool.query(
-      'DELETE FROM category_field_definitions WHERE id = $1 RETURNING id, field_key',
-      [req.params.id]
-    );
-    if (!result.rows.length) return res.status(404).json({ error: 'Field definition not found' });
-    res.json({ message: `Field '${result.rows[0].field_key}' deleted` });
+    const fieldId = parseInt(req.params.id, 10);
+    const result = await getFieldDefinitionUsage(fieldId);
+    if (!result) return res.status(404).json({ error: 'Field definition not found' });
+    if (!result.can_delete) {
+      return res.status(409).json({
+        error: `'${result.field.label}' is in use — mark it inactive instead`,
+        usage: result.usage,
+      });
+    }
+    await pool.query('DELETE FROM category_field_definitions WHERE id = $1', [fieldId]);
+    res.json({ message: `Field '${result.field.field_key}' deleted` });
   } catch (err) {
     console.error('Error deleting field definition:', err);
     res.status(500).json({ error: 'Failed to delete field definition' });
   }
 });
+
+// PATCH /api/field-definitions/:id/status — Body: { is_active }. An inactive
+// field keeps working wherever it's already used (rules, stored values) but
+// can't be newly added to a category or division.
+app.patch('/api/field-definitions/:id/status', async (req, res) => {
+  try {
+    if (typeof req.body?.is_active !== 'boolean') return res.status(400).json({ error: 'is_active (true/false) is required' });
+    const result = await pool.query(
+      `UPDATE category_field_definitions SET is_active = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 RETURNING id, field_key, label, data_type, allowed_values, unit_of_measure,
+                               normalizer, validation_rule, allow_free_type, is_active`,
+      [req.body.is_active, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Field definition not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating field definition status:', err);
+    res.status(500).json({ error: 'Failed to update field status' });
+  }
+});
+
+// Rejects (400) adding an inactive field to a category / division. Returns true when it responded.
+async function rejectInactiveFieldDefinitions(res, fieldIds) {
+  const ids = [...new Set(fieldIds.map(Number).filter(Boolean))];
+  if (!ids.length) return false;
+  const r = await pool.query('SELECT label FROM category_field_definitions WHERE id = ANY($1) AND is_active = false', [ids]);
+  if (!r.rows.length) return false;
+  res.status(400).json({ error: `${r.rows.map(x => x.label).join(', ')} ${r.rows.length === 1 ? 'is' : 'are'} inactive in the Field Library — reactivate before adding` });
+  return true;
+}
 
 // ============================================================
 // CATEGORY FIELD RULES
@@ -16175,6 +16255,7 @@ app.get('/api/category-field-rules/:cat_id', async (req, res) => {
 app.post('/api/category-field-rules', async (req, res) => {
   try {
     if (req.body?.category_id && await rejectIfCategoryInactive(res, req.body.category_id)) return;
+    if (req.body?.action === 'ADD' && await rejectInactiveFieldDefinitions(res, [req.body.field_definition_id])) return;
     const {
       category_id, field_definition_id, action, scope,
       required_for_catalog, required_for_inventory, applies_to_modes,
@@ -16407,10 +16488,14 @@ app.put('/api/categories/:id/field-rules', async (req, res) => {
     if (await rejectIfCategoryInactive(res, categoryId)) return;
     const incoming = Array.isArray(req.body.rules) ? req.body.rules : [];
 
-    await client.query('BEGIN');
-
-    const currentRes = await client.query('SELECT id FROM category_field_rules WHERE category_id = $1', [categoryId]);
+    const currentRes = await client.query('SELECT id, field_definition_id FROM category_field_rules WHERE category_id = $1', [categoryId]);
     const currentIds = new Set(currentRes.rows.map(r => r.id));
+    // Inactive Field Library fields can't be newly ADDed (existing rules keep saving).
+    const currentFieldIds = new Set(currentRes.rows.map(r => r.field_definition_id));
+    const newlyAdded = incoming.filter(r => r.action === 'ADD' && !currentFieldIds.has(r.field_definition_id)).map(r => r.field_definition_id);
+    if (await rejectInactiveFieldDefinitions(res, newlyAdded)) return;
+
+    await client.query('BEGIN');
     const incomingIds = new Set(incoming.filter(r => r.id).map(r => r.id));
 
     // Delete first — a row being replaced (e.g. an OVERRIDE swapped for a
@@ -16489,6 +16574,11 @@ app.put('/api/divisions/:id/field-rules', async (req, res) => {
   try {
     const divisionId = parseInt(req.params.id, 10);
     const incoming = Array.isArray(req.body.rules) ? req.body.rules : [];
+
+    // Inactive Field Library fields can't be newly added (existing rules keep saving).
+    const existingFieldsRes = await client.query('SELECT field_definition_id FROM division_field_rules WHERE division_id = $1', [divisionId]);
+    const existingFieldIds = new Set(existingFieldsRes.rows.map(r => r.field_definition_id));
+    if (await rejectInactiveFieldDefinitions(res, incoming.map(r => r.field_definition_id).filter(id => !existingFieldIds.has(id)))) return;
 
     await client.query('BEGIN');
 
@@ -17354,10 +17444,10 @@ app.delete('/api/categories/:id', async (req, res) => {
 // catalog_item_id but keep their own snapshotted values, so nothing here
 // rewrites existing inventory descriptions. The one exception is Category,
 // which is structural — moving a Catalog Item reclassifies linked inventory.
-// Search, Merge/Split, Intake and intelligence are deliberately out of scope.
+// Merge lives in POST /api/catalog-items/merge; Split and intelligence are later phases.
 // ============================================================
 
-// MERGED is only ever set by the (future) Merge workflow.
+// MERGED is only ever set by the Merge workflow (POST /api/catalog-items/merge).
 const CATALOG_SETTABLE_STATUSES = ['DRAFT', 'ACTIVE', 'INACTIVE'];
 const CATALOG_IDENTIFIER_TYPES = ['UPC', 'EAN', 'MANUFACTURER_MODEL', 'OTHER'];
 const CATALOG_IDENTIFIER_SOURCES = ['MANUAL', 'MANUFACTURER_API', 'EXTERNAL_PROVIDER'];
@@ -17727,7 +17817,7 @@ async function loadCatalogItem(catalogItemId) {
   if (!itemRes.rows.length) return null;
   const item = itemRes.rows[0];
 
-  const [identRes, aliasRes, valueMap, catalogFields, linkedRes, imageRes] = await Promise.all([
+  const [identRes, aliasRes, valueMap, catalogFields, linkedRes, imageRes, lineageRes] = await Promise.all([
     pool.query(
       `SELECT id, identifier_type, raw_value, normalized_value, is_active, source, provider, created_at, updated_at
        FROM catalog_item_identifiers WHERE catalog_item_id = $1
@@ -17753,6 +17843,20 @@ async function loadCatalogItem(catalogItemId) {
        LEFT JOIN employees e ON e.employee_id = i.uploaded_by
        WHERE i.catalog_item_id = $1
        ORDER BY i.is_primary DESC, i.created_at DESC, i.id DESC`,
+      [catalogItemId]
+    ),
+    // Merge/Split lineage in both directions (doc §6).
+    pool.query(
+      `SELECT 'INTO' AS direction, r.relationship_type, r.performed_at,
+              o.id, o.catalog_code, COALESCE(o.title_override, o.generated_title, o.model_name) AS title
+       FROM catalog_item_relationships r JOIN catalog_items o ON o.id = r.target_catalog_item_id
+       WHERE r.source_catalog_item_id = $1
+       UNION ALL
+       SELECT 'FROM', r.relationship_type, r.performed_at,
+              o.id, o.catalog_code, COALESCE(o.title_override, o.generated_title, o.model_name)
+       FROM catalog_item_relationships r JOIN catalog_items o ON o.id = r.source_catalog_item_id
+       WHERE r.target_catalog_item_id = $1
+       ORDER BY performed_at, id`,
       [catalogItemId]
     ),
   ]);
@@ -17788,6 +17892,11 @@ async function loadCatalogItem(catalogItemId) {
     field_values: fieldValues,
     images: imageRes.rows,
     primary_image: imageRes.rows.find(r => r.is_primary) || null,
+    lineage: {
+      // e.g. a MERGED source → the item it was merged into; a merge result → its sources.
+      into: lineageRes.rows.filter(r => r.direction === 'INTO'),
+      from: lineageRes.rows.filter(r => r.direction === 'FROM'),
+    },
     summary: {
       identifiers: identRes.rows.filter(r => r.is_active).length,
       aliases: aliasRes.rows.filter(r => r.is_active).length,
@@ -17833,6 +17942,39 @@ app.post('/api/catalog-items/generate-title', async (req, res) => {
   }
 });
 
+// Inserts the catalog_items row (inside the caller's transaction) and returns
+// its id. params: [company_id, category_id, status, make_brand, model_name,
+// title_override, default_inventory_mode, suggested_cost, suggested_retail,
+// retails_new_for, internal_notes, employee_id].
+// catalog_code (CAT-XXXXX) and friendly_code (CAT-{div}-{BRANDMODEL}) are
+// assigned once by the trg_catalog_items_assign_codes trigger
+// (catalog_items.sql, section 9). A concurrent insert could pick the same code
+// between the trigger's check and commit, so a collision on either unique
+// constraint is retried from a savepoint.
+async function insertCatalogItemRow(client, params) {
+  for (let attempt = 1; ; attempt++) {
+    await client.query('SAVEPOINT catalog_insert');
+    try {
+      const inserted = await client.query(
+        `INSERT INTO catalog_items
+           (company_id, category_id, status, make_brand, model_name, title_override,
+            default_inventory_mode, suggested_cost, suggested_retail, retails_new_for, internal_notes,
+            created_by, updated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
+         RETURNING id`,
+        params
+      );
+      await client.query('RELEASE SAVEPOINT catalog_insert');
+      return inserted.rows[0].id;
+    } catch (err) {
+      const codeCollision = err.code === '23505'
+        && ['catalog_items_catalog_code_key', 'uq_catalog_items_friendly_code'].includes(err.constraint);
+      if (!codeCollision || attempt >= 5) throw err;
+      await client.query('ROLLBACK TO SAVEPOINT catalog_insert');
+    }
+  }
+}
+
 // POST /api/catalog-items — create. Body: { category_id, make_brand, model_name,
 // title_override?, status? (DRAFT default), default_inventory_mode?, pricing?:
 // { suggested_cost, suggested_retail, retails_new_for }, internal_notes?,
@@ -17862,42 +18004,14 @@ app.post('/api/catalog-items', async (req, res) => {
     await assertInventoryModeExists(client, mode);
     const companyId = await getDefaultCompanyId(client);
 
-    // catalog_code (CAT-XXXXX) and friendly_code (CAT-{div}-{BRANDMODEL}) are
-    // assigned once by the trg_catalog_items_assign_codes trigger
-    // (catalog_items.sql, section 9). A concurrent insert could pick the same code
-    // between the trigger's check and commit, so a collision on either unique
-    // constraint is retried from a savepoint.
-    const insertParams = [
+    const catalogItemId = await insertCatalogItemRow(client, [
       companyId, categoryId, status, makeBrand, modelName,
       trimOrNull(b.title_override), mode,
       parseCatalogMoney(pricing.suggested_cost, 'Suggested Cost') ?? null,
       parseCatalogMoney(pricing.suggested_retail, 'Suggested Retail') ?? null,
       parseCatalogMoney(pricing.retails_new_for, 'Retails New For') ?? null,
       trimOrNull(b.internal_notes), employeeId,
-    ];
-    let catalogItemId;
-    for (let attempt = 1; ; attempt++) {
-      await client.query('SAVEPOINT catalog_insert');
-      try {
-        const inserted = await client.query(
-          `INSERT INTO catalog_items
-             (company_id, category_id, status, make_brand, model_name, title_override,
-              default_inventory_mode, suggested_cost, suggested_retail, retails_new_for, internal_notes,
-              created_by, updated_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
-           RETURNING id`,
-          insertParams
-        );
-        catalogItemId = inserted.rows[0].id;
-        await client.query('RELEASE SAVEPOINT catalog_insert');
-        break;
-      } catch (err) {
-        const codeCollision = err.code === '23505'
-          && ['catalog_items_catalog_code_key', 'uq_catalog_items_friendly_code'].includes(err.constraint);
-        if (!codeCollision || attempt >= 5) throw err;
-        await client.query('ROLLBACK TO SAVEPOINT catalog_insert');
-      }
-    }
+    ]);
 
     if (b.field_values !== undefined) await saveCatalogFieldValues(client, catalogItemId, categoryId, b.field_values);
     if (b.identifiers !== undefined) await saveCatalogIdentifiers(client, catalogItemId, companyId, b.identifiers);
@@ -17992,7 +18106,57 @@ async function catalogSearchScope(query) {
     statuses,
     categoryIds,
     makeBrand: trimOrNull(query.make_brand),
+    fieldFilters: await parseCatalogFieldFilters(query.field_filters, categoryId),
   };
+}
+
+// Advanced Search field filters: field_filters = JSON array of
+//   { field_definition_id, value }        TEXT (starts with) / ENUM / DATE (exact)
+//   { field_definition_id, values: [] }   MULTISELECT / ENUM (any of)
+//   { field_definition_id, min, max }     NUMBER / CURRENCY / MEASUREMENT / DATE (range)
+//   { field_definition_id, value: true|false }  BOOLEAN
+// Only Catalog-scope fields marked "Search" in Category Manager for the
+// selected category (or inherited by it) can be used, so a category is required.
+const CATALOG_NUMERIC_TYPES = ['NUMBER', 'CURRENCY', 'MEASUREMENT'];
+async function getCatalogSearchFields(categoryId) {
+  const { fields } = await resolveEffectiveFields(categoryId);
+  return fields.filter(f => f.scope === 'CATALOG' && f.search && f.required_at !== 'NOT_USED');
+}
+async function parseCatalogFieldFilters(raw, categoryId) {
+  if (raw === undefined || raw === null || raw === '') return [];
+  let list;
+  try { list = JSON.parse(raw); } catch (e) { throw new CatalogValidationError('field_filters must be a JSON array'); }
+  if (!Array.isArray(list)) throw new CatalogValidationError('field_filters must be a JSON array');
+  if (!list.length) return [];
+  if (!categoryId) throw new CatalogValidationError('Choose a Category to filter by its fields');
+  const searchable = Object.fromEntries((await getCatalogSearchFields(categoryId)).map(f => [f.field_definition_id, f]));
+  return list.slice(0, 20).map(fl => {
+    const field = searchable[parseInt(fl?.field_definition_id, 10)];
+    if (!field) throw new CatalogValidationError(`Field ${fl?.field_definition_id} is not a searchable field of this category`);
+    const label = field.label_override || field.field_label;
+    const out = { fieldId: field.field_definition_id, type: field.data_type };
+    if (field.data_type === 'BOOLEAN') {
+      out.bool = fl.value === true || fl.value === 'true';
+    } else if (CATALOG_NUMERIC_TYPES.includes(field.data_type) || (field.data_type === 'DATE' && (fl.min !== undefined || fl.max !== undefined))) {
+      const bound = (v) => {
+        if (v === undefined || v === null || v === '') return null;
+        if (field.data_type === 'DATE') return String(v);
+        const n = Number(v);
+        if (!Number.isFinite(n)) throw new CatalogValidationError(`${label}: enter a number`);
+        return n;
+      };
+      out.min = bound(fl.min);
+      out.max = bound(fl.max);
+      if (out.min === null && out.max === null) return null;
+    } else if (Array.isArray(fl.values)) {
+      out.values = fl.values.map(v => String(v).trim()).filter(Boolean);
+      if (!out.values.length) return null;
+    } else {
+      out.value = trimOrNull(fl.value);
+      if (out.value === null) return null;
+    }
+    return out;
+  }).filter(Boolean);
 }
 
 // WHERE fragment for the shared company/status/category/make filters on alias `ci`.
@@ -18008,6 +18172,39 @@ function catalogScopeWhere(scope, params) {
   if (scope.makeBrand) {
     params.push(scope.makeBrand);
     sql += ` AND lower(ci.make_brand) = lower($${params.length})`;
+  }
+  // Advanced Search field filters — each must match the item's Catalog value.
+  for (const f of scope.fieldFilters || []) {
+    params.push(f.fieldId);
+    const fieldParam = `$${params.length}`;
+    const has = (cond) => `EXISTS (SELECT 1 FROM catalog_item_field_values v
+      WHERE v.catalog_item_id = ci.id AND v.field_definition_id = ${fieldParam} AND ${cond})`;
+    if (f.type === 'BOOLEAN') {
+      // "No" also matches items where the box was simply never ticked.
+      sql += f.bool ? ` AND ${has("v.value = 'true'")}` : ` AND NOT ${has("v.value = 'true'")}`;
+    } else if (f.min !== undefined || f.max !== undefined) {
+      const isDate = f.type === 'DATE';
+      const value = isDate ? 'v.value' : 'v.value::numeric';
+      const conds = [isDate ? "v.value ~ '^\\d{4}-\\d{2}-\\d{2}'" : "v.value ~ '^\\s*-?\\d+(\\.\\d+)?\\s*$'"];
+      if (f.min !== null) { params.push(f.min); conds.push(`${value} >= $${params.length}`); }
+      if (f.max !== null) { params.push(f.max); conds.push(`${value} <= $${params.length}`); }
+      // CASE keeps the cast from running on rows that failed the format check.
+      sql += ` AND ${has(`CASE WHEN ${conds[0]} THEN ${conds.slice(1).join(' AND ') || 'true'} ELSE false END`)}`;
+    } else if (f.values) {
+      params.push(f.values.map(v => v.toLowerCase()));
+      const p = `$${params.length}::text[]`;
+      // Multi-select values are stored as a JSON array string.
+      sql += ` AND ${has(`CASE WHEN v.value LIKE '[%' THEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(v.value::jsonb) e WHERE lower(e) = ANY(${p}))
+        ELSE lower(v.value) = ANY(${p}) END`)}`;
+    } else if (f.type === 'TEXT') {
+      // "Starts with" (index-friendly prefix match; no leading wildcard).
+      params.push(`${f.value.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`);
+      sql += ` AND ${has(`lower(v.value) LIKE $${params.length}`)}`;
+    } else {
+      params.push(f.value.toLowerCase());
+      sql += ` AND ${has(`lower(v.value) = $${params.length}`)}`;
+    }
   }
   return sql;
 }
@@ -18081,6 +18278,7 @@ async function hydrateCatalogSearchResults(ids) {
 
 // GET /api/catalog-items/search?q=&mode=&division_id=&category_id=&make_brand=
 //     &status=&include_inactive=&browse_all=&sort=&page=&page_size=   (limit = page_size alias)
+//     &field_filters=[...]   (Advanced Search; see parseCatalogFieldFilters)
 app.get('/api/catalog-items/search', async (req, res) => {
   try {
     const startedAt = Date.now();
@@ -18235,6 +18433,42 @@ app.get('/api/catalog-items/makes', async (req, res) => {
   }
 });
 
+// GET /api/catalog-items/field-values?category_id=&field_definition_id=&status=&q=
+// Distinct existing values of one searchable field among catalog items in the
+// category subtree — suggestions for Advanced Search's text filters.
+app.get('/api/catalog-items/field-values', async (req, res) => {
+  try {
+    const categoryId = parseInt(req.query.category_id, 10);
+    const fieldId = parseInt(req.query.field_definition_id, 10);
+    if (!categoryId || !fieldId) throw new CatalogValidationError('category_id and field_definition_id are required');
+    if (!(await getCatalogSearchFields(categoryId)).some(f => f.field_definition_id === fieldId)) {
+      throw new CatalogValidationError('Not a searchable field of this category');
+    }
+    const scope = await catalogSearchScope({ category_id: categoryId, status: req.query.status || 'ALL' });
+    const params = [fieldId];
+    const where = catalogScopeWhere(scope, params);
+    let prefix = '';
+    const q = trimOrNull(req.query.q);
+    if (q) {
+      params.push(`${q.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`);
+      prefix = ` AND lower(v.value) LIKE $${params.length}`;
+    }
+    const result = await pool.query(
+      `SELECT MIN(v.value) AS value
+       FROM catalog_item_field_values v
+       JOIN catalog_items ci ON ci.id = v.catalog_item_id
+       WHERE v.field_definition_id = $1 AND v.value IS NOT NULL AND v.value NOT LIKE '[%'${prefix} AND ${where}
+       GROUP BY lower(v.value)
+       ORDER BY lower(MIN(v.value))
+       LIMIT 30`,
+      params
+    );
+    res.json(result.rows.map(r => r.value));
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to load field values');
+  }
+});
+
 // GET /api/catalog-items/:id — item + identifiers, aliases, Catalog field values, pricing, status
 app.get('/api/catalog-items/:id', async (req, res) => {
   try {
@@ -18246,18 +18480,37 @@ app.get('/api/catalog-items/:id', async (req, res) => {
   }
 });
 
-// GET /api/catalog-items/:id/history — audit trail, newest first
+// GET /api/catalog-items/:id/history — audit trail, newest first.
+// History follows lineage (doc §6 "Inventory/history from both sources links
+// to the merged item"): a merged item also returns the history of the items
+// it was merged from, and a split item the history of the item it was split
+// from — recursively, up to the moment of the merge/split. Those rows stay
+// stored on their own (retired) item so each source remains traceable;
+// inherited rows carry from_catalog_item_id / from_catalog_code.
 app.get('/api/catalog-items/:id/history', async (req, res) => {
   try {
     const catalogItemId = parseCatalogItemId(req.params.id);
     const result = await pool.query(
-      `SELECT a.id, a.action, a.changed_fields, a.performed_by, a.performed_at,
-              NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS performed_by_name
+      `WITH RECURSIVE lineage AS (
+         SELECT $1::int AS item_id, NULL::timestamp AS until
+         UNION
+         SELECT r.source_catalog_item_id,
+                LEAST(r.performed_at, COALESCE(l.until, r.performed_at))
+         FROM catalog_item_relationships r
+         JOIN lineage l ON r.target_catalog_item_id = l.item_id
+       )
+       SELECT a.id, a.action, a.changed_fields, a.performed_by, a.performed_at,
+              NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS performed_by_name,
+              CASE WHEN a.catalog_item_id <> $1 THEN a.catalog_item_id END AS from_catalog_item_id,
+              CASE WHEN a.catalog_item_id <> $1 THEN ci.catalog_code END AS from_catalog_code
        FROM catalog_item_audit a
+       JOIN (SELECT item_id, MAX(until) AS until FROM lineage GROUP BY item_id) l ON l.item_id = a.catalog_item_id
+       JOIN catalog_items ci ON ci.id = a.catalog_item_id
        LEFT JOIN employees e ON e.employee_id = a.performed_by
-       WHERE a.catalog_item_id = $1
+       -- An ancestor's history counts only up to (and including) the merge/split.
+       WHERE l.until IS NULL OR a.performed_at <= l.until
        ORDER BY a.performed_at DESC, a.id DESC
-       LIMIT 200`,
+       LIMIT 500`,
       [catalogItemId]
     );
     res.json(result.rows);
@@ -18444,6 +18697,469 @@ app.patch('/api/catalog-items/:id/status', async (req, res) => {
   }
 });
 
+// ============================================================
+// MERGE CATALOG ITEMS (doc §6) — combines two catalog items into ONE NEW
+// item. The user chooses the surviving values; the selected identifiers and
+// aliases move to the new item; both old titles become MERGED_TITLE aliases;
+// inventory/history linked to either source is re-linked to the new item
+// (and follows its Category — Category is structural); both sources are kept,
+// read-only, with status MERGED; lineage is recorded source → target.
+//
+// POST /api/catalog-items/merge — Body: {
+//   source_a_id, source_b_id,
+//   values_from: 'A' | 'B'   (whose Catalog field values / image / inventory
+//                             mode win; the other source fills the gaps),
+//   merged: { make_brand, model_name, category_id, status, title_override,
+//             internal_notes, pricing: { suggested_cost, suggested_retail, retails_new_for } },
+//   field_values: [{ field_definition_id, value }]  (the chosen Catalog field
+//                            values; omitted = values_from source, other fills blanks),
+//   identifier_ids: [...]    (identifier rows of either source to keep),
+//   alias_ids: [...]         (alias rows of either source to keep),
+//   employee_id }
+// ============================================================
+app.post('/api/catalog-items/merge', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const b = req.body || {};
+    const employeeId = parseEmployeeId(b.employee_id);
+    const aId = parseCatalogItemId(String(b.source_a_id ?? ''));
+    const bId = parseCatalogItemId(String(b.source_b_id ?? ''));
+    if (aId === bId) throw new CatalogValidationError('Choose two different catalog items to merge');
+
+    const m = b.merged || {};
+    const makeBrand = trimOrNull(m.make_brand);
+    const modelName = trimOrNull(m.model_name);
+    const categoryId = parseInt(m.category_id, 10);
+    const status = String(m.status || 'ACTIVE').toUpperCase();
+    const pricing = m.pricing || {};
+    if (!modelName) throw new CatalogValidationError('Model Name is required');
+    if (!makeBrand) throw new CatalogValidationError('Make / Brand is required');
+    if (!categoryId) throw new CatalogValidationError('Category is required');
+    if (!CATALOG_SETTABLE_STATUSES.includes(status)) {
+      throw new CatalogValidationError(`status must be one of: ${CATALOG_SETTABLE_STATUSES.join(', ')}`);
+    }
+    const toIds = (v) => [...new Set((Array.isArray(v) ? v : []).map(x => parseInt(x, 10)).filter(Number.isInteger))];
+    const identifierIds = toIds(b.identifier_ids);
+    const aliasIds = toIds(b.alias_ids);
+
+    await client.query('BEGIN');
+    // Lock both sources so a concurrent edit/merge can't interleave.
+    const srcRes = await client.query('SELECT * FROM catalog_items WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE', [[aId, bId]]);
+    const srcA = srcRes.rows.find(r => r.id === aId);
+    const srcB = srcRes.rows.find(r => r.id === bId);
+    if (!srcA || !srcB) throw new CatalogValidationError('Catalog item to merge not found', 404);
+    for (const s of [srcA, srcB]) {
+      if (s.status === 'MERGED') throw new CatalogValidationError(`${s.catalog_code} has already been merged`, 409);
+    }
+    if (srcA.company_id !== srcB.company_id) throw new CatalogValidationError('Only catalog items of the same company can be merged');
+    const companyId = srcA.company_id;
+
+    const category = await assertCategoryExists(client, categoryId);
+    if (!category.is_active) throw new CatalogValidationError('Cannot merge into an inactive category');
+
+    const primary = b.values_from === 'B' ? srcB : srcA;
+    const secondary = primary === srcA ? srcB : srcA;
+
+    const catalogItemId = await insertCatalogItemRow(client, [
+      companyId, categoryId, status, makeBrand, modelName,
+      trimOrNull(m.title_override), primary.default_inventory_mode ?? secondary.default_inventory_mode,
+      parseCatalogMoney(pricing.suggested_cost, 'Suggested Cost') ?? null,
+      parseCatalogMoney(pricing.suggested_retail, 'Suggested Retail') ?? null,
+      parseCatalogMoney(pricing.retails_new_for, 'Retails New For') ?? null,
+      trimOrNull(m.internal_notes), employeeId,
+    ]);
+
+    // Catalog field values. field_values = the surviving values the user chose
+    // field by field on the Merge screen (validated against the merged
+    // Category's Catalog fields; blanks are simply not stored). Without it
+    // (API callers), the values_from source wins and the other fills blanks.
+    if (Array.isArray(b.field_values)) {
+      await saveCatalogFieldValues(client, catalogItemId, categoryId,
+        b.field_values.filter(fv => serializeCatalogFieldValue(fv?.value) !== null));
+    } else {
+      const [catalogFields, primaryValues, secondaryValues] = await Promise.all([
+        getCatalogScopeFields(categoryId),
+        loadCatalogFieldValueMap(client, primary.id),
+        loadCatalogFieldValueMap(client, secondary.id),
+      ]);
+      for (const f of catalogFields) {
+        const value = primaryValues[f.field_definition_id] ?? secondaryValues[f.field_definition_id] ?? null;
+        if (value === null) continue;
+        await client.query(
+          'INSERT INTO catalog_item_field_values (catalog_item_id, field_definition_id, value) VALUES ($1, $2, $3)',
+          [catalogItemId, f.field_definition_id, value]
+        );
+      }
+    }
+
+    // Selected identifiers (deduplicated by type + normalized value).
+    const identRes = await client.query(
+      `SELECT * FROM catalog_item_identifiers
+       WHERE id = ANY($1::int[]) AND catalog_item_id = ANY($2::int[]) ORDER BY id`,
+      [identifierIds, [aId, bId]]
+    );
+    if (identRes.rows.length !== identifierIds.length) {
+      throw new CatalogValidationError('An identifier to keep does not belong to either source item');
+    }
+    for (const i of identRes.rows) {
+      await client.query(
+        `INSERT INTO catalog_item_identifiers
+           (catalog_item_id, company_id, identifier_type, raw_value, normalized_value, is_active, source, provider)
+         VALUES ($1, $2, $3, $4, $5, true, $6, $7)
+         ON CONFLICT (catalog_item_id, identifier_type, normalized_value) DO NOTHING`,
+        [catalogItemId, companyId, i.identifier_type, i.raw_value, i.normalized_value, i.source, i.provider]
+      );
+    }
+
+    // Selected aliases: staff search terms stay search terms; system titles
+    // (previous / merged titles) carry over as merged titles.
+    const aliasRes = await client.query(
+      `SELECT * FROM catalog_item_aliases
+       WHERE id = ANY($1::int[]) AND catalog_item_id = ANY($2::int[]) ORDER BY id`,
+      [aliasIds, [aId, bId]]
+    );
+    if (aliasRes.rows.length !== aliasIds.length) {
+      throw new CatalogValidationError('An alias to keep does not belong to either source item');
+    }
+    const addAlias = (alias, type) => client.query(
+      `INSERT INTO catalog_item_aliases (catalog_item_id, alias, normalized_alias, alias_type)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (catalog_item_id, normalized_alias) DO NOTHING`,
+      [catalogItemId, alias, normalizeCatalogAlias(alias), type]
+    );
+    for (const a of aliasRes.rows) {
+      await addAlias(a.alias, a.alias_type === 'SEARCH_TERM' ? 'SEARCH_TERM' : 'MERGED_TITLE');
+    }
+
+    const generatedTitle = await buildCatalogGeneratedTitle(
+      categoryId, makeBrand, modelName, await loadCatalogFieldValueMap(client, catalogItemId)
+    );
+    await client.query('UPDATE catalog_items SET generated_title = $1 WHERE id = $2', [generatedTitle, catalogItemId]);
+
+    // Old titles become aliases (doc §6), unless identical to the new title.
+    const newTitle = normalizeCatalogAlias(trimOrNull(m.title_override) || generatedTitle);
+    for (const s of [srcA, srcB]) {
+      const oldTitle = s.title_override || s.generated_title || s.model_name;
+      if (oldTitle && normalizeCatalogAlias(oldTitle) !== newTitle) await addAlias(oldTitle, 'MERGED_TITLE');
+    }
+
+    // Reference images: every image of both sources is kept (same stored
+    // file); the chosen source's primary stays primary.
+    await client.query(
+      `INSERT INTO catalog_item_images (catalog_item_id, image_url, is_primary, source, source_url, provider, uploaded_by, created_at)
+       SELECT $1, image_url, false, source, source_url, provider, uploaded_by, created_at
+       FROM catalog_item_images WHERE catalog_item_id = ANY($2::int[])`,
+      [catalogItemId, [aId, bId]]
+    );
+    const primaryImgRes = await client.query(
+      `SELECT image_url FROM catalog_item_images
+       WHERE catalog_item_id = ANY($1::int[]) AND is_primary
+       ORDER BY (catalog_item_id = $2) DESC LIMIT 1`,
+      [[aId, bId], primary.id]
+    );
+    if (primaryImgRes.rows.length) {
+      await client.query(
+        `UPDATE catalog_item_images SET is_primary = true
+         WHERE id = (SELECT id FROM catalog_item_images WHERE catalog_item_id = $1 AND image_url = $2 ORDER BY id LIMIT 1)`,
+        [catalogItemId, primaryImgRes.rows[0].image_url]
+      );
+    }
+
+    // Re-link inventory/history from both sources; it follows the merged
+    // Category. Snapshotted descriptive values are intentionally untouched.
+    const relinked = {};
+    for (const s of [srcA, srcB]) {
+      const hg = await client.query(
+        'UPDATE hardgoods SET catalog_item_id = $1, category_id = $2, updated_at = CURRENT_TIMESTAMP WHERE catalog_item_id = $3',
+        [catalogItemId, categoryId, s.id]
+      );
+      const jw = await client.query(
+        'UPDATE jewelry SET catalog_item_id = $1, category_id = $2 WHERE catalog_item_id = $3',
+        [catalogItemId, categoryId, s.id]
+      );
+      relinked[s.id] = hg.rowCount + jw.rowCount;
+    }
+
+    const codeRes = await client.query('SELECT catalog_code FROM catalog_items WHERE id = $1', [catalogItemId]);
+    const newCode = codeRes.rows[0].catalog_code;
+
+    // Retire both sources (kept, read-only, traceable) and record lineage.
+    for (const s of [srcA, srcB]) {
+      await client.query(
+        `UPDATE catalog_items SET status = 'MERGED', updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [employeeId, s.id]
+      );
+      await client.query(
+        `INSERT INTO catalog_item_relationships
+           (source_catalog_item_id, target_catalog_item_id, relationship_type, performed_by)
+         VALUES ($1, $2, 'MERGE', $3)`,
+        [s.id, catalogItemId, employeeId]
+      );
+      await writeCatalogAudit(client, s.id, 'MERGE', {
+        status: { from: s.status, to: 'MERGED' },
+        merged_into: { from: null, to: newCode },
+        relinked_inventory: { from: null, to: relinked[s.id] },
+      }, employeeId);
+    }
+
+    // Checked after the sources are retired, so their own UPCs don't count.
+    if (status === 'ACTIVE') await assertNoActiveIdentifierConflicts(client, catalogItemId);
+
+    await writeCatalogAudit(client, catalogItemId, 'MERGE', {
+      ...diffCatalogSnapshots({}, await snapshotCatalogItem(client, catalogItemId)),
+      merged_from: { from: null, to: [srcA.catalog_code, srcB.catalog_code] },
+      relinked_inventory: { from: null, to: relinked[aId] + relinked[bId] },
+    }, employeeId);
+
+    await client.query('COMMIT');
+    res.status(201).json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to merge catalog items');
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/catalog-items/:id/linked-inventory — inventory records (hardgoods +
+// jewelry, all stores) linked to a catalog item, lightweight, for the Split
+// screen's assignment list. match_values: the record's normalized part number
+// and attribute values, so the client can suggest which new item a record
+// belongs to by matching them against each new item's identifiers.
+app.get('/api/catalog-items/:id/linked-inventory', async (req, res) => {
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const result = await pool.query(
+      `SELECT 'hardgoods' AS inventory_table, h.item_id,
+              COALESCE(h.short_desc, h.long_desc, h.original_intake_description) AS description,
+              h.status, h.serial_number, h.part_number, h.created_at,
+              COALESCE((SELECT array_agg(a.field_value) FROM hardgoods_attributes a
+                        WHERE a.item_id = h.item_id AND a.field_value IS NOT NULL), '{}') AS attribute_values
+       FROM hardgoods h WHERE h.catalog_item_id = $1
+       UNION ALL
+       SELECT 'jewelry', j.item_id, COALESCE(j.short_desc, j.long_desc, j.original_intake_description),
+              j.status, j.serial_number, j.part_number, j.created_at, '{}'
+       FROM jewelry j WHERE j.catalog_item_id = $1
+       ORDER BY created_at DESC, item_id
+       LIMIT 1000`,
+      [catalogItemId]
+    );
+    res.json(result.rows.map(({ part_number, attribute_values, ...r }) => ({
+      ...r,
+      part_number,
+      match_values: [...new Set([part_number, ...(attribute_values || [])]
+        .map(normalizeCatalogIdentifier).filter(v => v.length >= 3))],
+    })));
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to fetch linked inventory');
+  }
+});
+
+// ============================================================
+// SPLIT CATALOG ITEM (doc §6) — creates two (or more) NEW catalog items from
+// a source. Each new item gets its own details, identifiers, aliases and
+// Catalog field values; it starts from the source's pricing, inventory mode
+// and reference images. EVERY inventory record linked to the source must be
+// reassigned to one of the new items — the split is refused otherwise. The
+// source keeps all of its data and history but is marked INACTIVE, so the new
+// items can take over its UPCs. Lineage is recorded source → each new item.
+//
+// POST /api/catalog-items/:id/split — Body: {
+//   items: [{ model_name, make_brand, category_id, status, internal_notes,
+//             identifiers: [{ identifier_type, raw_value }], aliases: [...],
+//             field_values: [{ field_definition_id, value }] (this item's own
+//             Catalog field values; omitted = copy the source's values) }, ...],
+//   inventory: [{ item_id, inventory_table: 'hardgoods'|'jewelry', target: <index into items> }]
+//              (one entry for every linked inventory record),
+//   employee_id }
+// ============================================================
+app.post('/api/catalog-items/:id/split', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const sourceId = parseCatalogItemId(req.params.id);
+    const b = req.body || {};
+    const employeeId = parseEmployeeId(b.employee_id);
+    const specs = Array.isArray(b.items) ? b.items : [];
+    if (specs.length < 2) throw new CatalogValidationError('A split needs at least two new items');
+    specs.forEach((s, i) => {
+      const label = `New Item ${String.fromCharCode(65 + i)}`;
+      if (!trimOrNull(s?.model_name)) throw new CatalogValidationError(`${label}: Model Name is required`);
+      if (!trimOrNull(s?.make_brand)) throw new CatalogValidationError(`${label}: Make / Brand is required`);
+      if (!parseInt(s?.category_id, 10)) throw new CatalogValidationError(`${label}: Category is required`);
+      const status = String(s.status || 'ACTIVE').toUpperCase();
+      if (!CATALOG_SETTABLE_STATUSES.includes(status)) {
+        throw new CatalogValidationError(`${label}: status must be one of: ${CATALOG_SETTABLE_STATUSES.join(', ')}`);
+      }
+    });
+    // A UPC / EAN may go to only one of the new items.
+    const barcodeOwner = {};
+    specs.forEach((s, i) => {
+      for (const ident of Array.isArray(s.identifiers) ? s.identifiers : []) {
+        const type = String(ident?.identifier_type || '').toUpperCase();
+        if (!CATALOG_UNIQUE_IDENTIFIER_TYPES.includes(type)) continue;
+        const key = `${type}:${normalizeCatalogIdentifier(ident.raw_value)}`;
+        if (barcodeOwner[key] !== undefined && barcodeOwner[key] !== i) {
+          throw new CatalogValidationError(
+            `${type} ${ident.raw_value} is on both New Item ${String.fromCharCode(65 + barcodeOwner[key])} and New Item ${String.fromCharCode(65 + i)} — keep it on one`
+          );
+        }
+        barcodeOwner[key] = i;
+      }
+    });
+    const moves = Array.isArray(b.inventory) ? b.inventory : [];
+    for (const mv of moves) {
+      if (!['hardgoods', 'jewelry'].includes(mv?.inventory_table) || !mv?.item_id
+          || !Number.isInteger(mv.target) || mv.target < 0 || mv.target >= specs.length) {
+        throw new CatalogValidationError('Invalid inventory assignment');
+      }
+    }
+
+    await client.query('BEGIN');
+    const srcRes = await client.query('SELECT * FROM catalog_items WHERE id = $1 FOR UPDATE', [sourceId]);
+    if (!srcRes.rows.length) throw new CatalogValidationError('Catalog item not found', 404);
+    const source = srcRes.rows[0];
+    if (source.status === 'MERGED') throw new CatalogValidationError('Merged catalog items are read-only', 409);
+
+    // Retire the source first so the new items can take over its UPCs.
+    if (source.status !== 'INACTIVE') {
+      await client.query(
+        `UPDATE catalog_items SET status = 'INACTIVE', updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [employeeId, sourceId]
+      );
+    }
+
+    const sourceValues = await loadCatalogFieldValueMap(client, sourceId);
+    const sourceTitle = source.title_override || source.generated_title || source.model_name;
+    const created = [];
+    for (const [index, s] of specs.entries()) {
+      const label = `New Item ${String.fromCharCode(65 + index)}`;
+      const categoryId = parseInt(s.category_id, 10);
+      const status = String(s.status || 'ACTIVE').toUpperCase();
+      const makeBrand = trimOrNull(s.make_brand);
+      const modelName = trimOrNull(s.model_name);
+      const category = await assertCategoryExists(client, categoryId);
+      if (!category.is_active) throw new CatalogValidationError(`${label}: cannot use an inactive category`);
+
+      const id = await insertCatalogItemRow(client, [
+        source.company_id, categoryId, status, makeBrand, modelName,
+        null, source.default_inventory_mode,
+        source.suggested_cost, source.suggested_retail, source.retails_new_for,
+        trimOrNull(s.internal_notes), employeeId,
+      ]);
+
+      try {
+        // Catalog field values: this item's own (validated against its
+        // Category), or — when not sent — the source's values that apply.
+        if (Array.isArray(s.field_values)) {
+          await saveCatalogFieldValues(client, id, categoryId,
+            s.field_values.filter(fv => serializeCatalogFieldValue(fv?.value) !== null));
+        } else {
+          for (const f of await getCatalogScopeFields(categoryId)) {
+            const value = sourceValues[f.field_definition_id];
+            if (value === undefined || value === null) continue;
+            await client.query(
+              'INSERT INTO catalog_item_field_values (catalog_item_id, field_definition_id, value) VALUES ($1, $2, $3)',
+              [id, f.field_definition_id, value]
+            );
+          }
+        }
+        await saveCatalogIdentifiers(client, id, source.company_id, Array.isArray(s.identifiers) ? s.identifiers : []);
+        await saveCatalogAliases(client, id, Array.isArray(s.aliases) ? s.aliases : []);
+      } catch (err) {
+        if (err instanceof CatalogValidationError) err.message = `${label}: ${err.message}`;
+        throw err;
+      }
+
+      const generatedTitle = await buildCatalogGeneratedTitle(categoryId, makeBrand, modelName, await loadCatalogFieldValueMap(client, id));
+      await client.query('UPDATE catalog_items SET generated_title = $1 WHERE id = $2', [generatedTitle, id]);
+      // The source's title stays findable from each new item.
+      if (sourceTitle && normalizeCatalogAlias(sourceTitle) !== normalizeCatalogAlias(generatedTitle)) {
+        await client.query(
+          `INSERT INTO catalog_item_aliases (catalog_item_id, alias, normalized_alias, alias_type)
+           VALUES ($1, $2, $3, 'PREVIOUS_TITLE') ON CONFLICT (catalog_item_id, normalized_alias) DO NOTHING`,
+          [id, sourceTitle, normalizeCatalogAlias(sourceTitle)]
+        );
+      }
+
+      // Reference images (same stored files); the source's primary stays primary.
+      await client.query(
+        `INSERT INTO catalog_item_images (catalog_item_id, image_url, is_primary, source, source_url, provider, uploaded_by, created_at)
+         SELECT $1, image_url, is_primary, source, source_url, provider, uploaded_by, created_at
+         FROM catalog_item_images WHERE catalog_item_id = $2`,
+        [id, sourceId]
+      );
+
+      if (status === 'ACTIVE') {
+        try {
+          await assertNoActiveIdentifierConflicts(client, id);
+        } catch (err) {
+          if (err instanceof CatalogValidationError) err.message = `${label}: ${err.message}`;
+          throw err;
+        }
+      }
+      created.push({ id, categoryId, relinked: 0 });
+    }
+
+    // Reassign the chosen inventory records (only ones linked to the source).
+    for (const mv of moves) {
+      const target = created[mv.target];
+      const result = mv.inventory_table === 'hardgoods'
+        ? await client.query(
+          'UPDATE hardgoods SET catalog_item_id = $1, category_id = $2, updated_at = CURRENT_TIMESTAMP WHERE item_id = $3 AND catalog_item_id = $4',
+          [target.id, target.categoryId, mv.item_id, sourceId])
+        : await client.query(
+          'UPDATE jewelry SET catalog_item_id = $1, category_id = $2 WHERE item_id = $3 AND catalog_item_id = $4',
+          [target.id, target.categoryId, mv.item_id, sourceId]);
+      if (!result.rowCount) throw new CatalogValidationError(`Inventory ${mv.item_id} is not linked to this catalog item`);
+      target.relinked += 1;
+    }
+    // Nothing may stay on the source: every record must go to a new item.
+    const leftRes = await client.query(
+      `SELECT (SELECT COUNT(*) FROM hardgoods WHERE catalog_item_id = $1)
+            + (SELECT COUNT(*) FROM jewelry   WHERE catalog_item_id = $1) AS n`,
+      [sourceId]
+    );
+    const left = parseInt(leftRes.rows[0].n, 10);
+    if (left > 0) {
+      throw new CatalogValidationError(
+        `${left} linked inventory record${left === 1 ? ' is' : 's are'} not assigned — assign every record to New Item A or B`
+      );
+    }
+
+    const codesRes = await client.query('SELECT id, catalog_code FROM catalog_items WHERE id = ANY($1::int[])', [created.map(c => c.id)]);
+    const codeById = Object.fromEntries(codesRes.rows.map(r => [r.id, r.catalog_code]));
+    for (const c of created) {
+      await client.query(
+        `INSERT INTO catalog_item_relationships (source_catalog_item_id, target_catalog_item_id, relationship_type, performed_by)
+         VALUES ($1, $2, 'SPLIT', $3)`,
+        [sourceId, c.id, employeeId]
+      );
+      await writeCatalogAudit(client, c.id, 'SPLIT', {
+        ...diffCatalogSnapshots({}, await snapshotCatalogItem(client, c.id)),
+        split_from: { from: null, to: source.catalog_code },
+        relinked_inventory: { from: null, to: c.relinked },
+      }, employeeId);
+    }
+    const moved = created.reduce((n, c) => n + c.relinked, 0);
+    await writeCatalogAudit(client, sourceId, 'SPLIT', {
+      ...(source.status !== 'INACTIVE' ? { status: { from: source.status, to: 'INACTIVE' } } : {}),
+      split_into: { from: null, to: created.map(c => codeById[c.id]) },
+      relinked_inventory: { from: null, to: moved },
+    }, employeeId);
+
+    await client.query('COMMIT');
+    res.status(201).json({
+      source_id: sourceId,
+      items: await Promise.all(created.map(c => loadCatalogItem(c.id))),
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to split catalog item');
+  } finally {
+    client.release();
+  }
+});
+
 // POST /api/catalog-items/:id/images — add a reference image (multipart:
 // image=<file>, source=UPLOAD|CAMERA, make_primary=true|false, employee_id).
 // make_primary (default true): the new image becomes primary; the previous
@@ -18507,6 +19223,77 @@ app.post('/api/catalog-items/:id/images', uploadCatalogImage, async (req, res) =
     // Don't leave an orphaned file behind when the database write failed.
     if (writtenPath) fs.promises.unlink(writtenPath).catch(() => {});
     sendCatalogError(res, err, 'Failed to save reference image');
+  } finally {
+    client.release();
+  }
+});
+
+// Locks a non-merged catalog item and returns the image row (Images tab).
+async function lockCatalogImage(client, catalogItemId, imageId) {
+  const itemRes = await client.query('SELECT status FROM catalog_items WHERE id = $1 FOR UPDATE', [catalogItemId]);
+  if (!itemRes.rows.length) throw new CatalogValidationError('Catalog item not found', 404);
+  if (itemRes.rows[0].status === 'MERGED') throw new CatalogValidationError('Merged catalog items are read-only', 409);
+  const imgRes = await client.query(
+    'SELECT * FROM catalog_item_images WHERE id = $1 AND catalog_item_id = $2',
+    [imageId, catalogItemId]
+  );
+  if (!imgRes.rows.length) throw new CatalogValidationError('Image not found', 404);
+  return imgRes.rows[0];
+}
+
+// PATCH /api/catalog-items/:id/images/:imageId/primary — make an existing
+// image the primary reference image (the previous primary is kept). Body: { employee_id }
+app.patch('/api/catalog-items/:id/images/:imageId/primary', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const imageId = parseInt(req.params.imageId, 10);
+    const employeeId = parseEmployeeId(req.body?.employee_id);
+    await client.query('BEGIN');
+    const image = await lockCatalogImage(client, catalogItemId, imageId);
+    if (!image.is_primary) {
+      const prev = await client.query(
+        'UPDATE catalog_item_images SET is_primary = false WHERE catalog_item_id = $1 AND is_primary RETURNING image_url',
+        [catalogItemId]
+      );
+      await client.query('UPDATE catalog_item_images SET is_primary = true WHERE id = $1', [imageId]);
+      await client.query('UPDATE catalog_items SET updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [employeeId, catalogItemId]);
+      await writeCatalogAudit(client, catalogItemId, 'UPDATE', {
+        reference_image: { from: prev.rows[0]?.image_url || null, to: image.image_url, source: image.source },
+      }, employeeId);
+    }
+    await client.query('COMMIT');
+    res.json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to set primary image');
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/catalog-items/:id/images/:imageId?employee_id= — remove an image
+// from this catalog item. Only the link is removed: the stored file is kept,
+// since merged / split items share the same files. Removing the primary
+// leaves the item without a primary until another is chosen.
+app.delete('/api/catalog-items/:id/images/:imageId', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const catalogItemId = parseCatalogItemId(req.params.id);
+    const imageId = parseInt(req.params.imageId, 10);
+    const employeeId = parseEmployeeId(req.query.employee_id ?? req.body?.employee_id);
+    await client.query('BEGIN');
+    const image = await lockCatalogImage(client, catalogItemId, imageId);
+    await client.query('DELETE FROM catalog_item_images WHERE id = $1', [imageId]);
+    await client.query('UPDATE catalog_items SET updated_by = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [employeeId, catalogItemId]);
+    await writeCatalogAudit(client, catalogItemId, 'UPDATE', {
+      [image.is_primary ? 'reference_image' : 'additional_image']: { from: image.image_url, to: null, source: image.source },
+    }, employeeId);
+    await client.query('COMMIT');
+    res.json(await loadCatalogItem(catalogItemId));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    sendCatalogError(res, err, 'Failed to remove image');
   } finally {
     client.release();
   }

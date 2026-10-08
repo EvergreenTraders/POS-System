@@ -3,20 +3,15 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import {
   Alert,
-  Autocomplete,
   Box,
   Breadcrumbs,
   Button,
-  Checkbox,
   Chip,
   CircularProgress,
   FormControl,
-  FormControlLabel,
   FormHelperText,
   IconButton,
-  InputAdornment,
   InputBase,
-  InputLabel,
   Link,
   ListSubheader,
   MenuItem,
@@ -36,6 +31,7 @@ import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import { useSnackbar } from 'notistack';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
+import CatalogFieldInput, { catalogScopeFields } from '../components/CatalogFieldInput';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import CameraCaptureDialog, { ImageFileInput } from '../components/CameraCaptureDialog';
 
@@ -46,7 +42,6 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 // Make / Model are core Catalog Item columns, so same-keyed Field Library
 // fields aren't shown again as category fields.
-const CORE_FIELD_KEYS = ['brand', 'model'];
 
 // Same normalization the server uses for identifier search keys.
 const normalizeIdentifier = (raw) => String(raw || '').trim().toUpperCase().replace(/[\s\-_./]/g, '');
@@ -102,69 +97,6 @@ function ChipListInput({ label, values, onChange, placeholder, validate, disable
   );
 }
 
-// ── One Catalog-scope category field, rendered by its Field Library type ──
-function CatalogFieldInput({ field, value, onChange }) {
-  const label = field.label_override || field.field_label || field.field_key;
-  const helper = field.help_text || undefined;
-  const options = Array.isArray(field.allowed_values) ? field.allowed_values : [];
-
-  switch (field.data_type) {
-    case 'NUMBER':
-    case 'CURRENCY':
-    case 'MEASUREMENT':
-      return (
-        <TextField fullWidth size="small" type="number" label={label} value={value ?? ''} helperText={helper}
-          onChange={e => onChange(e.target.value)}
-          InputProps={{
-            startAdornment: field.data_type === 'CURRENCY' ? <InputAdornment position="start">$</InputAdornment> : undefined,
-            endAdornment: field.unit_of_measure ? <InputAdornment position="end">{field.unit_of_measure}</InputAdornment> : undefined,
-          }} />
-      );
-    case 'ENUM':
-      if (field.allow_free_type) {
-        return (
-          <Autocomplete freeSolo size="small" options={options} value={value || null}
-            onChange={(_, v) => onChange(v || '')}
-            onInputChange={(_, v, reason) => { if (reason === 'input') onChange(v); }}
-            renderInput={params => <TextField {...params} label={label} helperText={helper} />} />
-        );
-      }
-      return (
-        <FormControl fullWidth size="small">
-          <InputLabel>{label}</InputLabel>
-          <Select label={label} value={value ?? ''} onChange={e => onChange(e.target.value)}>
-            <MenuItem value=""><em>Not specified</em></MenuItem>
-            {options.map(o => <MenuItem key={o} value={o}>{o}</MenuItem>)}
-          </Select>
-          {helper && <FormHelperText>{helper}</FormHelperText>}
-        </FormControl>
-      );
-    case 'MULTISELECT':
-      return (
-        <Autocomplete multiple freeSolo={!!field.allow_free_type} size="small" options={options}
-          value={Array.isArray(value) ? value : []}
-          onChange={(_, v) => onChange(v)}
-          renderInput={params => <TextField {...params} label={label} helperText={helper} />} />
-      );
-    case 'BOOLEAN':
-      return (
-        <FormControlLabel sx={{ height: 40 }} label={label}
-          control={<Checkbox checked={value === true || value === 'true'}
-            onChange={e => onChange(e.target.checked ? true : null)} />} />
-      );
-    case 'DATE':
-      return (
-        <TextField fullWidth size="small" type="date" label={label} value={value ?? ''} helperText={helper}
-          InputLabelProps={{ shrink: true }} onChange={e => onChange(e.target.value)} />
-      );
-    default:
-      return (
-        <TextField fullWidth size="small" label={label} value={value ?? ''} helperText={helper}
-          onChange={e => onChange(e.target.value)} />
-      );
-  }
-}
-
 // Compact section card — the page is laid out to fit one screen.
 function Section({ title, subtitle, children, sx }) {
   return (
@@ -194,6 +126,8 @@ export default function NewCatalogItem() {
   const { user } = useAuth();
   const { enqueueSnackbar } = useSnackbar();
   const duplicate = location.state?.duplicate || null;
+  // Values copied from the source item that only the editor shows.
+  const copied = duplicate?.draft || null;
 
   const [categoryTree, setCategoryTree] = useState([]);
   const [categoryId, setCategoryId] = useState(duplicate?.draft?.category_id || '');
@@ -244,8 +178,7 @@ export default function NewCatalogItem() {
     axios.get(`${API}/categories/${categoryId}/effective-fields`)
       .then(res => {
         if (cancelled) return;
-        const catalogFields = (res.data?.fields || []).filter(f =>
-          f.scope === 'CATALOG' && f.required_at !== 'NOT_USED' && !CORE_FIELD_KEYS.includes(f.field_key));
+        const catalogFields = catalogScopeFields(res.data);
         setFields(catalogFields);
         const next = {};
         let dropped = 0;
@@ -339,6 +272,16 @@ export default function NewCatalogItem() {
         field_values: Object.entries(fieldValues)
           .filter(([, v]) => v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length))
           .map(([id, value]) => ({ field_definition_id: Number(id), value })),
+        // A copy also carries the editor-only values this page doesn't show.
+        ...(copied ? {
+          title_override: copied.title_override || null,
+          default_inventory_mode: copied.default_inventory_mode || null,
+          pricing: {
+            suggested_cost: copied.suggested_cost === '' ? null : copied.suggested_cost,
+            suggested_retail: copied.suggested_retail === '' ? null : copied.suggested_retail,
+            retails_new_for: copied.retails_new_for === '' ? null : copied.retails_new_for,
+          },
+        } : {}),
         employee_id: user?.id,
       });
       const created = res.data;
@@ -397,7 +340,9 @@ export default function NewCatalogItem() {
       <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 3, pb: 1.5, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
         {duplicate && (
           <Alert severity="info" sx={{ py: 0 }}>
-            Duplicated from {duplicate.sourceCode}. Identifiers, aliases and images were not copied.
+            Duplicated from {duplicate.sourceCode}.
+            {copied?.title_override ? <> Title Override “{copied.title_override}”, pricing and default inventory mode are copied too — change the title in the editor.</> : ' Pricing and default inventory mode are copied too.'}
+            {' '}Identifiers, aliases and images were not copied.
           </Alert>
         )}
 

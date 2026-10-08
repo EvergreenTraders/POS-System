@@ -13,6 +13,7 @@ import {
   IconButton,
   InputAdornment,
   InputLabel,
+  Link,
   ListSubheader,
   MenuItem,
   Pagination,
@@ -37,14 +38,18 @@ import CloseIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
 import ImageNotSupportedOutlinedIcon from '@mui/icons-material/ImageNotSupportedOutlined';
+import CallMergeIcon from '@mui/icons-material/CallMerge';
+import CallSplitIcon from '@mui/icons-material/CallSplit';
 import { useSnackbar } from 'notistack';
 import config from '../config';
 import { flattenCategoryTree } from '../utils/categoryTree';
+import CatalogFieldFilters, { useSearchableFields, serializeFieldFilters, activeFilterCount } from './CatalogFieldFilters';
 
 const API = config.apiUrl;
 // Stored image paths are server-relative (/uploads/…); the API base ends in /api.
@@ -105,6 +110,8 @@ const DEFAULT_STATE = {
   page: 1,
   pageSize: 25,
   selectedId: null,
+  advancedOpen: false,
+  fieldFilters: {}, // Advanced Search: { [field_definition_id]: { type, value | values | min / max } }
 };
 const loadSavedState = () => {
   try {
@@ -157,8 +164,9 @@ function IdentifierList({ label, values }) {
 // ─────────────────────────────────────────────────────────────────────────
 // Catalog Manager — search / browse Catalog Items (server-side, paginated),
 // preview the selected item, then "Open in Catalog Item Editor" or create a
-// "New Catalog Item". Intelligence, Advanced Search and Suggest New Item
-// are not built yet and are shown as unavailable.
+// "New Catalog Item". Advanced Search filters by Category, Make / Brand,
+// Status and the category's fields marked "Search" in Category Manager.
+// Intelligence and Suggest New Item are not built yet (shown as unavailable).
 // ─────────────────────────────────────────────────────────────────────────
 export default function CatalogManager() {
   const navigate = useNavigate();
@@ -175,6 +183,8 @@ export default function CatalogManager() {
   const [page, setPage] = useState(saved.page);
   const [pageSize, setPageSize] = useState(saved.pageSize);
   const [selectedId, setSelectedId] = useState(saved.selectedId);
+  const [advancedOpen, setAdvancedOpen] = useState(saved.advancedOpen);
+  const [fieldFilters, setFieldFilters] = useState(saved.fieldFilters || {});
 
   const [categoryTree, setCategoryTree] = useState([]);
   const [makes, setMakes] = useState([]);
@@ -197,10 +207,15 @@ export default function CatalogManager() {
   useEffect(() => {
     try {
       sessionStorage.setItem(STATE_KEY, JSON.stringify({
-        tab, mode, query, categoryId, make, status, sort, page, pageSize, selectedId,
+        tab, mode, query, categoryId, make, status, sort, page, pageSize, selectedId, advancedOpen, fieldFilters,
       }));
     } catch (e) { /* storage unavailable — state just won't persist */ }
-  }, [tab, mode, query, categoryId, make, status, sort, page, pageSize, selectedId]);
+  }, [tab, mode, query, categoryId, make, status, sort, page, pageSize, selectedId, advancedOpen, fieldFilters]);
+
+  // Advanced Search: the selected category's fields marked "Search".
+  const searchableFields = useSearchableFields(categoryId || null);
+  const fieldFilterCount = activeFilterCount(fieldFilters);
+  const fieldFiltersParam = serializeFieldFilters(fieldFilters);
 
   useEffect(() => {
     axios.get(`${API}/categories/tree`)
@@ -235,6 +250,8 @@ export default function CatalogManager() {
           category_id: params.categoryId || undefined,
           make_brand: params.make || undefined,
           status: params.status,
+          // Field filters need a category; they're cleared whenever it changes.
+          field_filters: params.categoryId ? params.fieldFiltersParam : undefined,
           sort: params.sort,
           page: params.page,
           page_size: params.pageSize,
@@ -261,7 +278,7 @@ export default function CatalogManager() {
 
   // Search on any change: immediately for filters/paging/scans, debounced for typing.
   useEffect(() => {
-    const params = { tab, mode, query, categoryId, make, status, sort, page, pageSize };
+    const params = { tab, mode, query, categoryId, make, status, sort, page, pageSize, fieldFiltersParam };
     const typing = lastQueryRef.current !== null && lastQueryRef.current !== query;
     lastQueryRef.current = query;
     clearTimeout(debounceRef.current);
@@ -271,7 +288,7 @@ export default function CatalogManager() {
       runSearch(params);
     }
     return () => clearTimeout(debounceRef.current);
-  }, [tab, mode, query, categoryId, make, status, sort, page, pageSize, runSearch]);
+  }, [tab, mode, query, categoryId, make, status, sort, page, pageSize, fieldFiltersParam, runSearch]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -331,7 +348,7 @@ export default function CatalogManager() {
           ? 'No catalog item has this model number. Try Keyword.'
           : 'No catalog items match these keywords.';
     }
-    return 'No catalog items match these filters.';
+    return fieldFilterCount ? 'No catalog items match these filters — try clearing some field filters.' : 'No catalog items match these filters.';
   };
 
   return (
@@ -344,6 +361,9 @@ export default function CatalogManager() {
             <Button variant="outlined" startIcon={<LightbulbOutlinedIcon />} disabled>Suggest New Item</Button>
           </span>
         </Tooltip>
+        <Button variant="outlined" startIcon={<CallMergeIcon />} onClick={() => navigate('/catalog/merge')}>
+          Merge Items
+        </Button>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate('/catalog/items/new')}>
           New Catalog Item
         </Button>
@@ -374,7 +394,7 @@ export default function CatalogManager() {
                 onChange={e => resetPage(setQuery)(e.target.value)}
                 onKeyDown={e => {
                   if (e.key === 'Enter') {
-                    runSearch({ tab, mode, query, categoryId, make, status, sort, page: 1, pageSize });
+                    runSearch({ tab, mode, query, categoryId, make, status, sort, page: 1, pageSize, fieldFiltersParam });
                   }
                 }}
                 InputProps={{
@@ -386,20 +406,25 @@ export default function CatalogManager() {
                 }}
                 sx={{ flex: 1, minWidth: 260, mt: 3 }}
               />
-              <Tooltip title="Coming in a later phase">
-                <span>
-                  <Button variant="outlined" endIcon={<ExpandMoreIcon />} disabled sx={{ mt: 3 }}>Advanced Search</Button>
-                </span>
-              </Tooltip>
+              <Button variant={advancedOpen ? 'contained' : 'outlined'} sx={{ mt: 3 }}
+                endIcon={advancedOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                onClick={() => setAdvancedOpen(o => !o)}>
+                Advanced Search{fieldFilterCount ? ` (${fieldFilterCount})` : ''}
+              </Button>
             </Box>
           )}
 
-          {/* Filters (Category → Make → Status). Browse = these filters with no search text. */}
-          <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center', m: 2, p: 1.5, bgcolor: 'grey.50', border: 1, borderColor: 'divider', borderRadius: 1 }}>
+          {/* Filters (Category → Make → Status → category fields). Browse = these filters with no
+              search text; on Search the category fields are part of Advanced Search. */}
+          <Box sx={{ m: 2, p: 1.5, bgcolor: 'grey.50', border: 1, borderColor: advancedOpen && tab === 'search' ? 'primary.light' : 'divider', borderRadius: 1 }}>
+          {advancedOpen && tab === 'search' && (
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.25 }}>Advanced Search</Typography>
+          )}
+          <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
             <FormControl size="small" sx={{ minWidth: 220 }}>
               <InputLabel shrink>Category</InputLabel>
               <Select value={categoryId} label="Category" displayEmpty notched
-                onChange={e => { setCategoryId(e.target.value); setMake(''); setPage(1); }}
+                onChange={e => { setCategoryId(e.target.value); setMake(''); setFieldFilters({}); setPage(1); }}
                 renderValue={v => (v ? categoryById[v]?.path || '' : 'All Categories')}
                 MenuProps={{ PaperProps: { sx: { maxHeight: 400 } } }}>
                 {categoryMenuItems}
@@ -433,6 +458,19 @@ export default function CatalogManager() {
                 <Button variant="outlined" size="small" startIcon={<BarChartIcon />} disabled>View Other Data Sets</Button>
               </span>
             </Tooltip>
+          </Box>
+          {(tab === 'browse' || advancedOpen) && (
+            <Box sx={{ mt: 1.5, pt: 1.5, borderTop: 1, borderColor: 'divider' }}>
+              <CatalogFieldFilters
+                categoryId={categoryId || null}
+                categoryPath={categoryById[categoryId]?.path}
+                status={status}
+                searchable={searchableFields}
+                filters={fieldFilters}
+                onChange={next => { setFieldFilters(next); setPage(1); }}
+              />
+            </Box>
+          )}
           </Box>
 
           {/* Results bar */}
@@ -606,6 +644,27 @@ export default function CatalogManager() {
                 </Box>
               </Box>
 
+              {/* Merge / Split lineage: where this item went / what it came from. */}
+              {preview.lineage?.into?.length > 0 && (
+                <Alert severity="info" sx={{ mb: 1.5 }}>
+                  {preview.lineage.into[0].relationship_type === 'SPLIT' ? 'Split into' : 'Merged into'}{' '}
+                  {preview.lineage.into.map((l, i) => (
+                    <React.Fragment key={l.id}>
+                      {i > 0 && ', '}
+                      <Link component="button" variant="body2" onClick={() => setSelectedId(l.id)} sx={{ verticalAlign: 'baseline' }}>
+                        {l.catalog_code} — {l.title}
+                      </Link>
+                    </React.Fragment>
+                  ))}
+                </Alert>
+              )}
+              {preview.lineage?.from?.length > 0 && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  {preview.lineage.from[0].relationship_type === 'SPLIT' ? 'Split from' : 'Merged from'}{' '}
+                  {preview.lineage.from.map(l => l.catalog_code).join(' + ')}
+                </Typography>
+              )}
+
               <PanelSection title="Identifiers">
                 <IdentifierList label="Model Numbers" values={previewModels} />
                 <IdentifierList label="UPCs" values={previewUpcs} />
@@ -639,6 +698,18 @@ export default function CatalogManager() {
               <Button fullWidth variant="contained" size="large" startIcon={<EditIcon />} onClick={() => openEditor(preview.id)}>
                 Open in Catalog Item Editor
               </Button>
+              {preview.status !== 'MERGED' && (
+                <Button fullWidth variant="outlined" startIcon={<CallMergeIcon />} sx={{ mt: 1 }}
+                  onClick={() => navigate(`/catalog/merge?a=${preview.id}`)}>
+                  Merge with Another Item…
+                </Button>
+              )}
+              {preview.status !== 'MERGED' && (
+                <Button fullWidth variant="outlined" startIcon={<CallSplitIcon />} sx={{ mt: 1 }}
+                  onClick={() => navigate(`/catalog/split?source=${preview.id}`)}>
+                  Split into Two Items…
+                </Button>
+              )}
             </>
           )}
         </Paper>
