@@ -18016,7 +18016,57 @@ async function catalogSearchScope(query) {
     statuses,
     categoryIds,
     makeBrand: trimOrNull(query.make_brand),
+    fieldFilters: await parseCatalogFieldFilters(query.field_filters, categoryId),
   };
+}
+
+// Advanced Search field filters: field_filters = JSON array of
+//   { field_definition_id, value }        TEXT (starts with) / ENUM / DATE (exact)
+//   { field_definition_id, values: [] }   MULTISELECT / ENUM (any of)
+//   { field_definition_id, min, max }     NUMBER / CURRENCY / MEASUREMENT / DATE (range)
+//   { field_definition_id, value: true|false }  BOOLEAN
+// Only Catalog-scope fields marked "Search" in Category Manager for the
+// selected category (or inherited by it) can be used, so a category is required.
+const CATALOG_NUMERIC_TYPES = ['NUMBER', 'CURRENCY', 'MEASUREMENT'];
+async function getCatalogSearchFields(categoryId) {
+  const { fields } = await resolveEffectiveFields(categoryId);
+  return fields.filter(f => f.scope === 'CATALOG' && f.search && f.required_at !== 'NOT_USED');
+}
+async function parseCatalogFieldFilters(raw, categoryId) {
+  if (raw === undefined || raw === null || raw === '') return [];
+  let list;
+  try { list = JSON.parse(raw); } catch (e) { throw new CatalogValidationError('field_filters must be a JSON array'); }
+  if (!Array.isArray(list)) throw new CatalogValidationError('field_filters must be a JSON array');
+  if (!list.length) return [];
+  if (!categoryId) throw new CatalogValidationError('Choose a Category to filter by its fields');
+  const searchable = Object.fromEntries((await getCatalogSearchFields(categoryId)).map(f => [f.field_definition_id, f]));
+  return list.slice(0, 20).map(fl => {
+    const field = searchable[parseInt(fl?.field_definition_id, 10)];
+    if (!field) throw new CatalogValidationError(`Field ${fl?.field_definition_id} is not a searchable field of this category`);
+    const label = field.label_override || field.field_label;
+    const out = { fieldId: field.field_definition_id, type: field.data_type };
+    if (field.data_type === 'BOOLEAN') {
+      out.bool = fl.value === true || fl.value === 'true';
+    } else if (CATALOG_NUMERIC_TYPES.includes(field.data_type) || (field.data_type === 'DATE' && (fl.min !== undefined || fl.max !== undefined))) {
+      const bound = (v) => {
+        if (v === undefined || v === null || v === '') return null;
+        if (field.data_type === 'DATE') return String(v);
+        const n = Number(v);
+        if (!Number.isFinite(n)) throw new CatalogValidationError(`${label}: enter a number`);
+        return n;
+      };
+      out.min = bound(fl.min);
+      out.max = bound(fl.max);
+      if (out.min === null && out.max === null) return null;
+    } else if (Array.isArray(fl.values)) {
+      out.values = fl.values.map(v => String(v).trim()).filter(Boolean);
+      if (!out.values.length) return null;
+    } else {
+      out.value = trimOrNull(fl.value);
+      if (out.value === null) return null;
+    }
+    return out;
+  }).filter(Boolean);
 }
 
 // WHERE fragment for the shared company/status/category/make filters on alias `ci`.
@@ -18032,6 +18082,39 @@ function catalogScopeWhere(scope, params) {
   if (scope.makeBrand) {
     params.push(scope.makeBrand);
     sql += ` AND lower(ci.make_brand) = lower($${params.length})`;
+  }
+  // Advanced Search field filters — each must match the item's Catalog value.
+  for (const f of scope.fieldFilters || []) {
+    params.push(f.fieldId);
+    const fieldParam = `$${params.length}`;
+    const has = (cond) => `EXISTS (SELECT 1 FROM catalog_item_field_values v
+      WHERE v.catalog_item_id = ci.id AND v.field_definition_id = ${fieldParam} AND ${cond})`;
+    if (f.type === 'BOOLEAN') {
+      // "No" also matches items where the box was simply never ticked.
+      sql += f.bool ? ` AND ${has("v.value = 'true'")}` : ` AND NOT ${has("v.value = 'true'")}`;
+    } else if (f.min !== undefined || f.max !== undefined) {
+      const isDate = f.type === 'DATE';
+      const value = isDate ? 'v.value' : 'v.value::numeric';
+      const conds = [isDate ? "v.value ~ '^\\d{4}-\\d{2}-\\d{2}'" : "v.value ~ '^\\s*-?\\d+(\\.\\d+)?\\s*$'"];
+      if (f.min !== null) { params.push(f.min); conds.push(`${value} >= $${params.length}`); }
+      if (f.max !== null) { params.push(f.max); conds.push(`${value} <= $${params.length}`); }
+      // CASE keeps the cast from running on rows that failed the format check.
+      sql += ` AND ${has(`CASE WHEN ${conds[0]} THEN ${conds.slice(1).join(' AND ') || 'true'} ELSE false END`)}`;
+    } else if (f.values) {
+      params.push(f.values.map(v => v.toLowerCase()));
+      const p = `$${params.length}::text[]`;
+      // Multi-select values are stored as a JSON array string.
+      sql += ` AND ${has(`CASE WHEN v.value LIKE '[%' THEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(v.value::jsonb) e WHERE lower(e) = ANY(${p}))
+        ELSE lower(v.value) = ANY(${p}) END`)}`;
+    } else if (f.type === 'TEXT') {
+      // "Starts with" (index-friendly prefix match; no leading wildcard).
+      params.push(`${f.value.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`);
+      sql += ` AND ${has(`lower(v.value) LIKE $${params.length}`)}`;
+    } else {
+      params.push(f.value.toLowerCase());
+      sql += ` AND ${has(`lower(v.value) = $${params.length}`)}`;
+    }
   }
   return sql;
 }
@@ -18105,6 +18188,7 @@ async function hydrateCatalogSearchResults(ids) {
 
 // GET /api/catalog-items/search?q=&mode=&division_id=&category_id=&make_brand=
 //     &status=&include_inactive=&browse_all=&sort=&page=&page_size=   (limit = page_size alias)
+//     &field_filters=[...]   (Advanced Search; see parseCatalogFieldFilters)
 app.get('/api/catalog-items/search', async (req, res) => {
   try {
     const startedAt = Date.now();
@@ -18256,6 +18340,42 @@ app.get('/api/catalog-items/makes', async (req, res) => {
     res.json(result.rows.map(r => r.make_brand));
   } catch (err) {
     sendCatalogError(res, err, 'Failed to load catalog makes');
+  }
+});
+
+// GET /api/catalog-items/field-values?category_id=&field_definition_id=&status=&q=
+// Distinct existing values of one searchable field among catalog items in the
+// category subtree — suggestions for Advanced Search's text filters.
+app.get('/api/catalog-items/field-values', async (req, res) => {
+  try {
+    const categoryId = parseInt(req.query.category_id, 10);
+    const fieldId = parseInt(req.query.field_definition_id, 10);
+    if (!categoryId || !fieldId) throw new CatalogValidationError('category_id and field_definition_id are required');
+    if (!(await getCatalogSearchFields(categoryId)).some(f => f.field_definition_id === fieldId)) {
+      throw new CatalogValidationError('Not a searchable field of this category');
+    }
+    const scope = await catalogSearchScope({ category_id: categoryId, status: req.query.status || 'ALL' });
+    const params = [fieldId];
+    const where = catalogScopeWhere(scope, params);
+    let prefix = '';
+    const q = trimOrNull(req.query.q);
+    if (q) {
+      params.push(`${q.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`);
+      prefix = ` AND lower(v.value) LIKE $${params.length}`;
+    }
+    const result = await pool.query(
+      `SELECT MIN(v.value) AS value
+       FROM catalog_item_field_values v
+       JOIN catalog_items ci ON ci.id = v.catalog_item_id
+       WHERE v.field_definition_id = $1 AND v.value IS NOT NULL AND v.value NOT LIKE '[%'${prefix} AND ${where}
+       GROUP BY lower(v.value)
+       ORDER BY lower(MIN(v.value))
+       LIMIT 30`,
+      params
+    );
+    res.json(result.rows.map(r => r.value));
+  } catch (err) {
+    sendCatalogError(res, err, 'Failed to load field values');
   }
 });
 

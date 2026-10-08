@@ -171,6 +171,10 @@ CREATE TABLE IF NOT EXISTS catalog_item_field_values (
 );
 
 CREATE INDEX IF NOT EXISTS idx_catalog_field_values_item ON catalog_item_field_values(catalog_item_id);
+-- Advanced Search field filters (doc §10 "index only fields used for search"):
+-- one field's values, exact or starts-with, case-insensitive.
+CREATE INDEX IF NOT EXISTS idx_catalog_field_values_search
+    ON catalog_item_field_values(field_definition_id, lower(value) text_pattern_ops);
 
 
 -- ============================================================
