@@ -34,7 +34,7 @@ import { useWorkingDate } from '../context/WorkingDateContext';
 import { Avatar } from '@mui/material';
 import { openPawnReceiptPDF } from '../utils/ticketReceiptUtils';
 import config from '../config';
-import { injectPDFScript } from '../utils/printUtils';
+import { injectPDFScript, reserveReceiptWindow, writeReceiptWindow, closeReceiptWindow } from '../utils/printUtils';
 
 function TransactionJournals() {
   const navigate = useNavigate();
@@ -240,14 +240,16 @@ function TransactionJournals() {
     return grouped;
   };
 
-  const handleTradeTicketClick = async (tradeTicketId) => {
+  // `win` is a receipt tab already reserved by the caller (see reserveReceiptWindow)
+  const handleTradeTicketClick = async (tradeTicketId, win) => {
+    const receiptWin = win || reserveReceiptWindow();
     const tradeTicket = tradeTickets.find(tt => tt.trade_ticket_id === tradeTicketId);
     const allItems = transactionItems.filter(item => {
       const id = item.ticket_id;
       return id === tradeTicket?.buy_ticket_id || id === tradeTicket?.sale_ticket_id;
     });
 
-    if (allItems.length === 0) { alert('No items found for this trade ticket'); return; }
+    if (allItems.length === 0) { closeReceiptWindow(receiptWin); alert('No items found for this trade ticket'); return; }
 
     const tradeInItems  = allItems.filter(i => i.transaction_type === 'buy');
     const tradeSaleItems = allItems.filter(i => i.transaction_type === 'sale');
@@ -363,16 +365,14 @@ function TransactionJournals() {
       </div>
     </body></html>`;
 
-    const printWindow = window.open('', '_blank');
-    const pdfReadyHTML = injectPDFScript(receiptHTML, `trade_${tradeTicketId}`);
-    printWindow.document.write(pdfReadyHTML);
-    printWindow.document.close();
+    writeReceiptWindow(receiptWin, injectPDFScript(receiptHTML, `trade_${tradeTicketId}`));
   };
 
   // Generate receipt for a payment ticket (PMT-xxx) — pawn extensions
-  const handlePaymentTicketClick = async (transactionId) => {
+  const handlePaymentTicketClick = async (transactionId, win) => {
+    const receiptWin = win || reserveReceiptWindow();
     const rows = paymentTickets.filter(pt => pt.payment_ticket_id === transactionId || pt.transaction_id === transactionId);
-    if (rows.length === 0) { alert('No payment data found for this ticket'); return; }
+    if (rows.length === 0) { closeReceiptWindow(receiptWin); alert('No payment data found for this ticket'); return; }
 
     const ticketNote    = rows[0].ticket_note    || null;
     const showOnReceipt = rows[0].show_on_receipt ?? true;
@@ -470,24 +470,24 @@ function TransactionJournals() {
       </body></html>
     `;
 
-    const printWindow = window.open('', '_blank');
-    const pdfReadyHTML = injectPDFScript(receiptHTML, `payment_${pmtId}`);
-    printWindow.document.write(pdfReadyHTML);
-    printWindow.document.close();
+    writeReceiptWindow(receiptWin, injectPDFScript(receiptHTML, `payment_${pmtId}`));
   };
 
   // Handle double click on ticket_id to show receipt using PDF template
   const handleBuyTicketClick = async (ticketId) => {
+    // Open the receipt tab during the click, before anything is fetched
+    const receiptWin = reserveReceiptWindow();
+
     // Payment tickets (PMT-xxx) get their own dedicated receipt
     if (ticketId?.startsWith('PMT-')) {
-      await handlePaymentTicketClick(ticketId);
+      await handlePaymentTicketClick(ticketId, receiptWin);
       return;
     }
 
     // Trade tickets (TT-xxx) get their own dedicated receipt
     const isTradeTicket = tradeTickets.some(tt => tt.trade_ticket_id === ticketId);
     if (isTradeTicket) {
-      await handleTradeTicketClick(ticketId);
+      await handleTradeTicketClick(ticketId, receiptWin);
       return;
     }
 
@@ -500,13 +500,19 @@ function TransactionJournals() {
     let ticketItems = transactionItems.filter(item => item.ticket_id === ticketId);
 
     if (ticketItems.length === 0) {
+      closeReceiptWindow(receiptWin);
       alert('No items found for this ticket');
       return;
     }
 
     // Pawn receipts use the shared utility — same output as PawnTransactionScreen
     if (isPawnTicket) {
-      await openPawnReceiptPDF(ticketId);
+      try {
+        await openPawnReceiptPDF(ticketId, receiptWin);
+      } catch (err) {
+        console.error('Error generating pawn receipt:', err);
+        alert('Failed to generate the pawn receipt. Please try again.');
+      }
       return;
     }
 
@@ -781,19 +787,18 @@ function TransactionJournals() {
         </html>
       `;
 
-      // Open in new tab (with PDF support for testing)
-      const printWindow = window.open('', '_blank');
-      const pdfReadyHTML = injectPDFScript(receiptHTML, `ticket_${ticketId}`);
-      printWindow.document.write(pdfReadyHTML);
-      printWindow.document.close();
+      // Fill the tab reserved at the click (with PDF support for testing)
+      writeReceiptWindow(receiptWin, injectPDFScript(receiptHTML, `ticket_${ticketId}`));
   };
 
   const handlePrintTransaction = async () => {
     if (!selectedTransaction) return;
+    // Open the receipt tab during the click, before anything is fetched
+    const receiptWin = reserveReceiptWindow();
 
     // PMT transactions have no transactionItems — use the payment receipt instead
     if (paymentTickets.length > 0 && transactionItems.length === 0) {
-      await handlePaymentTicketClick(selectedTransaction.transaction_id);
+      await handlePaymentTicketClick(selectedTransaction.transaction_id, receiptWin);
       return;
     }
 
@@ -1060,12 +1065,9 @@ function TransactionJournals() {
       </html>
     `;
 
-    // Open in new tab (with PDF support for testing)
-    const printWindow = window.open('', '_blank');
+    // Fill the tab reserved at the click (with PDF support for testing)
     const transactionId = selectedTransaction.transaction_id || selectedTransaction.id;
-    const pdfReadyHTML = injectPDFScript(receiptHTML, `transaction_${transactionId}`);
-    printWindow.document.write(pdfReadyHTML);
-    printWindow.document.close();
+    writeReceiptWindow(receiptWin, injectPDFScript(receiptHTML, `transaction_${transactionId}`));
   };
 
   const handleEditPayments = () => {

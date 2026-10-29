@@ -3,19 +3,37 @@ import axios from 'axios';
 import { pdf } from '@react-pdf/renderer';
 import PawnTicketTemplate from '../components/PawnTicketTemplate';
 import config from '../config';
-import { injectPDFScript } from './printUtils';
+import { injectPDFScript, reserveReceiptWindow, writeReceiptWindow, showUrlInReceiptWindow, closeReceiptWindow } from './printUtils';
 
 // Single source of truth for every ticket receipt in the app. Nothing that
 // builds receipt HTML/PDF content should live outside this file — screens
 // call one of these functions instead of generating their own markup.
+//
+// Each open*() reserves the receipt tab synchronously (before its first
+// await) so the popup blocker sees it as part of the click, then fills it in.
+// Callers that already reserved a tab can pass it as `win`.
+const withReceiptWindow = async (win, render) => {
+  const receiptWin = win || reserveReceiptWindow();
+  try {
+    await render(receiptWin);
+  } catch (err) {
+    closeReceiptWindow(receiptWin);
+    throw err;
+  }
+};
 
 /**
  * Fetches receipt data and opens the pawn receipt PDF in a new tab.
  * Used by PawnTransactionScreen, RePawnIntakeScreen, and TransactionJournals.
  * @param {string} ticketId - The pawn_ticket_id
+ * @param {Window} [win] - A tab already reserved with reserveReceiptWindow
  * @returns {Promise<void>}
  */
-export async function openPawnReceiptPDF(ticketId) {
+export function openPawnReceiptPDF(ticketId, win) {
+  return withReceiptWindow(win, (w) => renderPawnReceipt(ticketId, w));
+}
+
+async function renderPawnReceipt(ticketId, win) {
   const token = localStorage.getItem('token');
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -82,7 +100,7 @@ export async function openPawnReceiptPDF(ticketId) {
 
   const blob = await pdf(pdfDoc).toBlob();
   const url  = URL.createObjectURL(blob);
-  window.open(url, '_blank');
+  showUrlInReceiptWindow(win, url);
 }
 
 /**
@@ -93,9 +111,14 @@ export async function openPawnReceiptPDF(ticketId) {
  * Used by ModernTransactions (workspace ticket-ID search) and mirrors the
  * same fields TransactionJournals.js's own reprint uses.
  * @param {string} ticketId - The buy_ticket_id or sale_ticket_id
+ * @param {Window} [win] - A tab already reserved with reserveReceiptWindow
  * @returns {Promise<void>}
  */
-export async function openBuySaleReceiptPDF(ticketId) {
+export function openBuySaleReceiptPDF(ticketId, win) {
+  return withReceiptWindow(win, (w) => renderBuySaleReceipt(ticketId, w));
+}
+
+async function renderBuySaleReceipt(ticketId, win) {
   const token = localStorage.getItem('token');
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -212,10 +235,7 @@ export async function openBuySaleReceiptPDF(ticketId) {
     </html>
   `;
 
-  const printWindow = window.open('', '_blank');
-  const pdfReadyHTML = injectPDFScript(receiptHTML, `ticket_${ticketId}`);
-  printWindow.document.write(pdfReadyHTML);
-  printWindow.document.close();
+  writeReceiptWindow(win, injectPDFScript(receiptHTML, `ticket_${ticketId}`));
 }
 
 /**
@@ -227,9 +247,14 @@ export async function openBuySaleReceiptPDF(ticketId) {
  * covers several tickets) — a single ticket instead uses the type-specific
  * receipt (openPawnReceiptPDF / openBuySaleReceiptPDF).
  * @param {string} transactionId
+ * @param {Window} [win] - A tab already reserved with reserveReceiptWindow
  * @returns {Promise<void>}
  */
-export async function openTransactionReceiptPDF(transactionId) {
+export function openTransactionReceiptPDF(transactionId, win) {
+  return withReceiptWindow(win, (w) => renderTransactionReceipt(transactionId, w));
+}
+
+async function renderTransactionReceipt(transactionId, win) {
   const token = localStorage.getItem('token');
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -366,8 +391,5 @@ export async function openTransactionReceiptPDF(transactionId) {
     </html>
   `;
 
-  const printWindow = window.open('', '_blank');
-  const pdfReadyHTML = injectPDFScript(receiptHTML, `transaction_${transactionId}`);
-  printWindow.document.write(pdfReadyHTML);
-  printWindow.document.close();
+  writeReceiptWindow(win, injectPDFScript(receiptHTML, `transaction_${transactionId}`));
 }
