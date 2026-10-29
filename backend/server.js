@@ -11975,6 +11975,67 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
           FROM pawn_ticket pt
           LEFT JOIN jewelry j ON pt.item_id = j.item_id
           WHERE pt.transaction_id = $1
+
+          UNION ALL
+
+          -- Get redeemed pawn items. A redemption has no ticket table of its own;
+          -- Checkout links its transaction through the pawn_history REDEEM row.
+          -- Like the Redeem cart, the first item of each pawn carries the payoff.
+          SELECT
+            pt.id,
+            h.transaction_id,
+            pt.item_id,
+            pt.pawn_ticket_id as ticket_id,
+            h.action_date as created_at,
+            j.updated_at,
+            'redeem' as transaction_type,
+            COALESCE(pt.inventory_type, 'JW') as inventory_type,
+            j.item_id as jewelry_item_id,
+            j.long_desc,
+            j.short_desc,
+            j.category,
+            j.metal_weight,
+            j.precious_metal_type,
+            j.non_precious_metal_type,
+            j.metal_purity,
+            j.purity_value,
+            j.jewelry_color,
+            j.metal_spot_price,
+            j.est_metal_value,
+            CASE WHEN ROW_NUMBER() OVER (PARTITION BY pt.pawn_ticket_id ORDER BY pt.item_id) = 1
+                 THEN h.total_paid ELSE 0 END as item_price,
+            j.images,
+            j.status as item_status,
+            j.primary_gem_type,
+            j.primary_gem_category,
+            j.primary_gem_size,
+            j.primary_gem_weight,
+            j.primary_gem_quantity,
+            j.primary_gem_shape,
+            j.primary_gem_color,
+            j.primary_gem_exact_color,
+            j.primary_gem_clarity,
+            j.primary_gem_cut,
+            j.primary_gem_lab_grown,
+            j.primary_gem_authentic,
+            j.primary_gem_value,
+            EXISTS (
+              SELECT 1 FROM jewelry_secondary_gems jsg
+              WHERE jsg.item_id = pt.item_id
+            ) as has_secondary_gems,
+            pt.ticket_note,
+            pt.show_on_receipt,
+            0::NUMERIC as protection_plan,
+            0::NUMERIC as item_discount,
+            0::NUMERIC as global_discount
+          FROM (
+            SELECT DISTINCT ON (pawn_ticket_id) pawn_ticket_id, transaction_id, action_date, total_paid
+            FROM pawn_history
+            WHERE transaction_id = $1 AND action_type = 'REDEEM'
+            ORDER BY pawn_ticket_id, id
+          ) h
+          JOIN pawn_ticket pt ON pt.pawn_ticket_id = h.pawn_ticket_id
+          LEFT JOIN jewelry j ON pt.item_id = j.item_id
         )
         SELECT
           il.*,
@@ -12337,6 +12398,86 @@ app.get('/api/transactions', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching transactions:', err);
+    res.status(500).json({ error: 'Failed to fetch transactions' });
+  }
+});
+
+// GET /api/transactions/journal — one page of the Transaction Journal with its
+// filters applied in SQL (type and ticket ID are resolved through the ticket
+// tables), so the page doesn't have to load every transaction's items first.
+// Returns { rows, total }.
+app.get('/api/transactions/journal', async (req, res) => {
+  try {
+    const { type, employee_id, date, transaction_number, ticket_id, amount } = req.query;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+    const page = Math.max(parseInt(req.query.page, 10) || 0, 0);
+
+    const params = [];
+    const where = [`t.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)`];
+    const add = (value) => { params.push(value); return `$${params.length}`; };
+
+    // Same meaning as the item types the journal used to filter on, plus
+    // payment/redeem, which live in payment_ticket / pawn_history.
+    const legacy = (typeId) => `EXISTS (SELECT 1 FROM transaction_items ti WHERE ti.transaction_id = t.transaction_id AND ti.transaction_type_id = ${typeId})`;
+    const typeFilters = {
+      pawn:    `(EXISTS (SELECT 1 FROM pawn_ticket x WHERE x.transaction_id = t.transaction_id) OR ${legacy(1)})`,
+      buy:     `(EXISTS (SELECT 1 FROM buy_ticket x WHERE x.transaction_id = t.transaction_id) OR ${legacy(2)})`,
+      sale:    `(EXISTS (SELECT 1 FROM sale_ticket x WHERE x.transaction_id = t.transaction_id) OR ${legacy(3)})`,
+      trade:   `(EXISTS (SELECT 1 FROM trade_ticket x WHERE x.transaction_id = t.transaction_id) OR ${legacy(4)})`,
+      repair:  legacy(5),
+      payment: `(EXISTS (SELECT 1 FROM payment_ticket x WHERE x.transaction_id = t.transaction_id) OR ${legacy(6)})`,
+      refund:  legacy(7),
+      redeem:  `EXISTS (SELECT 1 FROM pawn_history x WHERE x.transaction_id = t.transaction_id AND x.action_type = 'REDEEM')`,
+    };
+    if (type) where.push(typeFilters[type.toLowerCase()] || 'FALSE');
+    if (employee_id) where.push(`t.employee_id = ${add(parseInt(employee_id, 10))}`);
+    if (date) where.push(`t.created_at::date = ${add(date)}::date`);
+    if (transaction_number) where.push(`t.transaction_id ILIKE ${add(`%${transaction_number}%`)}`);
+    if (amount && !isNaN(parseFloat(amount))) where.push(`ABS(t.total_amount - ${add(parseFloat(amount))}) < 0.01`);
+    if (ticket_id) {
+      const p = add(`%${ticket_id}%`);
+      where.push(`(
+        EXISTS (SELECT 1 FROM buy_ticket x     WHERE x.transaction_id = t.transaction_id AND x.buy_ticket_id ILIKE ${p})
+        OR EXISTS (SELECT 1 FROM sale_ticket x    WHERE x.transaction_id = t.transaction_id AND x.sale_ticket_id ILIKE ${p})
+        OR EXISTS (SELECT 1 FROM pawn_ticket x    WHERE x.transaction_id = t.transaction_id AND x.pawn_ticket_id ILIKE ${p})
+        OR EXISTS (SELECT 1 FROM trade_ticket x   WHERE x.transaction_id = t.transaction_id AND x.trade_ticket_id ILIKE ${p})
+        OR EXISTS (SELECT 1 FROM payment_ticket x WHERE x.transaction_id = t.transaction_id AND x.payment_ticket_id ILIKE ${p})
+        OR EXISTS (SELECT 1 FROM pawn_history x   WHERE x.transaction_id = t.transaction_id AND x.action_type = 'REDEEM' AND x.pawn_ticket_id ILIKE ${p}))`);
+    }
+
+    const result = await pool.query(`
+      SELECT
+        t.transaction_id as id,
+        t.transaction_id,
+        t.customer_id,
+        c.first_name || ' ' || c.last_name as customer_name,
+        c.phone as customer_phone,
+        TRIM(CONCAT_WS(', ',
+          NULLIF(c.address_line1, ''),
+          NULLIF(c.address_line2, ''),
+          NULLIF(CONCAT_WS(', ', NULLIF(c.city, ''), NULLIF(c.state, ''), NULLIF(c.postal_code, '')), '')
+        )) as customer_address,
+        e.first_name || ' ' || e.last_name as employee_name,
+        e.employee_id,
+        t.parked_by_employee_id,
+        pe.first_name || ' ' || pe.last_name as parked_by_employee_name,
+        t.total_amount,
+        t.transaction_date,
+        t.created_at,
+        t.updated_at,
+        COUNT(*) OVER () AS total_count
+      FROM transactions t
+      LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN employees e ON t.employee_id = e.employee_id
+      LEFT JOIN employees pe ON t.parked_by_employee_id = pe.employee_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY t.created_at DESC, t.id DESC
+      LIMIT ${add(limit)} OFFSET ${add(page * limit)}`, params);
+
+    const total = result.rows.length ? parseInt(result.rows[0].total_count, 10) : 0;
+    res.json({ rows: result.rows.map(({ total_count, ...row }) => row), total });
+  } catch (err) {
+    console.error('Error fetching transaction journal:', err);
     res.status(500).json({ error: 'Failed to fetch transactions' });
   }
 });

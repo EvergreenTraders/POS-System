@@ -112,6 +112,53 @@ export const openReceiptAsPDF = async (html, filename = 'receipt') => {
 };
 
 /**
+ * Browsers only allow window.open() while handling the click itself. Receipts
+ * fetch their data first, so if that takes a moment the popup gets blocked and
+ * window.open() returns null. Call this synchronously at the start of the click
+ * handler (before any await) to open the tab right away, then fill it with
+ * writeReceiptWindow / showUrlInReceiptWindow once the receipt is ready.
+ * @returns {Window|null} The reserved tab (null if the browser blocked it anyway)
+ */
+export const reserveReceiptWindow = () => {
+  const win = window.open('', '_blank');
+  if (win) {
+    win.document.write('<p style="font-family: sans-serif; padding: 20px; color: #555;">Loading receipt…</p>');
+  }
+  return win;
+};
+
+const popupBlocked = () => {
+  alert('The receipt was blocked by the browser. Please allow pop-ups for this site and try again.');
+};
+
+/**
+ * Writes receipt HTML into a tab from reserveReceiptWindow (opens one if it
+ * was blocked or closed in the meantime).
+ */
+export const writeReceiptWindow = (win, html) => {
+  const target = win && !win.closed ? win : window.open('', '_blank');
+  if (!target) { popupBlocked(); return; }
+  target.document.open();
+  target.document.write(html);
+  target.document.close();
+};
+
+/**
+ * Points a tab from reserveReceiptWindow at a URL (e.g. a generated PDF blob).
+ */
+export const showUrlInReceiptWindow = (win, url) => {
+  if (win && !win.closed) { win.location.href = url; return; }
+  if (!window.open(url, '_blank')) popupBlocked();
+};
+
+/**
+ * Closes a reserved tab when there turned out to be nothing to show.
+ */
+export const closeReceiptWindow = (win) => {
+  if (win && !win.closed) win.close();
+};
+
+/**
  * Generates receipt HTML buttons based on current print mode
  * Returns HTML string for buttons
  */
@@ -214,6 +261,10 @@ export const injectPDFScript = (html, filename = 'receipt') => {
 export default {
   openReceiptWindow,
   openReceiptAsPDF,
+  reserveReceiptWindow,
+  writeReceiptWindow,
+  showUrlInReceiptWindow,
+  closeReceiptWindow,
   getReceiptButtons,
   getPrintMode,
   injectPDFScript,
