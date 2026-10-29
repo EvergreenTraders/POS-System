@@ -21,6 +21,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -63,11 +64,11 @@ function TransactionJournals() {
   const [taxRate, setTaxRate] = useState(0.13);
   const API_BASE_URL = config.apiUrl;
 
-  const [transactions, setTransactions] = useState([]);
-  const [transactionItemsMap, setTransactionItemsMap] = useState({});
-  const [buyTicketsMap, setBuyTicketsMap] = useState({}); // Map of transaction_id to buy_tickets
-  const [saleTicketsMap, setSaleTicketsMap] = useState({}); // Map of transaction_id to sale_tickets
-  const [pawnTicketsMap, setPawnTicketsMap] = useState({}); // Map of transaction_id to pawn_tickets
+  const [transactions, setTransactions] = useState([]); // current page only (filtered server-side)
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [reloadKey, setReloadKey] = useState(0); // bump to refetch the current page
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stores, setStores] = useState([]);
@@ -160,58 +161,33 @@ function TransactionJournals() {
     setViewDialogOpen(true);
 
     try {
-      // Fetch transaction items from the updated endpoint (reads from buy_ticket/sale_ticket)
-      const itemsResponse = await axios.get(`${API_BASE_URL}/transactions/${transaction.transaction_id}/items`);
-      const items = itemsResponse.data || [];
-      setTransactionItems(items);
+      const id = transaction.transaction_id;
+      // Ticket lookups are optional: a failed one just leaves that list empty
+      const optional = (url, label) => axios.get(url)
+        .then(res => res.data || [])
+        .catch(err => { console.error(`Error fetching ${label}:`, err); return []; });
 
-      // Fetch payment details
-      const response = await axios.get(`${API_BASE_URL}/transactions/${transaction.transaction_id}/payments`);
+      // All requests in parallel
+      const [itemsResponse, response, buy, sale, pawn, trade, pmt] = await Promise.all([
+        axios.get(`${API_BASE_URL}/transactions/${id}/items`),
+        axios.get(`${API_BASE_URL}/transactions/${id}/payments`),
+        optional(`${API_BASE_URL}/buy-ticket?transaction_id=${id}`, 'buy tickets'),
+        optional(`${API_BASE_URL}/sale-ticket?transaction_id=${id}`, 'sale tickets'),
+        optional(`${API_BASE_URL}/pawn-ticket?transaction_id=${id}`, 'pawn tickets'),
+        optional(`${API_BASE_URL}/trade-ticket?transaction_id=${id}`, 'trade tickets'),
+        optional(`${API_BASE_URL}/payment-ticket?transaction_id=${id}`, 'payment tickets'),
+      ]);
+
+      setTransactionItems(itemsResponse.data || []);
       setPaymentDetails({
         payments: response.data.payments || [],
         total_paid: response.data.total_paid || 0
       });
-
-      // Fetch buy_ticket and sale_ticket data for this transaction
-      try {
-        const buyTicketResponse = await axios.get(`${API_BASE_URL}/buy-ticket?transaction_id=${transaction.transaction_id}`);
-        setBuyTickets(buyTicketResponse.data || []);
-      } catch (buyTicketError) {
-        console.error('Error fetching buy tickets:', buyTicketError);
-        setBuyTickets([]);
-      }
-
-      try {
-        const saleTicketResponse = await axios.get(`${API_BASE_URL}/sale-ticket?transaction_id=${transaction.transaction_id}`);
-        setSaleTickets(saleTicketResponse.data || []);
-      } catch (saleTicketError) {
-        console.error('Error fetching sale tickets:', saleTicketError);
-        setSaleTickets([]);
-      }
-
-      try {
-        const pawnTicketResponse = await axios.get(`${API_BASE_URL}/pawn-ticket?transaction_id=${transaction.transaction_id}`);
-        setPawnTickets(pawnTicketResponse.data || []);
-      } catch (pawnTicketError) {
-        console.error('Error fetching pawn tickets:', pawnTicketError);
-        setPawnTickets([]);
-      }
-
-      try {
-        const tradeTicketResponse = await axios.get(`${API_BASE_URL}/trade-ticket?transaction_id=${transaction.transaction_id}`);
-        setTradeTickets(tradeTicketResponse.data || []);
-      } catch (tradeTicketError) {
-        console.error('Error fetching trade tickets:', tradeTicketError);
-        setTradeTickets([]);
-      }
-
-      try {
-        const pmtResponse = await axios.get(`${API_BASE_URL}/payment-ticket?transaction_id=${transaction.transaction_id}`);
-        setPaymentTickets(pmtResponse.data || []);
-      } catch (pmtError) {
-        console.error('Error fetching payment tickets:', pmtError);
-        setPaymentTickets([]);
-      }
+      setBuyTickets(buy);
+      setSaleTickets(sale);
+      setPawnTickets(pawn);
+      setTradeTickets(trade);
+      setPaymentTickets(pmt);
     } catch (error) {
       console.error('Error fetching transaction details:', error);
       // Initialize with empty data if there's an error
@@ -1143,103 +1119,63 @@ function TransactionJournals() {
     setEditedPayments([]);
   };
 
-  // Fetch transactions, their items, and filter options
+  // Employees for the filter dropdown (once)
   useEffect(() => {
-    const fetchData = async () => {
+    axios.get(`${API_BASE_URL}/employees`)
+      .then(res => setEmployees(res.data.map(emp => ({
+        id: emp.employee_id,
+        name: `${emp.first_name} ${emp.last_name}`,
+        ...emp
+      }))))
+      .catch(err => console.error('Error fetching employees:', err));
+  }, [API_BASE_URL]);
+
+  // Text filters wait for a pause in typing before querying
+  const [debouncedText, setDebouncedText] = useState({ transactionNumber: '', ticketId: '', amountFilter: '' });
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedText({ transactionNumber, ticketId, amountFilter }), 350);
+    return () => clearTimeout(t);
+  }, [transactionNumber, ticketId, amountFilter]);
+
+  // Any filter change goes back to the first page
+  useEffect(() => {
+    setPage(0);
+  }, [transactionType, employee, businessDate, debouncedText]);
+
+  // Fetch one page of transactions with the filters applied on the server
+  useEffect(() => {
+    let cancelled = false;
+    const fetchPage = async () => {
       try {
         setLoading(true);
-        
-        // Fetch transactions and employees in parallel
-        const [transactionsRes, employeesRes] = await Promise.all([
-          axios.get(`${API_BASE_URL}/transactions`),
-          axios.get(`${API_BASE_URL}/employees`)
-        ]);
-        
-        const transactionsData = transactionsRes.data;
-        setTransactions(transactionsData);
-        
-        // Fetch all transaction items in parallel
-        const itemsPromises = transactionsData.map(tx => 
-          axios.get(`${API_BASE_URL}/transactions/${tx.transaction_id}/items`)
-            .then(res => ({
-              transactionId: tx.transaction_id,
-              items: res.data
-            }))
-            .catch(() => ({
-              transactionId: tx.transaction_id,
-              items: []
-            }))
-        );
-        
-        // Process all items responses
-        const itemsResponses = await Promise.all(itemsPromises);
-        const itemsMap = {};
-        itemsResponses.forEach(({ transactionId, items }) => {
-          itemsMap[transactionId] = items;
-        });
-        setTransactionItemsMap(itemsMap);
-
-        // Fetch all buy tickets in parallel
-        const buyTicketsPromises = transactionsData.map(tx =>
-          axios.get(`${API_BASE_URL}/buy-ticket?transaction_id=${tx.transaction_id}`)
-            .then(res => ({
-              transactionId: tx.transaction_id,
-              buyTickets: res.data || []
-            }))
-            .catch(() => ({
-              transactionId: tx.transaction_id,
-              buyTickets: []
-            }))
-        );
-
-        // Process all buy tickets responses
-        const buyTicketsResponses = await Promise.all(buyTicketsPromises);
-        const buyTicketsMapData = {};
-        buyTicketsResponses.forEach(({ transactionId, buyTickets }) => {
-          buyTicketsMapData[transactionId] = buyTickets;
-        });
-        setBuyTicketsMap(buyTicketsMapData);
-
-        // Fetch all sale tickets in parallel
-        const saleTicketsPromises = transactionsData.map(tx =>
-          axios.get(`${API_BASE_URL}/sale-ticket?transaction_id=${tx.transaction_id}`)
-            .then(res => ({
-              transactionId: tx.transaction_id,
-              saleTickets: res.data || []
-            }))
-            .catch(() => ({
-              transactionId: tx.transaction_id,
-              saleTickets: []
-            }))
-        );
-
-        // Process all sale tickets responses
-        const saleTicketsResponses = await Promise.all(saleTicketsPromises);
-        const saleTicketsMapData = {};
-        saleTicketsResponses.forEach(({ transactionId, saleTickets }) => {
-          saleTicketsMapData[transactionId] = saleTickets;
-        });
-        setSaleTicketsMap(saleTicketsMapData);
-
-        // Transform employees data for the dropdown
-        const employeeOptions = employeesRes.data.map(emp => ({
-          id: emp.employee_id,
-          name: `${emp.first_name} ${emp.last_name}`,
-          ...emp
-        }));
-
-        setEmployees(employeeOptions);
-        
+        setError(null);
+        const d = businessDate ? new Date(businessDate) : null;
+        const params = {
+          page,
+          limit: rowsPerPage,
+          type: transactionType || undefined,
+          employee_id: employee || undefined,
+          date: d && !isNaN(d) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : undefined,
+          transaction_number: debouncedText.transactionNumber || undefined,
+          ticket_id: debouncedText.ticketId || undefined,
+          amount: debouncedText.amountFilter || undefined,
+        };
+        const res = await axios.get(`${API_BASE_URL}/transactions/journal`, { params });
+        if (cancelled) return;
+        setTransactions(res.data.rows);
+        setTotalCount(res.data.total);
       } catch (err) {
+        if (cancelled) return;
         console.error('Error fetching data:', err);
         setError('Failed to load transactions. Please try again later.');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
-    
-    fetchData();
-  }, []);
+
+    fetchPage();
+    return () => { cancelled = true; };
+  }, [API_BASE_URL, page, rowsPerPage, transactionType, employee, businessDate, debouncedText, reloadKey]);
 
   const handleOpenDeleteDialog = (transactionId) => {
     const transaction = transactions.find(tx => tx.id === transactionId);
@@ -1273,9 +1209,9 @@ function TransactionJournals() {
       // Delete the transaction and all related data
       await axios.delete(`${API_BASE_URL}/transactions/${transactionToDelete}`);
       
-      // Update the UI by removing the deleted transaction
-      const updatedTransactions = transactions.filter(tx => tx.id !== transactionToDelete);
-      setTransactions(updatedTransactions);
+      // Refetch the page (step back if the deleted row was the last one on it)
+      if (transactions.length === 1 && page > 0) setPage(page - 1);
+      else setReloadKey(k => k + 1);
     } catch (err) {
       console.error('Error deleting transaction:', err);
       alert('Failed to delete transaction. Please try again.');
@@ -1296,64 +1232,6 @@ function TransactionJournals() {
     return new Date(dateString).toLocaleString('en-US', options);
   };
   
-  // Filter transactions based on search criteria
-  const filteredTransactions = transactions.filter(tx => {
-    const matchesStore = !store || tx.store_id === store;
-
-    // Check employee match if employee is selected
-    let matchesEmployee = true;
-    if (employee) {
-      matchesEmployee = tx.employee_id?.toString() === employee.toString();
-    }
-
-    const matchesTransactionNumber = !transactionNumber ||
-      tx.transaction_id?.toLowerCase().includes(transactionNumber.toLowerCase());
-
-    // Check transaction type match
-    let matchesTransactionType = !transactionType;
-    if (transactionType) {
-      const items = transactionItemsMap[tx.transaction_id] || [];
-      // Match if transaction type matches any item's type or the transaction's main type
-      matchesTransactionType = items.some(item =>
-        item.transaction_type?.toLowerCase() === transactionType.toLowerCase()
-      ) || tx.transaction_type_name?.toLowerCase() === transactionType.toLowerCase();
-    }
-
-    // Check date match if businessDate is set
-    let matchesDate = true;
-    if (businessDate) {
-      const txDate = tx.created_at ? new Date(tx.created_at).toDateString() : '';
-      const selectedDate = new Date(businessDate).toDateString();
-      matchesDate = txDate === selectedDate;
-    }
-
-    // Check ticket ID match - search through buy_tickets and sale_tickets for this transaction
-    let matchesTicketId = true;
-    if (ticketId) {
-      const txBuyTickets = buyTicketsMap[tx.transaction_id] || [];
-      const txSaleTickets = saleTicketsMap[tx.transaction_id] || [];
-      // Match if any buy ticket ID or sale ticket ID contains the search string
-      matchesTicketId = txBuyTickets.some(ticket =>
-        ticket.buy_ticket_id?.toLowerCase().includes(ticketId.toLowerCase())
-      ) || txSaleTickets.some(ticket =>
-        ticket.sale_ticket_id?.toLowerCase().includes(ticketId.toLowerCase())
-      );
-    }
-
-    // Check amount match
-    let matchesAmount = true;
-    if (amountFilter) {
-      const filterAmount = parseFloat(amountFilter);
-      if (!isNaN(filterAmount)) {
-        const txAmount = parseFloat(tx.total_amount || 0);
-        matchesAmount = Math.abs(txAmount - filterAmount) < 0.01; // Match with small tolerance for floating point
-      }
-    }
-
-    return matchesStore && matchesEmployee && matchesTransactionNumber &&
-           matchesDate && matchesTransactionType && matchesTicketId && matchesAmount;
-  });
-
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h5" gutterBottom>
@@ -1493,14 +1371,14 @@ function TransactionJournals() {
                   {error}
                 </TableCell>
               </TableRow>
-            ) : filteredTransactions.length === 0 ? (
+            ) : transactions.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
                   No transactions found matching your criteria.
                 </TableCell>
               </TableRow>
             ) : (
-              filteredTransactions.map((txn) => (
+              transactions.map((txn) => (
                 <TableRow key={txn.id} hover>
                   <TableCell>
                     <Box display="flex" alignItems="center">
@@ -1535,6 +1413,15 @@ function TransactionJournals() {
             )}
           </TableBody>
         </Table>
+        <TablePagination
+          component="div"
+          count={totalCount}
+          page={page}
+          onPageChange={(e, newPage) => setPage(newPage)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+          rowsPerPageOptions={[25, 50, 100]}
+        />
       </TableContainer>
 
       {/* Transaction Details Dialog */}
